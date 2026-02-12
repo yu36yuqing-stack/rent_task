@@ -48,7 +48,8 @@ function buildDingdingMessage(payload) {
         const z = shortState(acc.zuhaowan);
         const icon = pickIcon(acc);
         const tag = acc.suffix ? ` ${acc.suffix.replace(/[()]/g, '')}` : '';
-        lines.push(`${icon} ${acc.remark || acc.account} Y${y}/U${u}/Z${z}${tag}`);
+        const hint = String(acc.hint || '');
+        lines.push(`${icon} ${acc.remark || acc.account} Y${y}/U${u}/Z${z}${tag}${hint}`);
     });
 
     lines.push('');
