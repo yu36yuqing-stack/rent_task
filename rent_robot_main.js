@@ -166,9 +166,11 @@ async function loadBlacklistAccountsFromDb() {
     };
 
     try {
-        console.log('[Step] 开始连接浏览器');
-        browser = await ensureBrowser();
-        console.log('[Step] 浏览器连接成功');
+        // 浏览器兜底逻辑暂时关闭（保留 ensureBrowser 实现，后续可快速恢复）
+        // console.log('[Step] 开始连接浏览器');
+        // browser = await ensureBrowser();
+        // console.log('[Step] 浏览器连接成功');
+        console.log('[Step] 浏览器流程已跳过（当前使用纯 API 模式）');
 
         // ----------------------
         // 1. 抓取悠悠租号 (已封装)

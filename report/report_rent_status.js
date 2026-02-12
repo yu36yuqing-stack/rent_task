@@ -1,19 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 const { sendTelegramMessage } = require('./telegram/tg_notify.js');
+const { sendDingdingMessage } = require('./dingding/ding_notify.js');
+const { buildTelegramMessage } = require('./telegram/tg_style.js');
+const { buildDingdingMessage } = require('./dingding/ding_style.js');
 const { getActiveBlacklist, ensureBlacklistSyncedFromFile } = require('../database/blacklist_db.js');
 
 const TASK_DIR = path.resolve(__dirname, '..');
 const STATUS_FILE = path.join(TASK_DIR, 'rent_robot_status.json');
 const HISTORY_FILE = path.join(TASK_DIR, 'rent_robot_history.jsonl');
 const BLACKLIST_FILE = path.join(TASK_DIR, 'config', 'blacklist.json');
-
-function esc(v) {
-    return String(v ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-}
 
 function readJson(file, fallback) {
     try {
@@ -41,16 +37,6 @@ function readHistory() {
     }
 }
 
-function shortState(s) {
-    if (!s) return '未';
-    return String(s)
-        .replace('租赁中', '租')
-        .replace('出租中', '租')
-        .replace('审核失败', '审核失败')
-        .replace('上架', '上')
-        .replace('下架', '下');
-}
-
 function scoreAccount(acc) {
     const y = acc.youpin;
     const u = acc.uhaozu;
@@ -66,20 +52,6 @@ function scoreAccount(acc) {
     if (hasReviewFail) return 250;
     if (allUp) return 100;
     return 0;
-}
-
-function pickIcon(acc) {
-    const y = acc.youpin;
-    const u = acc.uhaozu;
-    const z = acc.zuhaowan;
-    const anyRent = [y, u, z].includes('租赁中');
-    const allUp = y === '上架' && u === '上架' && z === '上架';
-    const allDown = y === '下架' && u === '下架' && z === '下架';
-
-    if (anyRent) return '💰';
-    if (allUp) return '✅';
-    if (allDown) return '⬇️';
-    return '⚠️';
 }
 
 function computeActionHint(acc, isBlacklisted) {
@@ -120,7 +92,7 @@ async function loadBlacklistRecords() {
     return Array.isArray(fallback) ? fallback : [];
 }
 
-async function buildReportMessage() {
+async function buildReportPayload() {
     if (!fs.existsSync(STATUS_FILE)) {
         return {
             ok: false,
@@ -184,31 +156,8 @@ async function buildReportMessage() {
         return allUp || allDown || anyRent || blacklistDown || u === '审核失败';
     });
 
-    let msg = '';
-    msg += `<b>执行汇报</b> <code>${esc(hhmm)}</code>\n\n`;
-    msg += allNormal
-        ? '<blockquote>✅ 所有状态正常 (三方一致或无冲突)</blockquote>\n\n'
-        : '<blockquote>⚠️ 检测到待修复状态</blockquote>\n\n';
-    msg += '<b>📊 租号状态汇报</b>\n';
-    msg += `⏱️ 最近1小时执行: <b>${esc(runCount)}</b> 次\n`;
-    msg += `💓 心跳检测: <b>${esc(runCount)}</b> 次 (正常)\n\n`;
-
-    if (recentActions.length > 0) {
-        msg += '<b>🛠️ 近1小时自动操作</b>\n';
-        msg += `${recentActions.slice(-8).map(esc).join('\n')}\n\n`;
-    } else {
-        msg += '<b>🛠️ 近1小时自动操作</b>\n';
-        msg += '• 无\n\n';
-    }
-
-    msg += `<b>📋 完整账号列表</b> <code>(${esc(accounts.length)}个)</code>\n\n`;
-    accounts.forEach((acc) => {
-        const y = shortState(acc.youpin);
-        const u = shortState(acc.uhaozu);
-        const z = shortState(acc.zuhaowan);
-        const icon = pickIcon(acc);
+    const viewAccounts = accounts.map((acc) => {
         const blacklisted = blacklistSet.has(String(acc.account));
-
         let suffix = '';
         if (blacklisted) suffix = ' (已按黑名单强制下架)';
         else if ([acc.youpin, acc.uhaozu, acc.zuhaowan].includes('租赁中') && acc.youpin !== '上架' && acc.uhaozu !== '上架' && acc.zuhaowan !== '上架') {
@@ -216,21 +165,29 @@ async function buildReportMessage() {
         } else if (acc.uhaozu === '审核失败') {
             suffix = ` (${acc.uhaozu_debug || 'U号审核失败'})`;
         }
-
-        const hint = computeActionHint(acc, blacklisted);
-        msg += `${esc(icon)} <b>${esc(acc.remark || acc.account)}</b>: `;
-        msg += `Y[<code>${esc(y)}</code>] U[<code>${esc(u)}</code>] Z[<code>${esc(z)}</code>]`;
-        msg += `${esc(suffix)}${esc(hint)}\n`;
+        return {
+            ...acc,
+            is_blacklisted: blacklisted,
+            suffix,
+            hint: computeActionHint(acc, blacklisted)
+        };
     });
-
-    msg += '\n';
-    msg += '<b>系统状态</b>：';
-    msg += allNormal ? '所有账号状态均正常，系统运行稳定。' : '存在待修复账号，系统正在自动处理。';
 
     return {
         ok: true,
         allNormal,
-        message: msg
+        hhmm,
+        runCount,
+        recentActions,
+        accounts: viewAccounts
+    };
+}
+
+async function buildReportMessage() {
+    const payload = await buildReportPayload();
+    return {
+        ...payload,
+        message: buildTelegramMessage(payload)
     };
 }
 
@@ -240,14 +197,32 @@ async function sendTelegram(message, mode = 'html') {
     return true;
 }
 
+async function sendDingding(message) {
+    if (!message) return false;
+    await sendDingdingMessage(message);
+    return true;
+}
+
 async function reportAndNotify() {
-    const result = await buildReportMessage();
-    if (result.ok) {
-        await sendTelegram(result.message, 'html');
-    } else {
-        await sendTelegram(result.message, '');
+    const payload = await buildReportPayload();
+    const telegramMessage = buildTelegramMessage(payload);
+    const dingdingMessage = buildDingdingMessage(payload);
+    const notifyJobs = [
+        sendTelegram(telegramMessage, payload.ok ? 'html' : ''),
+        sendDingding(dingdingMessage)
+    ];
+    const settled = await Promise.allSettled(notifyJobs);
+    if (settled[0].status === 'rejected') {
+        console.error('[Notify] Telegram 发送失败:', settled[0].reason?.message || settled[0].reason);
     }
-    return result;
+    if (settled[1].status === 'rejected') {
+        console.error('[Notify] 钉钉发送失败:', settled[1].reason?.message || settled[1].reason);
+    }
+    return {
+        ...payload,
+        message: telegramMessage,
+        dingding_message: dingdingMessage
+    };
 }
 
 if (require.main === module) {
@@ -263,7 +238,9 @@ if (require.main === module) {
 }
 
 module.exports = {
+    buildReportPayload,
     buildReportMessage,
     sendTelegram,
+    sendDingding,
     reportAndNotify
 };
