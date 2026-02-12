@@ -25,6 +25,8 @@
 
 ## 本地运行
 
+本机 Node 版本：`v24.13.0`
+
 ```bash
 cd rent_task
 npm install
