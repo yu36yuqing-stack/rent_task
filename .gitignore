@@ -2,7 +2,5 @@ node_modules/
 log/
 *.log
 rent_robot.lock
-rent_robot_status.json
 rent_robot_history.jsonl
-uhaozu/uhaozu_account_map.json
 uhaozu/uhaozu_goods_account_cache.json
