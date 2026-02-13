@@ -4,7 +4,11 @@ const { openDatabase } = require('./sqlite_client');
 const USER_TYPE_ADMIN = '管理员';
 const USER_TYPE_INTERNAL = '内部';
 const USER_TYPE_EXTERNAL = '外部';
+const USER_STATUS_ENABLED = 'enabled';
+const USER_STATUS_DISABLED = 'disabled';
+
 const ALLOWED_USER_TYPES = new Set([USER_TYPE_ADMIN, USER_TYPE_INTERNAL, USER_TYPE_EXTERNAL]);
+const ALLOWED_STATUS = new Set([USER_STATUS_ENABLED, USER_STATUS_DISABLED]);
 
 function nowText() {
     const d = new Date();
@@ -39,6 +43,11 @@ function all(db, sql, params = []) {
     });
 }
 
+async function tableColumns(db, tableName) {
+    const rows = await all(db, `PRAGMA table_info(${tableName})`);
+    return new Set(rows.map((row) => String(row.name || '')));
+}
+
 function normalizeUserType(input) {
     const raw = String(input || '').trim().toLowerCase();
     if (!raw) return USER_TYPE_EXTERNAL;
@@ -48,13 +57,20 @@ function normalizeUserType(input) {
     throw new Error(`无效 user_type: ${input}`);
 }
 
+function normalizeUserStatus(input) {
+    const raw = String(input || USER_STATUS_ENABLED).trim().toLowerCase();
+    if (raw === USER_STATUS_ENABLED) return USER_STATUS_ENABLED;
+    if (raw === USER_STATUS_DISABLED) return USER_STATUS_DISABLED;
+    throw new Error(`无效 status: ${input}`);
+}
+
 function normalizeNotifyConfig(input) {
     if (input === undefined || input === null || input === '') return '{}';
     if (typeof input === 'string') {
         try {
             const parsed = JSON.parse(input);
             return JSON.stringify(parsed || {});
-        } catch (e) {
+        } catch {
             throw new Error('notify_config 必须是合法 JSON');
         }
     }
@@ -81,18 +97,20 @@ function verifyPassword(rawPassword, encoded) {
 
 function rowToPublicUser(row = {}) {
     return {
-        id: row.id,
+        id: Number(row.id || 0),
         account: String(row.account || ''),
         name: String(row.name || ''),
         phone: String(row.phone || ''),
         notify_config: (() => {
             try {
                 return JSON.parse(String(row.notify_config || '{}'));
-            } catch (_) {
+            } catch {
                 return {};
             }
         })(),
         user_type: String(row.user_type || USER_TYPE_EXTERNAL),
+        status: String(row.status || USER_STATUS_ENABLED),
+        last_login_at: String(row.last_login_at || ''),
         modify_date: String(row.modify_date || ''),
         is_deleted: Number(row.is_deleted || 0),
         desc: String(row.desc || '')
@@ -112,14 +130,32 @@ async function initUserDb() {
                 notify_config TEXT DEFAULT '{}',
                 user_type TEXT DEFAULT '外部',
                 create_date TEXT DEFAULT CURRENT_TIMESTAMP,
+                status TEXT NOT NULL DEFAULT 'enabled',
+                last_login_at TEXT DEFAULT '',
                 modify_date TEXT DEFAULT CURRENT_TIMESTAMP,
                 is_deleted INTEGER DEFAULT 0,
                 desc TEXT DEFAULT ''
             )
         `);
+
+        const cols = await tableColumns(db, 'user');
+        if (!cols.has('status')) {
+            await run(db, `ALTER TABLE user ADD COLUMN status TEXT NOT NULL DEFAULT 'enabled'`);
+        }
+        if (!cols.has('last_login_at')) {
+            await run(db, `ALTER TABLE user ADD COLUMN last_login_at TEXT DEFAULT ''`);
+        }
+        if (!cols.has('create_date')) {
+            await run(db, `ALTER TABLE user ADD COLUMN create_date TEXT DEFAULT CURRENT_TIMESTAMP`);
+        }
+
         await run(db, `
             CREATE UNIQUE INDEX IF NOT EXISTS uq_user_account_alive
             ON user(account, is_deleted)
+        `);
+        await run(db, `
+            CREATE INDEX IF NOT EXISTS idx_user_status
+            ON user(status, is_deleted)
         `);
     } finally {
         db.close();
@@ -134,11 +170,13 @@ async function createUserByAdmin(input = {}) {
     const phone = String(input.phone || '').trim();
     const notifyConfig = normalizeNotifyConfig(input.notify_config);
     const userType = normalizeUserType(input.user_type);
+    const status = normalizeUserStatus(input.status || USER_STATUS_ENABLED);
     const desc = String(input.desc || '').trim();
 
     if (!account) throw new Error('account 不能为空');
     if (!rawPassword) throw new Error('password 不能为空');
     if (!ALLOWED_USER_TYPES.has(userType)) throw new Error('user_type 不合法');
+    if (!ALLOWED_STATUS.has(status)) throw new Error('status 不合法');
 
     const db = openDatabase();
     try {
@@ -148,9 +186,9 @@ async function createUserByAdmin(input = {}) {
         const encodedPassword = hashPassword(rawPassword);
         await run(db, `
             INSERT INTO user
-            (account, password, name, phone, notify_config, user_type, modify_date, is_deleted, desc)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
-        `, [account, encodedPassword, name, phone, notifyConfig, userType, nowText(), desc]);
+            (account, password, name, phone, notify_config, user_type, status, last_login_at, modify_date, is_deleted, desc)
+            VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, 0, ?)
+        `, [account, encodedPassword, name, phone, notifyConfig, userType, status, nowText(), desc]);
 
         const row = await get(db, `SELECT * FROM user WHERE account = ? AND is_deleted = 0`, [account]);
         return rowToPublicUser(row);
@@ -172,6 +210,36 @@ async function getActiveUserByAccount(account) {
     }
 }
 
+async function getActiveUserById(userId) {
+    await initUserDb();
+    const uid = Number(userId || 0);
+    if (!uid) return null;
+    const db = openDatabase();
+    try {
+        const row = await get(db, `SELECT * FROM user WHERE id = ? AND is_deleted = 0`, [uid]);
+        return row ? rowToPublicUser(row) : null;
+    } finally {
+        db.close();
+    }
+}
+
+async function touchUserLastLogin(userId) {
+    await initUserDb();
+    const uid = Number(userId || 0);
+    if (!uid) return false;
+    const db = openDatabase();
+    try {
+        const r = await run(db, `
+            UPDATE user
+            SET last_login_at = ?, modify_date = ?
+            WHERE id = ? AND is_deleted = 0
+        `, [nowText(), nowText(), uid]);
+        return Number(r.changes || 0) > 0;
+    } finally {
+        db.close();
+    }
+}
+
 async function verifyUserLogin(account, rawPassword) {
     await initUserDb();
     const target = String(account || '').trim();
@@ -182,8 +250,13 @@ async function verifyUserLogin(account, rawPassword) {
     try {
         const row = await get(db, `SELECT * FROM user WHERE account = ? AND is_deleted = 0`, [target]);
         if (!row) return { ok: false, reason: '账号不存在', user: null };
+        if (String(row.status || USER_STATUS_ENABLED) !== USER_STATUS_ENABLED) {
+            return { ok: false, reason: '账号已禁用', user: null };
+        }
         if (!verifyPassword(pass, row.password)) return { ok: false, reason: '密码错误', user: null };
-        return { ok: true, reason: '', user: rowToPublicUser(row) };
+        const user = rowToPublicUser(row);
+        await touchUserLastLogin(user.id);
+        return { ok: true, reason: '', user };
     } finally {
         db.close();
     }
@@ -204,9 +277,13 @@ module.exports = {
     USER_TYPE_ADMIN,
     USER_TYPE_INTERNAL,
     USER_TYPE_EXTERNAL,
+    USER_STATUS_ENABLED,
+    USER_STATUS_DISABLED,
     initUserDb,
     createUserByAdmin,
     getActiveUserByAccount,
+    getActiveUserById,
     verifyUserLogin,
+    touchUserLastLogin,
     listActiveUsers
 };

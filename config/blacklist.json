@@ -1,16 +1,9 @@
 [
   {
-    "account": "428530661",
-    "remark": "满所老二",
-    "reason": "触发人脸识别",
-    "create_time": "2026-02-11 22:40",
-    "action": "off"
-  },
-  {
-    "account": "3045296464",
-    "remark": "呆猪猪",
-    "reason": "触发人脸识别",
-    "create_time": "2026-02-11 22:28",
+    "account": "2147515620",
+    "remark": "呆小鱼",
+    "reason": "手动加入黑名单",
+    "create_time": "2026-02-12 22:29",
     "action": "off"
   }
 ]

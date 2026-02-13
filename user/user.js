@@ -3,6 +3,7 @@ const {
     createUserByAdmin,
     verifyUserLogin,
     getActiveUserByAccount,
+    getActiveUserById,
     listActiveUsers
 } = require('../database/user_db');
 
@@ -25,5 +26,6 @@ module.exports = {
     register,
     createUserByAdmin,
     getActiveUserByAccount,
+    getActiveUserById,
     listActiveUsers
 };

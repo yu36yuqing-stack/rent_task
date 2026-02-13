@@ -41,9 +41,9 @@ function resolveWebhookUrl(raw, secret) {
     return u.toString();
 }
 
-async function sendDingdingMessage(message) {
-    const webhook = loadWebhook();
-    const secret = loadSecret();
+async function sendDingdingMessage(message, options = {}) {
+    const webhook = String(options.webhook || '').trim() || loadWebhook();
+    const secret = String(options.secret || '').trim() || loadSecret();
     const url = resolveWebhookUrl(webhook, secret);
     const text = String(message || '').trim();
     if (!text) return false;

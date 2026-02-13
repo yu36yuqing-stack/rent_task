@@ -2,8 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const { fetch, ProxyAgent } = require('undici');
 
-const TOKEN = process.env.TG_BOT_TOKEN || '8458250702:AAH6jSTgyZyTTQzQMdUhs2Rwv91Neen2AFU';
-const CHAT_ID = process.env.TG_CHAT_ID || '6796486659';
+const DEFAULT_TOKEN = process.env.TG_BOT_TOKEN || '8458250702:AAH6jSTgyZyTTQzQMdUhs2Rwv91Neen2AFU';
+const DEFAULT_CHAT_ID = process.env.TG_CHAT_ID || '6796486659';
 const LOG_FILE = path.resolve(__dirname, '..', '..', 'log', 'tg_notify.log');
 const MAX_LEN = 3500;
 const DEFAULT_PROXY = 'http://127.0.0.1:7897';
@@ -18,10 +18,17 @@ function appendLog(line) {
     }
 }
 
-async function sendTelegramMessage(message, mode = '') {
+async function sendTelegramMessage(message, mode = '', options = {}) {
     if (!message) return { ok: true, chunks: 0 };
 
+    const token = String(options.token || DEFAULT_TOKEN).trim();
+    const chatId = String(options.chat_id || DEFAULT_CHAT_ID).trim();
+    if (!token || !chatId) {
+        throw new Error('telegram token/chat_id 未配置');
+    }
+
     const proxyCandidates = [
+        options.proxy,
         process.env.TG_PROXY,
         process.env.HTTPS_PROXY,
         process.env.HTTP_PROXY,
@@ -33,7 +40,7 @@ async function sendTelegramMessage(message, mode = '') {
     for (let i = 0; i < message.length; i += MAX_LEN) {
         const chunk = message.slice(i, i + MAX_LEN);
         const params = new URLSearchParams({
-            chat_id: CHAT_ID,
+            chat_id: chatId,
             text: chunk
         });
         if (mode === 'html') {
@@ -46,7 +53,7 @@ async function sendTelegramMessage(message, mode = '') {
         for (const proxy of proxyCandidates) {
             try {
                 const dispatcher = proxy ? new ProxyAgent(proxy) : undefined;
-                const resp = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+                const resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
                     method: 'POST',
                     headers: { 'content-type': 'application/x-www-form-urlencoded' },
                     body: params.toString(),

@@ -5,6 +5,8 @@ const { sendDingdingMessage } = require('./dingding/ding_notify.js');
 const { buildTelegramMessage } = require('./telegram/tg_style.js');
 const { buildDingdingMessage } = require('./dingding/ding_style.js');
 const { getActiveBlacklist, ensureBlacklistSyncedFromFile } = require('../database/blacklist_db.js');
+const { listOwnersByGameAccounts } = require('../database/user_game_account_db.js');
+const { listActiveUsers } = require('../database/user_db.js');
 
 const TASK_DIR = path.resolve(__dirname, '..');
 const STATUS_FILE = path.join(TASK_DIR, 'rent_robot_status.json');
@@ -75,6 +77,16 @@ function computeActionHint(acc, isBlacklisted) {
     if (u === '下架') toOn.push('U');
     if (z === '下架') toOn.push('Z');
     return toOn.length > 0 ? ` -> 🔄 正在上架${toOn.join('/')}` : '';
+}
+
+function isAccountNormal(acc) {
+    const y = acc.youpin;
+    const u = acc.uhaozu;
+    const z = acc.zuhaowan;
+    const allUp = y === '上架' && u === '上架' && z === '上架';
+    const allDown = y === '下架' && u === '下架' && z === '下架';
+    const anyRent = [y, u, z].includes('租赁中');
+    return allUp || allDown || anyRent || u === '审核失败' || Boolean(acc.is_blacklisted);
 }
 
 async function loadBlacklistRecords() {
@@ -203,8 +215,110 @@ async function sendDingding(message) {
     return true;
 }
 
+async function reportAndNotifyByUser(payload) {
+    if (!payload?.ok) return { routed: false, reason: 'payload_not_ok' };
+    const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+    if (accounts.length === 0) return { routed: false, reason: 'no_accounts' };
+
+    const accountValues = accounts.map((a) => String(a.account || '').trim()).filter(Boolean);
+    const ownerMap = await listOwnersByGameAccounts(accountValues, 'WZRY');
+    const users = await listActiveUsers();
+    const userById = new Map(users.map((u) => [Number(u.id), u]));
+
+    const grouped = new Map();
+    for (const acc of accounts) {
+        const ownerId = Number(ownerMap[String(acc.account || '')] || 0);
+        if (!ownerId) continue;
+        const arr = grouped.get(ownerId) || [];
+        arr.push(acc);
+        grouped.set(ownerId, arr);
+    }
+
+    const routed = [];
+    const errors = [];
+
+    for (const [userId, userAccounts] of grouped.entries()) {
+        const user = userById.get(Number(userId));
+        if (!user) continue;
+
+        const cfg = user.notify_config || {};
+        const tgCfg = cfg.telegram || {};
+        const dingCfg = cfg.dingding || {};
+
+        const userPayload = {
+            ...payload,
+            accounts: userAccounts,
+            allNormal: userAccounts.every((x) => isAccountNormal(x))
+        };
+        const tgMsg = buildTelegramMessage(userPayload);
+        const dingMsg = buildDingdingMessage(userPayload);
+
+        const jobs = [];
+        if (tgCfg.bot_token && tgCfg.chat_id) {
+            jobs.push(
+                sendTelegramMessage(tgMsg, payload.ok ? 'html' : '', {
+                    token: tgCfg.bot_token,
+                    chat_id: tgCfg.chat_id,
+                    proxy: tgCfg.proxy || ''
+                })
+            );
+        }
+        if (dingCfg.webhook) {
+            jobs.push(
+                sendDingdingMessage(dingMsg, {
+                    webhook: dingCfg.webhook,
+                    secret: dingCfg.secret || ''
+                })
+            );
+        }
+        if (jobs.length === 0) continue;
+
+        const settled = await Promise.allSettled(jobs);
+        const failed = settled.filter((s) => s.status === 'rejected');
+        if (failed.length > 0) {
+            errors.push({
+                user_id: user.id,
+                account: user.account,
+                errors: failed.map((f) => f.reason?.message || String(f.reason))
+            });
+            continue;
+        }
+
+        routed.push({
+            user_id: user.id,
+            account: user.account,
+            accounts: userAccounts.length
+        });
+    }
+
+    return {
+        routed: routed.length > 0,
+        routed_users: routed,
+        routed_user_count: routed.length,
+        errors
+    };
+}
+
 async function reportAndNotify() {
     const payload = await buildReportPayload();
+    const userMode = String(process.env.USER_MODE_ENABLED || '').toLowerCase() === 'true';
+
+    if (userMode) {
+        try {
+            const routed = await reportAndNotifyByUser(payload);
+            if (routed.routed) {
+                return {
+                    ...payload,
+                    user_mode: true,
+                    route: routed
+                };
+            }
+            console.warn(`[Notify] USER_MODE_ENABLED=true 但未命中用户路由，回退全局通知。reason=${routed.reason || 'none'}`);
+        } catch (e) {
+            console.error('[Notify] 用户路由通知失败，回退全局通知:', e.message);
+        }
+    }
+
     const telegramMessage = buildTelegramMessage(payload);
     const dingdingMessage = buildDingdingMessage(payload);
     const notifyJobs = [
@@ -242,5 +356,6 @@ module.exports = {
     buildReportMessage,
     sendTelegram,
     sendDingding,
-    reportAndNotify
+    reportAndNotify,
+    reportAndNotifyByUser
 };

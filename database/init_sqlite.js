@@ -1,4 +1,8 @@
 const { openDatabase, DB_FILE } = require('./sqlite_client');
+const { initUserDb } = require('./user_db');
+const { initUserGameAccountDb } = require('./user_game_account_db');
+const { initUserPlatformAuthDb } = require('./user_platform_auth_db');
+const { initUserSessionDb } = require('./user_session_db');
 
 function run(db, sql, params = []) {
     return new Promise((resolve, reject) => {
@@ -19,6 +23,11 @@ function get(db, sql, params = []) {
 }
 
 async function main() {
+    await initUserDb();
+    await initUserGameAccountDb();
+    await initUserPlatformAuthDb();
+    await initUserSessionDb();
+
     const db = openDatabase();
     try {
         await run(db, `
@@ -41,4 +50,3 @@ main().catch((err) => {
     console.error('[SQLite] 初始化失败:', err.message);
     process.exit(1);
 });
-
