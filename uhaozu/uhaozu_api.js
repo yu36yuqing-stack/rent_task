@@ -1,17 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 
-const UHAOZU_API_BASE = process.env.UHAOZU_API_BASE || 'https://mapi.uhaozu.com';
-const UHAOZU_TIMEOUT_MS = Number(process.env.UHAOZU_TIMEOUT_MS || 15000);
+const DEFAULT_UHAOZU_API_BASE = 'https://mapi.uhaozu.com';
+const DEFAULT_UHAOZU_TIMEOUT_MS = 15000;
 const TASK_DIR = path.resolve(__dirname, '..');
 const STATUS_FILE = path.join(TASK_DIR, 'rent_robot_status.json');
 const ACCOUNT_MAP_FILE = path.join(__dirname, 'uhaozu_account_map.json');
 const GOODS_ACCOUNT_CACHE_FILE = path.join(__dirname, 'uhaozu_goods_account_cache.json');
 
-// 来自 uhaozu_api.md（可通过环境变量覆盖）
-const UHAOZU_COOKIE = process.env.UHAOZU_COOKIE || 'Hm_lvt_d8c87cd1dcbd946bc8798d9aa99e46d1=1769791464; HMACCOUNT=1DCDE0E60BCD2A08; Hm_lvt_8ea4fcb9d0854f54b423c1e75b3cefdc=1769791464; Hm_lvt_a3300660f0e3ddfe9253e1e7323179cf=1769791464; uid=d8AZUpWrOsfV1GUYswbdixom5hesDuIqndUAwxfIWTq40TPVW8GhMh6nKisy8WbcbNN8uDqb4Cww36oydKpT_jwBA2Kn8_07llHmzdFQd1-pUcSHW4eGzQ8BRPKKE-O9uleirQbzuXOT1MjwW0SEOlmoXb_VrXyCVVLY1NKdH47NIGcDLuH6nMZUOhdBxu6Yzg..; Hm_lpvt_a3300660f0e3ddfe9253e1e7323179cf=1770818425; Hm_lpvt_d8c87cd1dcbd946bc8798d9aa99e46d1=1770818425; Hm_lpvt_8ea4fcb9d0854f54b423c1e75b3cefdc=1770818425';
-
-const DEFAULT_HEADERS = {
+function buildDefaultHeaders(cookie) {
+    return {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
     'Accept': 'application/json, text/plain, */*',
     'Accept-Encoding': 'gzip, deflate, br, zstd',
@@ -27,8 +25,19 @@ const DEFAULT_HEADERS = {
     'Sec-Fetch-Dest': 'empty',
     'Referer': 'https://b.uhaozu.com/goods',
     'Accept-Language': 'zh-CN,zh;q=0.9',
-    'Cookie': UHAOZU_COOKIE
+    'Cookie': cookie
 };
+}
+
+function resolveAuth(auth = {}) {
+    const cfg = {
+        api_base: String(auth.api_base || DEFAULT_UHAOZU_API_BASE),
+        timeout_ms: Number(auth.timeout_ms || DEFAULT_UHAOZU_TIMEOUT_MS),
+        cookie: String(auth.cookie || '').trim()
+    };
+    if (!cfg.cookie) throw new Error('uhaozu cookie 未配置');
+    return cfg;
+}
 
 function formatV(d = new Date()) {
     const y = d.getFullYear();
@@ -40,9 +49,9 @@ function formatV(d = new Date()) {
     return `${y}${m}${day}${h}${min}${s}`;
 }
 
-async function requestJson(url, options = {}) {
+async function requestJson(url, options = {}, timeoutMs = DEFAULT_UHAOZU_TIMEOUT_MS) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), UHAOZU_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
         const res = await fetch(url, { ...options, signal: controller.signal });
         const text = await res.text();
@@ -88,7 +97,7 @@ function mapStatus(item) {
     return { status: '未知', reason: '' };
 }
 
-async function normalizeList(rawList) {
+async function normalizeList(rawList, auth = {}) {
     const maps = loadAccountMaps();
     const { accountByRemark, roleByAccount, entries } = maps;
     const goodsAccountCache = loadGoodsAccountCache();
@@ -115,7 +124,7 @@ async function normalizeList(rawList) {
         };
     }).filter(i => i.id);
 
-    const { fetchedCount, cacheHitCount } = await fillMissingAccountsByGoodsId(staged, goodsAccountCache);
+    const { fetchedCount, cacheHitCount } = await fillMissingAccountsByGoodsId(staged, goodsAccountCache, auth);
     persistGoodsAccountCache(goodsAccountCache);
 
     const used = new Set(staged.map(i => i.account).filter(Boolean));
@@ -189,28 +198,30 @@ function buildListPayload(page, pageSize, overrides = {}) {
     };
 }
 
-async function listGoodsPage(page = 1, pageSize = 30, overrides = {}) {
+async function listGoodsPage(page = 1, pageSize = 30, overrides = {}, auth = {}) {
+    const cfg = resolveAuth(auth);
+    const headers = buildDefaultHeaders(cfg.cookie);
     const v = formatV();
-    const url = `${UHAOZU_API_BASE}/merchants/goods/list?v=${v}`;
+    const url = `${cfg.api_base}/merchants/goods/list?v=${v}`;
     const payload = buildListPayload(page, pageSize, overrides);
     const json = await requestJson(url, {
         method: 'POST',
-        headers: DEFAULT_HEADERS,
+        headers,
         body: JSON.stringify(payload)
-    });
+    }, cfg.timeout_ms);
     if (!isApiSuccess(json)) {
         throw new Error(`U号租列表API失败: ${json.message || json.msg || JSON.stringify(json).slice(0, 200)}`);
     }
     return json;
 }
 
-async function listAllGoods(pageSize = 30) {
+async function listAllGoods(pageSize = 30, auth = {}) {
     const all = [];
     let page = 1;
     let total = 0;
     let guard = 0;
     while (guard++ < 200) {
-        const json = await listGoodsPage(page, pageSize);
+        const json = await listGoodsPage(page, pageSize, {}, auth);
         const { list, total: t } = extractListAndTotal(json);
         if (page === 1) total = t;
         if (!Array.isArray(list) || list.length === 0) break;
@@ -221,52 +232,58 @@ async function listAllGoods(pageSize = 30) {
     return all;
 }
 
-async function queryActualByGoodsId(goodsId) {
+async function queryActualByGoodsId(goodsId, auth = {}) {
+    const cfg = resolveAuth(auth);
+    const headers = buildDefaultHeaders(cfg.cookie);
     const id = String(goodsId);
-    const url = `${UHAOZU_API_BASE}/merchants/query/actual/${encodeURIComponent(id)}`;
+    const url = `${cfg.api_base}/merchants/query/actual/${encodeURIComponent(id)}`;
     const json = await requestJson(url, {
         method: 'POST',
         headers: {
-            ...DEFAULT_HEADERS,
+            ...headers,
             'Content-Type': 'application/json;charset=UTF-8'
         },
         body: ''
-    });
+    }, cfg.timeout_ms);
     if (!isApiSuccess(json)) return '';
     return String((json.object && json.object.gameAccount) || '').trim();
 }
 
-async function findGoodsByAccount(account) {
+async function findGoodsByAccount(account, auth = {}) {
     const target = String(account);
     // gameAccount 字段在全量列表常被脱敏为空；优先走 keyWords 精确搜索。
-    const searchRes = await listGoodsPage(1, 30, { keyWords: target });
+    const searchRes = await listGoodsPage(1, 30, { keyWords: target }, auth);
     const search = extractListAndTotal(searchRes).list;
     if (search.length > 0) return search[0];
-    const list = await listAllGoods(30);
+    const list = await listAllGoods(30, auth);
     return list.find(item => String(item.gameAccount || item.accountNo || item.account || '') === target) || null;
 }
 
-async function callUnshelf(goodsId) {
-    const url = `${UHAOZU_API_BASE}/merchants/goods/unShelves/${encodeURIComponent(String(goodsId))}`;
+async function callUnshelf(goodsId, auth = {}) {
+    const cfg = resolveAuth(auth);
+    const headers = buildDefaultHeaders(cfg.cookie);
+    const url = `${cfg.api_base}/merchants/goods/unShelves/${encodeURIComponent(String(goodsId))}`;
     const json = await requestJson(url, {
         method: 'POST',
         headers: {
-            ...DEFAULT_HEADERS,
+            ...headers,
             'Content-Type': 'application/json;charset=UTF-8'
         },
         body: ''
-    });
+    }, cfg.timeout_ms);
     return isApiSuccess(json);
 }
 
-async function callShelf(goodsId) {
+async function callShelf(goodsId, auth = {}) {
+    const cfg = resolveAuth(auth);
+    const headers = buildDefaultHeaders(cfg.cookie);
     const id = String(goodsId);
-    const url = `${UHAOZU_API_BASE}/api/goods/shelves/${encodeURIComponent(id)}`;
+    const url = `${cfg.api_base}/api/goods/shelves/${encodeURIComponent(id)}`;
     const json = await requestJson(url, {
         method: 'POST',
-        headers: DEFAULT_HEADERS,
+        headers,
         body: JSON.stringify({ goodsId: Number(id), forbidplayConfirm: false })
-    });
+    }, cfg.timeout_ms);
     return isApiSuccess(json);
 }
 
@@ -335,7 +352,7 @@ function persistGoodsAccountCache(cache) {
     }
 }
 
-async function fillMissingAccountsByGoodsId(rows, goodsAccountCache) {
+async function fillMissingAccountsByGoodsId(rows, goodsAccountCache, auth = {}) {
     let fetchedCount = 0;
     let cacheHitCount = 0;
 
@@ -356,7 +373,7 @@ async function fillMissingAccountsByGoodsId(rows, goodsAccountCache) {
         }
 
         try {
-            const account = await queryActualByGoodsId(id);
+            const account = await queryActualByGoodsId(id, auth);
             if (account) {
                 row.account = account;
                 goodsAccountCache[id] = account;
@@ -427,20 +444,22 @@ function persistAccountMap(roleByAccount) {
 }
 
 // 与 uhaozu_logic.js 保持同样接口（先不替换主集成）
-async function collectUhaozuData(_browser, _uhaozuUrl) {
-    const raw = await listAllGoods(30);
-    const data = await normalizeList(raw);
+async function collectUhaozuData(_browser, _uhaozuUrl, options = {}) {
+    const auth = options.auth || {};
+    const raw = await listAllGoods(30, auth);
+    const data = await normalizeList(raw, auth);
     return { page: null, data };
 }
 
-async function uhaozuOffShelf(_page, account) {
+async function uhaozuOffShelf(_page, account, options = {}) {
+    const auth = options.auth || {};
     try {
-        const goods = await findGoodsByAccount(account);
+        const goods = await findGoodsByAccount(account, auth);
         if (!goods) {
             console.log(`[UhaozuAPI] 下架失败，未找到账号: ${account}`);
             return false;
         }
-        const ok = await callUnshelf(goods.id);
+        const ok = await callUnshelf(goods.id, auth);
         if (ok) console.log(`[UhaozuAPI] 下架成功: account=${account}, goodsId=${goods.id}`);
         else console.warn(`[UhaozuAPI] 下架失败: account=${account}, goodsId=${goods.id}`);
         return ok;
@@ -450,14 +469,15 @@ async function uhaozuOffShelf(_page, account) {
     }
 }
 
-async function uhaozuOnShelf(_page, account) {
+async function uhaozuOnShelf(_page, account, options = {}) {
+    const auth = options.auth || {};
     try {
-        const goods = await findGoodsByAccount(account);
+        const goods = await findGoodsByAccount(account, auth);
         if (!goods) {
             console.log(`[UhaozuAPI] 上架失败，未找到账号: ${account}`);
             return false;
         }
-        const ok = await callShelf(goods.id);
+        const ok = await callShelf(goods.id, auth);
         if (ok) console.log(`[UhaozuAPI] 上架成功: account=${account}, goodsId=${goods.id}`);
         else console.warn(`[UhaozuAPI] 上架失败: account=${account}, goodsId=${goods.id}`);
         return ok;

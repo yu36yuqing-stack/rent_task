@@ -1,16 +1,16 @@
 const crypto = require('crypto');
 
-// 来自 youyouzuhao_api.md
-const APP_KEY = 'd8303c79f9354ea2bed061cb28609f3b';
-const APP_SECRET = '902d9ba500a84c81b80115b1d7fd51e2';
-
-// 可通过环境变量覆盖，便于灰度/测试
-const API_BASE = process.env.YOUYOUZUHAO_API_BASE || 'https://acctrade-api.youpin898.com';
-const TIMEOUT_MS = Number(process.env.YOUYOUZUHAO_API_TIMEOUT_MS || 15000);
+const API_BASE = 'https://acctrade-api.youpin898.com';
+const TIMEOUT_MS = 15000;
 
 const PATH_LIST = '/api/youpin/rent-connector/product/v1/list';
 const PATH_ON = '/api/youpin/rent-connector/product/v1/on';
 const PATH_OFF = '/api/youpin/rent-connector/product/v1/off';
+const PATH_GAME_ONLINE = '/api/youpin/rent-connector/product/v1/game/online';
+
+const GAME_ID_BY_NAME = {
+    WZRY: 1
+};
 
 function toSignValue(value) {
     if (value === null || value === undefined) return '';
@@ -38,20 +38,33 @@ function createSign(params, appSecret) {
     return crypto.createHash('md5').update(src, 'utf8').digest('hex').toUpperCase();
 }
 
-async function postSigned(path, businessParams = {}) {
+function resolveAuth(auth = {}) {
+    const cfg = {
+        app_key: String(auth.app_key || '').trim(),
+        app_secret: String(auth.app_secret || '').trim(),
+        api_base: String(auth.api_base || API_BASE).trim(),
+        timeout_ms: Number(auth.timeout_ms || TIMEOUT_MS)
+    };
+    if (!cfg.app_key) throw new Error('uuzuhao app_key 未配置');
+    if (!cfg.app_secret) throw new Error('uuzuhao app_secret 未配置');
+    return cfg;
+}
+
+async function postSigned(path, businessParams = {}, auth = {}) {
+    const cfg = resolveAuth(auth);
     const timestamp = Math.floor(Date.now() / 1000);
     const payload = {
         ...businessParams,
-        appKey: APP_KEY,
+        appKey: cfg.app_key,
         timestamp
     };
-    payload.sign = createSign(payload, APP_SECRET);
+    payload.sign = createSign(payload, cfg.app_secret);
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), cfg.timeout_ms);
 
     try {
-        const res = await fetch(`${API_BASE}${path}`, {
+        const res = await fetch(`${cfg.api_base}${path}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json; charset=UTF-8' },
             body: JSON.stringify(payload),
@@ -114,7 +127,7 @@ function mapProductToRobotItem(p) {
     };
 }
 
-async function listProductsByTab(tabKey) {
+async function listProductsByTab(tabKey, auth = {}) {
     const rows = [];
     let lastId = '';
     let guard = 0;
@@ -122,7 +135,7 @@ async function listProductsByTab(tabKey) {
     while (guard++ < 200) {
         const req = { tabKey, limit: 50 };
         if (lastId) req.lastId = lastId;
-        const json = await postSigned(PATH_LIST, req);
+        const json = await postSigned(PATH_LIST, req, auth);
         const data = json.data || {};
         const list = Array.isArray(data.productPublishList) ? data.productPublishList : [];
         rows.push(...list.map(item => ({ ...item, _tabKey: tabKey })));
@@ -135,11 +148,11 @@ async function listProductsByTab(tabKey) {
     return rows;
 }
 
-async function listAllProducts() {
+async function listAllProducts(auth = {}) {
     const [sale, rent, off] = await Promise.all([
-        listProductsByTab('SALE'), // 在租
-        listProductsByTab('RENT'), // 出租中
-        listProductsByTab('OFF') // 已下架
+        listProductsByTab('SALE', auth), // 在租
+        listProductsByTab('RENT', auth), // 出租中
+        listProductsByTab('OFF', auth) // 已下架
     ]);
 
     const all = [...sale, ...rent, ...off];
@@ -160,27 +173,29 @@ async function listAllProducts() {
     return Array.from(byId.values());
 }
 
-async function findProductByAccount(account) {
+async function findProductByAccount(account, auth = {}) {
     const target = String(account);
-    const all = await listAllProducts();
+    const all = await listAllProducts(auth);
     return all.find(p => String(p.accountNo || '') === target) || null;
 }
 
 // 与 youpin_logic.js 保持同样接口（先不替换主集成）
-async function collectYoupinData(_browser, _youpinUrl) {
-    const all = await listAllProducts();
+async function collectYoupinData(_browser, _youpinUrl, options = {}) {
+    const auth = options.auth || {};
+    const all = await listAllProducts(auth);
     const data = all.map(mapProductToRobotItem).filter(i => i.account);
     return { page: null, data };
 }
 
-async function youpinOffShelf(_page, account) {
+async function youpinOffShelf(_page, account, options = {}) {
+    const auth = options.auth || {};
     try {
-        const product = await findProductByAccount(account);
+        const product = await findProductByAccount(account, auth);
         if (!product) {
             console.log(`[YouyouAPI] 下架失败，未找到账号: ${account}`);
             return false;
         }
-        await postSigned(PATH_OFF, { productId: String(product.productId) });
+        await postSigned(PATH_OFF, { productId: String(product.productId) }, auth);
         console.log(`[YouyouAPI] 下架成功: account=${account}, productId=${product.productId}`);
         return true;
     } catch (e) {
@@ -189,14 +204,15 @@ async function youpinOffShelf(_page, account) {
     }
 }
 
-async function youpinOnShelf(_page, account) {
+async function youpinOnShelf(_page, account, options = {}) {
+    const auth = options.auth || {};
     try {
-        const product = await findProductByAccount(account);
+        const product = await findProductByAccount(account, auth);
         if (!product) {
             console.log(`[YouyouAPI] 上架失败，未找到账号: ${account}`);
             return false;
         }
-        await postSigned(PATH_ON, { productId: String(product.productId) });
+        await postSigned(PATH_ON, { productId: String(product.productId) }, auth);
         console.log(`[YouyouAPI] 上架成功: account=${account}, productId=${product.productId}`);
         return true;
     } catch (e) {
@@ -205,10 +221,43 @@ async function youpinOnShelf(_page, account) {
     }
 }
 
+function resolveGameIdByName(gameName = 'WZRY') {
+    const key = String(gameName || 'WZRY').trim().toUpperCase();
+    const gameId = Number(GAME_ID_BY_NAME[key] || 0);
+    if (!gameId) throw new Error(`uuzuhao 不支持的 game_name: ${gameName}`);
+    return gameId;
+}
+
+// 查询账号游戏在线状态：
+// - accountId 对应项目里的 game_account
+// - game_name 目前支持 WZRY（映射 gameId=1）
+// - 使用与商品接口一致的 appKey + sign 签名方式
+async function queryAccountOnlineStatus(accountId, gameName = 'WZRY', options = {}) {
+    const auth = options.auth || {};
+    const acc = String(accountId || '').trim();
+    if (!acc) throw new Error('accountId 不能为空');
+
+    const gameId = resolveGameIdByName(gameName);
+    const json = await postSigned(PATH_GAME_ONLINE, {
+        accountId: acc,
+        gameId
+    }, auth);
+
+    const gameOnline = Boolean(json && json.data && json.data.gameOnline);
+    return {
+        account: acc,
+        game_name: String(gameName || 'WZRY').trim().toUpperCase(),
+        game_id: gameId,
+        online: gameOnline,
+        raw: json
+    };
+}
+
 module.exports = {
     collectYoupinData,
     youpinOffShelf,
     youpinOnShelf,
+    queryAccountOnlineStatus,
 
     // 便于单测/诊断
     _internals: {
@@ -217,6 +266,7 @@ module.exports = {
         listProductsByTab,
         listAllProducts,
         findProductByAccount,
-        mapProductToRobotItem
+        mapProductToRobotItem,
+        resolveGameIdByName
     }
 };

@@ -93,8 +93,8 @@
   - `game_name`（可为空，后续多游戏用）
   - `has_zuhaowang`（0/1）
   - `has_uhaozu`（0/1）
-  - `has_youyouzuhao`（0/1）
-  - `platform_status`（JSON，按平台保存状态；示例：`{"zuhaowang":"上架","uhaozu":"审核失败","youyouzuhao":"下架"}`）
+  - `has_uuzuhao`（0/1）
+  - `platform_status`（JSON，按平台保存状态；示例：`{"zuhaowang":"上架","uhaozu":"审核失败","uuzuhao":"下架"}`）
   - `modify_date`
   - `is_deleted`
   - `desc`
@@ -104,7 +104,7 @@
 - 字段：
   - `id`
   - `user_id`
-  - `platform`（`zuhaowang`/`uhaozu`/`youyouzuhao`）
+  - `platform`（`zuhaowang`/`uhaozu`/`uuzuhao`）
   - `auth_type`（cookie/token/session）
   - `auth_payload`（加密 JSON）
   - `auth_status`（valid/expired/revoked）

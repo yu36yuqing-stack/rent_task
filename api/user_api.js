@@ -7,6 +7,7 @@ const {
     USER_TYPE_ADMIN
 } = require('../database/user_db');
 const { initUserGameAccountDb, listUserGameAccounts } = require('../database/user_game_account_db');
+const { initUserBlacklistDb } = require('../database/user_blacklist_db');
 const {
     initUserPlatformAuthDb,
     upsertUserPlatformAuth,
@@ -23,7 +24,7 @@ const {
     REFRESH_TTL_SEC
 } = require('../user/auth_token');
 const { requireAccessToken } = require('./auth_middleware');
-const { syncUserAccountsByAuth } = require('../service/account_sync_service');
+const { syncUserAccountsByAuth } = require('../product/product');
 
 function parseArgs(argv) {
     const out = {};
@@ -44,6 +45,7 @@ function toBool(v) {
 async function initAll() {
     await initUserDb();
     await initUserGameAccountDb();
+    await initUserBlacklistDb();
     await initUserPlatformAuthDb();
     await initUserSessionDb();
 }
@@ -180,7 +182,7 @@ function printHelp() {
     console.log('  node api/user_api.js logout --refresh_token <token>');
     console.log('  node api/user_api.js me --access_token <token>');
     console.log('  node api/user_api.js list-users --access_token <admin_access_token>');
-    console.log('  node api/user_api.js platform-auth-upsert --access_token <token> --platform zuhaowang --auth_type cookie --auth_payload "{...}"');
+    console.log('  node api/user_api.js platform-auth-upsert --access_token <token> --platform zuhaowang --auth_type token --auth_payload "{...}"');
     console.log('  node api/user_api.js platform-auth-list --access_token <token> [--with_payload true]');
     console.log('  node api/user_api.js accounts-sync --access_token <token>');
     console.log('  node api/user_api.js accounts-list --access_token <token> [--page 1 --page_size 50]');

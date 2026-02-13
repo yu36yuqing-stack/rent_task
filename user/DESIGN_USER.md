@@ -27,9 +27,9 @@
   - 账号归属表 CRUD、按用户查询、按账号 upsert。
 - `database/user_platform_auth_db.js`（新增）
   - 用户平台授权存取、失效标记。
-- `service/account_sync_service.js`（新增）
+- `product/product.js`（商品模块，原 `account_sync_service.js`）
   - 按用户授权调用三平台抓取，写入 `user_game_account`。
-- `service/notify_router_service.js`（新增）
+- `product/notify_router_service.js`（新增）
   - 按 `user_id` 聚合扫描结果并读取 `notify_config` 发送通知。
 
 ### 3.2 运行模式
@@ -96,7 +96,7 @@ ON user_game_account(user_id, is_deleted);
 {
   "zuhaowang": "上架",
   "uhaozu": "审核失败",
-  "youyouzuhao": "下架"
+  "uuzuhao": "下架"
 }
 ```
 
@@ -111,8 +111,8 @@ CREATE TABLE IF NOT EXISTS user_platform_auth (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     platform TEXT NOT NULL,
-    auth_type TEXT NOT NULL,                -- 凭据类型：cookie/token/session
-    auth_payload TEXT NOT NULL,             -- 加密后的凭据内容(JSON 字符串)
+    auth_type TEXT NOT NULL,                -- 凭据类型（按平台约束）
+    auth_payload TEXT NOT NULL,             -- 凭据内容(JSON 字符串，明文存储)
     auth_status TEXT NOT NULL DEFAULT 'valid', -- 授权状态：valid/expired/revoked
     expire_at TEXT DEFAULT '',
     modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -126,10 +126,13 @@ ON user_platform_auth(user_id, auth_status, is_deleted);
 ```
 
 说明：
-- `auth_payload` 存密文 JSON。
-- `platform` 固定值：`zuhaowang` / `uhaozu` / `youyouzuhao`。
-- `auth_type` 表示当前平台凭据形态，决定调用时如何组装请求头。
-- `auth_payload` 为实际登录态/令牌内容，入库前必须加密，出库后按 `auth_type` 解析。
+- `auth_payload` 存明文 JSON（便于初期排障与维护）。
+- `platform` 固定值：`zuhaowang` / `uhaozu` / `uuzuhao`。
+- `auth_type` 表示当前平台凭据形态，决定调用时如何组装请求头；当前约束：
+  - `zuhaowang`：`auth_type=token`，且 `auth_payload` 至少包含 `token_get`、`token_post`、`device_id`、`package_name`
+  - `uhaozu`：`auth_type=cookie`，且 `auth_payload` 至少包含 `cookie`
+  - `uuzuhao`：`auth_type=token`，且 `auth_payload` 至少包含 `app_key`、`app_secret`
+- `auth_payload` 为实际登录态/令牌内容，按 `auth_type` 解析。
 - `auth_status` 用于运行时快速判断凭据可用性（`valid` 可用，`expired` 过期，`revoked` 人工撤销）。
 
 ## 4.4 表：`scan_result`（可选）
@@ -214,13 +217,12 @@ ON user_platform_auth(user_id, auth_status, is_deleted);
 - `USER_MODE_ENABLED=true|false`
 - `JWT_ACCESS_SECRET`
 - `JWT_REFRESH_SECRET`
-- `AUTH_PAYLOAD_AES_KEY`（32 字节）
 - `ACCESS_TOKEN_TTL_SEC`（默认 1800）
 - `REFRESH_TOKEN_TTL_SEC`（默认 2592000）
 
 ## 9. 安全设计
 - 密码：PBKDF2 继续沿用，参数最小 120000 轮。
-- 授权凭据：`auth_payload` 使用 AES-GCM 加密后入库。
+- 授权凭据：`auth_payload` 以明文 JSON 入库（访问控制与日志脱敏仍需保留）。
 - 日志：禁止输出 cookie、token、auth_payload 明文。
 - 鉴权失败、授权失效需写审计日志（可先写文件，后续入表）。
 

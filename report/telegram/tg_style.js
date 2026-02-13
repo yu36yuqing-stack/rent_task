@@ -5,6 +5,8 @@ function esc(v) {
         .replace(/>/g, '&gt;');
 }
 
+const REPORT_VERSION = 'v1.0.3';
+
 function shortState(s) {
     if (!s) return '未';
     return String(s)
@@ -34,8 +36,11 @@ function buildTelegramMessage(payload) {
         return payload?.message || '⚠️ 暂无状态数据 (任务可能未运行)';
     }
 
+    const owner = String(payload?.report_owner || '').trim();
+    const title = owner ? `${owner} 租号状态汇报` : '租号状态汇报';
+
     let msg = '';
-    msg += `<b>📊 租号状态汇报</b> <code>${esc(payload.hhmm)}</code>\n`;
+    msg += `<b>📊 ${esc(title)}</b> <code>${esc(payload.hhmm)}</code>\n`;
 
     if (Array.isArray(payload.recentActions) && payload.recentActions.length > 0) {
         msg += '<b>🛠️ 近1小时自动操作</b>\n';
@@ -52,7 +57,9 @@ function buildTelegramMessage(payload) {
         const u = shortState(acc.uhaozu);
         const z = shortState(acc.zuhaowan);
         const icon = pickIcon(acc);
-        msg += `${esc(icon)} <b>${esc(acc.remark || acc.account)}</b>: `;
+        const onlineTag = String(acc.online_tag || '').trim();
+        const onlineBadge = onlineTag ? `(${onlineTag})` : '';
+        msg += `${esc(icon)}${esc(onlineBadge)} <b>${esc(acc.remark || acc.account)}</b>: `;
         msg += `Y[<code>${esc(y)}</code>] U[<code>${esc(u)}</code>] Z[<code>${esc(z)}</code>]`;
         msg += `${esc(acc.suffix || '')}${esc(acc.hint || '')}\n`;
     });
@@ -61,6 +68,7 @@ function buildTelegramMessage(payload) {
     msg += payload.allNormal
         ? '✅ 所有状态正常 (三方一致或无冲突)'
         : '⚠️ 检测到待修复状态';
+    msg += `\n<code>版本: ${esc(REPORT_VERSION)}</code>`;
     return msg;
 }
 

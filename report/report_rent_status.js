@@ -4,14 +4,10 @@ const { sendTelegramMessage } = require('./telegram/tg_notify.js');
 const { sendDingdingMessage } = require('./dingding/ding_notify.js');
 const { buildTelegramMessage } = require('./telegram/tg_style.js');
 const { buildDingdingMessage } = require('./dingding/ding_style.js');
-const { getActiveBlacklist, ensureBlacklistSyncedFromFile } = require('../database/blacklist_db.js');
-const { listOwnersByGameAccounts } = require('../database/user_game_account_db.js');
-const { listActiveUsers } = require('../database/user_db.js');
 
 const TASK_DIR = path.resolve(__dirname, '..');
 const STATUS_FILE = path.join(TASK_DIR, 'rent_robot_status.json');
 const HISTORY_FILE = path.join(TASK_DIR, 'rent_robot_history.jsonl');
-const BLACKLIST_FILE = path.join(TASK_DIR, 'config', 'blacklist.json');
 
 function readJson(file, fallback) {
     try {
@@ -28,9 +24,9 @@ function readHistory() {
         return fs
             .readFileSync(HISTORY_FILE, 'utf8')
             .split('\n')
-            .map(l => l.trim())
+            .map((l) => l.trim())
             .filter(Boolean)
-            .map(l => {
+            .map((l) => {
                 try { return JSON.parse(l); } catch { return null; }
             })
             .filter(Boolean);
@@ -89,19 +85,39 @@ function isAccountNormal(acc) {
     return allUp || allDown || anyRent || u === '审核失败' || Boolean(acc.is_blacklisted);
 }
 
-async function loadBlacklistRecords() {
-    try {
-        await ensureBlacklistSyncedFromFile(BLACKLIST_FILE, {
-            source: 'report_build',
-            operator: 'system',
-            desc: 'sync before build report'
-        });
-        return await getActiveBlacklist();
-    } catch (e) {
-        console.warn(`[Report] DB读取黑名单失败，回退文件读取: ${e.message}`);
-    }
-    const fallback = readJson(BLACKLIST_FILE, []);
-    return Array.isArray(fallback) ? fallback : [];
+function toReportAccountFromUserGameRow(row, blacklistSet = new Set()) {
+    const status = row && typeof row.channel_status === 'object' ? row.channel_status : {};
+    const account = String(row.game_account || '').trim();
+    const blacklisted = blacklistSet.has(account);
+    return {
+        account,
+        remark: String(row.account_remark || account),
+        youpin: String(status.uuzuhao || ''),
+        uhaozu: String(status.uhaozu || ''),
+        zuhaowan: String(status.zuhaowang || ''),
+        uhaozu_debug: '',
+        is_blacklisted: blacklisted,
+        suffix: blacklisted ? ' (已按黑名单强制下架)' : '',
+        hint: ''
+    };
+}
+
+function buildPayloadForOneUser(accounts, extra = {}) {
+    const hhmm = new Date().toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    });
+    const list = Array.isArray(accounts) ? accounts : [];
+    return {
+        ok: true,
+        hhmm,
+        runCount: 0,
+        recentActions: [],
+        accounts: list,
+        allNormal: list.every((x) => isAccountNormal(x)),
+        ...extra
+    };
 }
 
 async function buildReportPayload() {
@@ -115,16 +131,10 @@ async function buildReportPayload() {
 
     const status = readJson(STATUS_FILE, { timestamp: Date.now(), accounts: [] });
     const history = readHistory();
-    const blacklist = await loadBlacklistRecords();
-    const blacklistSet = new Set(
-        (Array.isArray(blacklist) ? blacklist : [])
-            .filter(e => e && e.account)
-            .filter(e => String(e.action || 'off').toLowerCase() !== 'on')
-            .map(e => String(e.account))
-    );
+    const blacklistSet = new Set();
 
     const oneHourAgo = Date.now() - 3600 * 1000;
-    const recentRuns = history.filter(h => h.timestamp > oneHourAgo);
+    const recentRuns = history.filter((h) => h.timestamp > oneHourAgo);
     const runCount = recentRuns.length;
 
     const recentActions = [];
@@ -157,7 +167,7 @@ async function buildReportPayload() {
         hour12: false
     });
 
-    const allNormal = accounts.every(acc => {
+    const allNormal = accounts.every((acc) => {
         const y = acc.youpin;
         const u = acc.uhaozu;
         const z = acc.zuhaowan;
@@ -203,140 +213,59 @@ async function buildReportMessage() {
     };
 }
 
-async function sendTelegram(message, mode = 'html') {
+async function sendTelegram(message, mode = 'html', options = {}) {
     if (!message) return false;
-    await sendTelegramMessage(message, mode);
+    await sendTelegramMessage(message, mode, options);
     return true;
 }
 
-async function sendDingding(message) {
+async function sendDingding(message, options = {}) {
     if (!message) return false;
-    await sendDingdingMessage(message);
+    await sendDingdingMessage(message, options);
     return true;
 }
 
-async function reportAndNotifyByUser(payload) {
-    if (!payload?.ok) return { routed: false, reason: 'payload_not_ok' };
-    const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
-    if (accounts.length === 0) return { routed: false, reason: 'no_accounts' };
+async function notifyUserByPayload(user, payload) {
+    const cfg = user && user.notify_config && typeof user.notify_config === 'object' ? user.notify_config : {};
+    const tgCfg = cfg.telegram || {};
+    const dingCfg = cfg.dingding || {};
 
-    const accountValues = accounts.map((a) => String(a.account || '').trim()).filter(Boolean);
-    const ownerMap = await listOwnersByGameAccounts(accountValues, 'WZRY');
-    const users = await listActiveUsers();
-    const userById = new Map(users.map((u) => [Number(u.id), u]));
+    const tgMsg = buildTelegramMessage(payload);
+    const dingMsg = buildDingdingMessage(payload);
 
-    const grouped = new Map();
-    for (const acc of accounts) {
-        const ownerId = Number(ownerMap[String(acc.account || '')] || 0);
-        if (!ownerId) continue;
-        const arr = grouped.get(ownerId) || [];
-        arr.push(acc);
-        grouped.set(ownerId, arr);
+    const jobs = [];
+    if (tgCfg.bot_token && tgCfg.chat_id) {
+        jobs.push(
+            sendTelegramMessage(tgMsg, payload.ok ? 'html' : '', {
+                token: tgCfg.bot_token,
+                chat_id: tgCfg.chat_id,
+                proxy: tgCfg.proxy || ''
+            })
+        );
+    }
+    if (dingCfg.webhook) {
+        jobs.push(
+            sendDingdingMessage(dingMsg, {
+                webhook: dingCfg.webhook,
+                secret: dingCfg.secret || ''
+            })
+        );
     }
 
-    const routed = [];
-    const errors = [];
+    if (jobs.length === 0) {
+        return { ok: false, reason: 'notify_config_missing', errors: ['notify_config_missing'] };
+    }
 
-    for (const [userId, userAccounts] of grouped.entries()) {
-        const user = userById.get(Number(userId));
-        if (!user) continue;
-
-        const cfg = user.notify_config || {};
-        const tgCfg = cfg.telegram || {};
-        const dingCfg = cfg.dingding || {};
-
-        const userPayload = {
-            ...payload,
-            accounts: userAccounts,
-            allNormal: userAccounts.every((x) => isAccountNormal(x))
+    const settled = await Promise.allSettled(jobs);
+    const failed = settled.filter((s) => s.status === 'rejected');
+    if (failed.length > 0) {
+        return {
+            ok: false,
+            reason: 'notify_failed',
+            errors: failed.map((f) => f.reason?.message || String(f.reason))
         };
-        const tgMsg = buildTelegramMessage(userPayload);
-        const dingMsg = buildDingdingMessage(userPayload);
-
-        const jobs = [];
-        if (tgCfg.bot_token && tgCfg.chat_id) {
-            jobs.push(
-                sendTelegramMessage(tgMsg, payload.ok ? 'html' : '', {
-                    token: tgCfg.bot_token,
-                    chat_id: tgCfg.chat_id,
-                    proxy: tgCfg.proxy || ''
-                })
-            );
-        }
-        if (dingCfg.webhook) {
-            jobs.push(
-                sendDingdingMessage(dingMsg, {
-                    webhook: dingCfg.webhook,
-                    secret: dingCfg.secret || ''
-                })
-            );
-        }
-        if (jobs.length === 0) continue;
-
-        const settled = await Promise.allSettled(jobs);
-        const failed = settled.filter((s) => s.status === 'rejected');
-        if (failed.length > 0) {
-            errors.push({
-                user_id: user.id,
-                account: user.account,
-                errors: failed.map((f) => f.reason?.message || String(f.reason))
-            });
-            continue;
-        }
-
-        routed.push({
-            user_id: user.id,
-            account: user.account,
-            accounts: userAccounts.length
-        });
     }
-
-    return {
-        routed: routed.length > 0,
-        routed_users: routed,
-        routed_user_count: routed.length,
-        errors
-    };
-}
-
-async function reportAndNotify() {
-    const payload = await buildReportPayload();
-    const userMode = String(process.env.USER_MODE_ENABLED || '').toLowerCase() === 'true';
-
-    if (userMode) {
-        try {
-            const routed = await reportAndNotifyByUser(payload);
-            if (routed.routed) {
-                return {
-                    ...payload,
-                    user_mode: true,
-                    route: routed
-                };
-            }
-            console.warn(`[Notify] USER_MODE_ENABLED=true 但未命中用户路由，回退全局通知。reason=${routed.reason || 'none'}`);
-        } catch (e) {
-            console.error('[Notify] 用户路由通知失败，回退全局通知:', e.message);
-        }
-    }
-
-    const telegramMessage = buildTelegramMessage(payload);
-    const dingdingMessage = buildDingdingMessage(payload);
-    const notifyJobs = [
-        sendTelegram(telegramMessage, payload.ok ? 'html' : ''),
-        sendDingding(dingdingMessage)
-    ];
-    const settled = await Promise.allSettled(notifyJobs);
-    if (settled[0].status === 'rejected') {
-        console.error('[Notify] Telegram 发送失败:', settled[0].reason?.message || settled[0].reason);
-    }
-    if (settled[1].status === 'rejected') {
-        console.error('[Notify] 钉钉发送失败:', settled[1].reason?.message || settled[1].reason);
-    }
-    return {
-        ...payload,
-        message: telegramMessage,
-        dingding_message: dingdingMessage
-    };
+    return { ok: true, reason: '', errors: [] };
 }
 
 if (require.main === module) {
@@ -356,6 +285,7 @@ module.exports = {
     buildReportMessage,
     sendTelegram,
     sendDingding,
-    reportAndNotify,
-    reportAndNotifyByUser
+    toReportAccountFromUserGameRow,
+    buildPayloadForOneUser,
+    notifyUserByPayload
 };

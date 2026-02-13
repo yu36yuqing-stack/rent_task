@@ -1,3 +1,9 @@
+const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
+const { buildAuthMap } = require('../user/user');
+const { youpinOffShelf, youpinOnShelf } = require('../uuzuhao/uuzuhao_api');
+const { uhaozuOffShelf, uhaozuOnShelf } = require('../uhaozu/uhaozu_api');
+const { changeStatus: changeZhwStatus } = require('../zuhaowang/zuhaowang_api');
+
 function detectConflictsAndBuildSnapshot({ youpinData, uhaozuData, zhwData, blacklistAccounts }) {
     const snapshot = {
         timestamp: Date.now(),
@@ -77,17 +83,27 @@ async function executeActions({
     youpinOnShelf,
     uhaozuOffShelf,
     uhaozuOnShelf,
-    changeZhwStatus
+    changeZhwStatus,
+    readOnly = false
 }) {
     console.log(`[Step] 策略计算完成，待执行操作数=${actions.length}`);
     if (actions.length === 0) return;
 
     console.log('ALERT_NEEDED'); // 触发通知
     console.log(`[Action] 发现 ${actions.length} 个需要处理的操作`);
+    if (readOnly) {
+        console.log('[Action] 当前为只读模式：阻断上下架执行，仅记录动作');
+    }
 
     for (const action of actions) {
         console.log(`[Execute] ${action.reason} -> ${action.item.account}`);
         try {
+            if (readOnly) {
+                runRecord.actions.push({ ...action, time: Date.now(), success: true, skipped: true, mode: 'read_only' });
+                console.log(`[Result] 已跳过(只读): ${action.type} -> ${action.item.account}`);
+                continue;
+            }
+
             let success = false;
 
             // U号租
@@ -123,7 +139,126 @@ async function executeActions({
     }
 }
 
+function buildPlatformRowsFromUserAccounts(rows = []) {
+    const youpinData = [];
+    const uhaozuData = [];
+    const zhwData = [];
+
+    for (const row of rows) {
+        const account = String(row.game_account || '').trim();
+        if (!account) continue;
+        const status = row && typeof row.channel_status === 'object' ? row.channel_status : {};
+        const prd = row && typeof row.channel_prd_info === 'object' ? row.channel_prd_info : {};
+
+        const y = String(status.uuzuhao || '').trim();
+        if (y) {
+            youpinData.push({
+                account,
+                status: y,
+                remark: String(row.account_remark || account)
+            });
+        }
+
+        const u = String(status.uhaozu || '').trim();
+        if (u) {
+            uhaozuData.push({
+                account,
+                status: u,
+                reason: ''
+            });
+        }
+
+        const z = String(status.zuhaowang || '').trim();
+        if (z) {
+            zhwData.push({
+                account,
+                status: z,
+                gameId: Number((prd.zuhaowang && (prd.zuhaowang.game_id || prd.zuhaowang.gameId)) || 0)
+            });
+        }
+    }
+
+    return { youpinData, uhaozuData, zhwData };
+}
+
+async function executeUserActionsIfNeeded({
+    user,
+    rows,
+    blacklistSet = new Set(),
+    actionEnabled = true,
+    readOnly = false
+}) {
+    if (!actionEnabled) return { planned: 0, actions: [], errors: [] };
+    if (!user || !user.id) throw new Error('user 缺失或不合法');
+
+    const authRows = await listUserPlatformAuth(user.id, { with_payload: true });
+    const authMap = buildAuthMap(authRows);
+    const { youpinData, uhaozuData, zhwData } = buildPlatformRowsFromUserAccounts(rows);
+    const { actions } = detectConflictsAndBuildSnapshot({
+        youpinData,
+        uhaozuData,
+        zhwData,
+        blacklistAccounts: blacklistSet
+    });
+
+    const requiredPlatforms = new Set();
+    for (const action of actions) {
+        const type = String(action && action.type || '');
+        if (type.endsWith('_y')) requiredPlatforms.add('uuzuhao');
+        else if (type.endsWith('_u')) requiredPlatforms.add('uhaozu');
+        else if (type.endsWith('_z')) requiredPlatforms.add('zuhaowang');
+    }
+    for (const platform of requiredPlatforms) {
+        const auth = authMap[platform];
+        if (!auth || typeof auth !== 'object') {
+            throw new Error(`${platform} 授权缺失，已阻断执行，避免混用非用户凭据`);
+        }
+    }
+
+    const runRecord = { actions: [], errors: [] };
+    await executeActions({
+        actions,
+        runRecord,
+        youpinPage: null,
+        uhaozuPage: null,
+        youpinOffShelf: (_page, account) => {
+            const auth = authMap.uuzuhao;
+            if (!auth) return false;
+            return youpinOffShelf(null, account, { auth });
+        },
+        youpinOnShelf: (_page, account) => {
+            const auth = authMap.uuzuhao;
+            if (!auth) return false;
+            return youpinOnShelf(null, account, { auth });
+        },
+        uhaozuOffShelf: (_page, account) => {
+            const auth = authMap.uhaozu;
+            if (!auth) return false;
+            return uhaozuOffShelf(null, account, { auth });
+        },
+        uhaozuOnShelf: (_page, account) => {
+            const auth = authMap.uhaozu;
+            if (!auth) return false;
+            return uhaozuOnShelf(null, account, { auth });
+        },
+        changeZhwStatus: (account, gameId, type) => {
+            const auth = authMap.zuhaowang;
+            if (!auth) return false;
+            return changeZhwStatus(account, gameId, type, auth);
+        },
+        readOnly
+    });
+
+    return {
+        planned: actions.length,
+        actions: Array.isArray(runRecord.actions) ? runRecord.actions : [],
+        errors: Array.isArray(runRecord.errors) ? runRecord.errors : []
+    };
+}
+
 module.exports = {
     detectConflictsAndBuildSnapshot,
-    executeActions
+    executeActions,
+    buildPlatformRowsFromUserAccounts,
+    executeUserActionsIfNeeded
 };

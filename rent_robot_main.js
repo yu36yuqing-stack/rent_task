@@ -1,20 +1,28 @@
-const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 const path = require('path');
 const util = require('util');
-const { getGoodsList: getZhwList, changeStatus: changeZhwStatus } = require('./zuhaowang/zuhaowang_api.js');
-const { collectUhaozuData, uhaozuOffShelf, uhaozuOnShelf } = require('./uhaozu/uhaozu_api.js');
-const { collectYoupinData, youpinOffShelf, youpinOnShelf } = require('./uuzuhao/uuzuhao_api.js');
-const { detectConflictsAndBuildSnapshot, executeActions } = require('./action_engine/action_engine.js');
-const { reportAndNotify, sendTelegram } = require('./report/report_rent_status.js');
-const { ensureBlacklistSyncedFromFile, getActiveBlacklist } = require('./database/blacklist_db.js');
+const {
+    sendTelegram,
+    toReportAccountFromUserGameRow,
+    buildPayloadForOneUser,
+    notifyUserByPayload
+} = require('./report/report_rent_status.js');
+const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('./database/user_db.js');
+const { syncUserAccountsByAuth, listAllUserGameAccountsByUser, fillOnlineTagsByYouyou } = require('./product/product');
+const { loadUserBlacklistSet } = require('./user/user');
+const { executeUserActionsIfNeeded } = require('./action_engine/action_engine.js');
 
+// ===== 基础目录与运行开关 =====
 const TASK_DIR = __dirname;
 if (!fs.existsSync(TASK_DIR)) fs.mkdirSync(TASK_DIR, { recursive: true });
 const LOG_DIR = path.join(TASK_DIR, 'log');
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 const MAIN_LOG_FILE = path.join(LOG_DIR, 'rent_robot_main.log');
 
+const ACTION_READ_ONLY = ['1', 'true', 'yes', 'on'].includes(String(process.env.ACTION_READ_ONLY || 'false').toLowerCase());
+const ACTION_ENABLED = !['0', 'false', 'no', 'off'].includes(String(process.env.ACTION_ENABLE || 'true').toLowerCase());
+
+// 主日志: 保留控制台输出，同时落盘到 log/rent_robot_main.log
 function setupMainLogger() {
     const original = {
         log: console.log.bind(console),
@@ -40,37 +48,31 @@ function setupMainLogger() {
 
 setupMainLogger();
 console.log(`[Boot] rent_robot_main.js 启动 pid=${process.pid} args=${process.argv.slice(2).join(' ') || '(none)'}`);
+console.log(`[Config] ACTION_ENABLE=${ACTION_ENABLED} ACTION_READ_ONLY=${ACTION_READ_ONLY}`);
 
-process.on('unhandledRejection', reason => {
+process.on('unhandledRejection', (reason) => {
     console.error('[UnhandledRejection]', reason);
 });
 
-process.on('uncaughtException', err => {
+process.on('uncaughtException', (err) => {
     console.error('[UncaughtException]', err);
 });
-
-const args = process.argv.slice(2);
 
 const LOCK_FILE = path.join(TASK_DIR, 'rent_robot.lock');
 const MAX_LOCK_AGE_MS = 10 * 60 * 1000;
 
-const BROWSER_PORT = 9222;
-const BROWSER_URL = `http://127.0.0.1:${BROWSER_PORT}`;
-const YOUPIN_URL = 'https://merchant.youpin898.com/commodity';
-const UHAOZU_URL = 'https://www.uhaozu.com/goods/usercenter/list';
-
+// 进程锁: 防止并发执行导致重复上下架
 function checkLock() {
     console.log(`[Lock] 检查锁文件: ${LOCK_FILE}`);
     if (fs.existsSync(LOCK_FILE)) {
         const stats = fs.statSync(LOCK_FILE);
         const age = Date.now() - stats.mtimeMs;
         if (age < MAX_LOCK_AGE_MS) {
-            console.log(`[Skip] 任务锁定中 (持续 ${Math.round(age/1000)}s)，跳过本次执行。`);
+            console.log(`[Skip] 任务锁定中 (持续 ${Math.round(age / 1000)}s)，跳过本次执行。`);
             console.log('ALERT_OVERLAP');
             return false;
-        } else {
-            console.log('[Info] 锁文件超时，强制覆盖。');
         }
+        console.log('[Info] 锁文件超时，强制覆盖。');
     }
     fs.writeFileSync(LOCK_FILE, process.pid.toString());
     console.log('[Lock] 已创建执行锁');
@@ -84,70 +86,104 @@ function releaseLock() {
     }
 }
 
-async function ensureBrowser() {
-    try {
-        const browser = await puppeteer.connect({ browserURL: BROWSER_URL, defaultViewport: null });
-        const pages = await browser.pages();
-        const urls = pages.map(p => p.url());
-        let needRefresh = false;
-        if (!urls.some(u => u.includes('uhaozu.com'))) {
-            const p = await browser.newPage();
-            await p.goto(UHAOZU_URL, { waitUntil: 'domcontentloaded' });
-            needRefresh = true;
-        }
-        if (!urls.some(u => u.includes('youpin898.com'))) {
-            const p = await browser.newPage();
-            await p.goto(YOUPIN_URL, { waitUntil: 'domcontentloaded' });
-            needRefresh = true;
-        }
-        if(needRefresh) await new Promise(r => setTimeout(r, 3000));
-        return browser;
-    } catch (err) {
-        console.log('[Alert] 浏览器异常，尝试重启...');
-        const CHROME_CMD = `/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=${BROWSER_PORT} --user-data-dir="$HOME/Library/Application Support/Google/Chrome/OpenClawRobot" --no-first-run --no-default-browser-check "${UHAOZU_URL}" "${YOUPIN_URL}"`;
-        require('child_process').exec(CHROME_CMD);
-        await new Promise(r => setTimeout(r, 5000));
-        return await puppeteer.connect({ browserURL: BROWSER_URL, defaultViewport: null });
-    }
-}
-
-const STATUS_FILE = path.join(TASK_DIR, 'rent_robot_status.json');
 const HISTORY_FILE = path.join(TASK_DIR, 'rent_robot_history.jsonl');
-const BLACKLIST_FILE = path.join(TASK_DIR, 'config', 'blacklist.json');
 
-async function loadBlacklistAccountsFromDb() {
-    try {
-        await ensureBlacklistSyncedFromFile(BLACKLIST_FILE, {
-            source: 'rent_robot_main_boot',
-            operator: 'system',
-            desc: 'auto sync from file before run'
-        });
-        const blacklist = await getActiveBlacklist();
-        const accounts = blacklist
-            .filter(entry => entry && entry.account)
-            .filter(entry => String(entry.action || 'off').toLowerCase() !== 'on')
-            .map(entry => String(entry.account).trim());
+async function runPipeline(runRecord) {
+    // 用户范围: 非管理员 + 启用状态
+    const users = await listActiveUsers();
+    const targets = users
+        .filter((u) => String(u.user_type || '') !== USER_TYPE_ADMIN)
+        .filter((u) => String(u.status || '') === USER_STATUS_ENABLED);
 
-        console.log(`[Blacklist] DB加载完成，条目=${accounts.length}`);
-        return new Set(accounts);
-    } catch (e) {
-        console.warn(`[Blacklist] DB读取失败，回退文件读取。err=${e.message}`);
+    if (targets.length === 0) {
+        return {
+            routed: false,
+            reason: 'no_non_admin_users',
+            routed_users: [],
+            routed_user_count: 0,
+            processed_user_count: 0,
+            errors: []
+        };
     }
 
-    try {
-        const blacklistData = fs.readFileSync(BLACKLIST_FILE, 'utf8');
-        const blacklist = JSON.parse(blacklistData);
-        if (!Array.isArray(blacklist)) return new Set();
-        const accounts = blacklist
-            .filter(entry => entry && entry.account)
-            .filter(entry => String(entry.action || 'off').toLowerCase() !== 'on')
-            .map(entry => String(entry.account).trim());
-        console.log(`[Blacklist] 文件回退加载完成，条目=${accounts.length} 文件=${BLACKLIST_FILE}`);
-        return new Set(accounts);
-    } catch (e) {
-        console.warn(`[Blacklist] 文件回退读取失败，忽略黑名单。file=${BLACKLIST_FILE}, err=${e.message}`);
-        return new Set();
+    const routed = [];
+    const errors = [];
+
+    // 用户级主流程（拉取 -> 策略/执行 -> 通知）
+    for (const user of targets) {
+        let rows = [];
+        let blacklistSet = new Set();
+
+        try {
+            console.log(`[User] 开始处理 user_id=${user.id} account=${user.account}`);
+            // Step 1: 拉取三平台最新数据并落到 user_game_account
+            await syncUserAccountsByAuth(user.id);
+            rows = await listAllUserGameAccountsByUser(user.id);
+            blacklistSet = await loadUserBlacklistSet(user.id);
+
+            // Step 2: 策略计算并执行（ACTION_ENABLE/ACTION_READ_ONLY 控制）
+            const actionResult = await executeUserActionsIfNeeded({
+                user,
+                rows,
+                blacklistSet,
+                actionEnabled: ACTION_ENABLED,
+                readOnly: ACTION_READ_ONLY
+            });
+            if (actionResult.actions.length > 0) {
+                runRecord.actions.push(...actionResult.actions.map((a) => ({ ...a, user_id: user.id, user_account: user.account })));
+            }
+            if (actionResult.errors.length > 0) {
+                const actionErrs = actionResult.errors.map((e) => `action_error user=${user.id} ${e}`);
+                runRecord.errors.push(...actionErrs);
+                errors.push({ user_id: user.id, account: user.account, errors: actionResult.errors });
+            }
+
+            // Step 3: 暂时关闭“执行后再次拉取”逻辑，降低平台请求频次，避免触发风控。
+            // TODO: 后续补充更稳健方案（例如仅成功动作增量校验/延迟抽样回拉），兼顾准确性与风控。
+            // if (actionResult.planned > 0 && !ACTION_READ_ONLY) {
+            //     await syncUserAccountsByAuth(user.id);
+            //     rows = await listAllUserGameAccountsByUser(user.id);
+            // }
+
+            // Step 4: 组装并发送用户通知（Telegram/Dingding）
+            const accounts = rows.map((r) => toReportAccountFromUserGameRow(r, blacklistSet));
+            await fillOnlineTagsByYouyou(user, accounts);
+            const payload = buildPayloadForOneUser(accounts, {
+                report_owner: String(user.name || user.account || '').trim()
+            });
+
+            const notifyResult = await notifyUserByPayload(user, payload);
+            if (!notifyResult.ok) {
+                const notifyErrs = Array.isArray(notifyResult.errors) ? notifyResult.errors : [notifyResult.reason || 'notify_failed'];
+                errors.push({ user_id: user.id, account: user.account, errors: notifyErrs });
+                runRecord.errors.push(...notifyErrs.map((e) => `notify_error user=${user.id} ${e}`));
+                continue;
+            }
+
+            routed.push({ user_id: user.id, account: user.account, accounts: accounts.length });
+            runRecord.actions.push({
+                type: 'notify_user',
+                item: { user_id: user.id, account: user.account },
+                reason: `notify ${accounts.length} accounts`,
+                time: Date.now(),
+                success: true
+            });
+            console.log(`[User] 处理完成 user_id=${user.id} accounts=${accounts.length}`);
+        } catch (e) {
+            const msg = `sync_failed: ${e.message}`;
+            errors.push({ user_id: user.id, account: user.account, errors: [msg] });
+            runRecord.errors.push(`pipeline_error user=${user.id} ${msg}`);
+            console.error(`[User] 处理失败 user_id=${user.id}: ${e.message}`);
+        }
     }
+
+    return {
+        routed: routed.length > 0,
+        routed_users: routed,
+        routed_user_count: routed.length,
+        processed_user_count: targets.length,
+        errors
+    };
 }
 
 (async () => {
@@ -155,9 +191,7 @@ async function loadBlacklistAccountsFromDb() {
         console.log('[Exit] 锁存在，结束本次执行');
         return;
     }
-    let browser;
-    
-    // 记录本次执行情况
+
     const runRecord = {
         timestamp: Date.now(),
         actions: [],
@@ -166,85 +200,13 @@ async function loadBlacklistAccountsFromDb() {
     };
 
     try {
-        // 浏览器兜底逻辑暂时关闭（保留 ensureBrowser 实现，后续可快速恢复）
-        // console.log('[Step] 开始连接浏览器');
-        // browser = await ensureBrowser();
-        // console.log('[Step] 浏览器连接成功');
-        console.log('[Step] 浏览器流程已跳过（当前使用纯 API 模式）');
-
-        // ----------------------
-        // 1. 抓取悠悠租号 (已封装)
-        // ----------------------
-        console.log('[Step] 开始抓取 悠悠租号');
-        const youpinResult = await collectYoupinData(browser, YOUPIN_URL);
-        const youpinPage = youpinResult.page;
-        const youpinData = youpinResult.data;
-        console.log(`[Step] 悠悠租号抓取完成，记录数=${youpinData.length}`);
-
-        // ----------------------
-        // 2. 抓取 U号租 (已封装)
-        // ----------------------
-        console.log('[Step] 开始抓取 U号租');
-        const uhaozuResult = await collectUhaozuData(browser, UHAOZU_URL);
-        const uhaozuPage = uhaozuResult.page;
-        const uhaozuData = uhaozuResult.data;
-        console.log(`[Step] U号租抓取完成，记录数=${uhaozuData.length}`);
-
-        // ----------------------
-        // 3. 抓取 租号王 (API)
-        // ----------------------
-        let zhwData = [];
-        console.log('[Step] 开始抓取 租号王 API');
-        try {
-            zhwData = await getZhwList();
-            console.log(`[Step] 租号王抓取完成，记录数=${zhwData.length}`);
-        } catch (e) {
-            console.error(`[Zuhaowang] API Fetch Error: ${e.message}`);
-            runRecord.errors.push(`租号王API失败: ${e.message}`);
+        // 顶层编排入口：执行完整链路
+        console.log('[Step] 启动用户清单主干（拉取/策略/执行/通知）');
+        const route = await runPipeline(runRecord);
+        console.log(`[Step] 主流程完成 routed=${route.routed} users=${route.routed_user_count || 0} processed=${route.processed_user_count || 0}`);
+        if (Array.isArray(route.errors) && route.errors.length > 0) {
+            console.warn(`[Step] 存在错误条目=${route.errors.length}`);
         }
-
-        // ----------------------
-        // 4. 三方冲突检测 & 构建快照
-        // ----------------------
-        let snapshot;
-        let actions = [];
-        const blacklistAccounts = await loadBlacklistAccountsFromDb();
-        ({ snapshot, actions } = detectConflictsAndBuildSnapshot({
-            youpinData,
-            uhaozuData,
-            zhwData,
-            blacklistAccounts
-        }));
-
-        // ----------------------
-        // 5. 执行操作
-        // ----------------------
-        await executeActions({
-            actions,
-            runRecord,
-            youpinPage,
-            uhaozuPage,
-            youpinOffShelf,
-            youpinOnShelf,
-            uhaozuOffShelf,
-            uhaozuOnShelf,
-            changeZhwStatus
-        });
-
-        // ----------------------
-        // 6. 写入状态 & 报告
-        // ----------------------
-        fs.writeFileSync(STATUS_FILE, JSON.stringify(snapshot, null, 2));
-        console.log(`[Step] 状态快照已写入: ${STATUS_FILE} accounts=${snapshot.accounts.length}`);
-
-        if (actions.length === 0) {
-            console.log('✅ 所有状态正常 (三方一致或无冲突)');
-        }
-
-        console.log('[Step] 开始生成并发送状态通知');
-        const reportResult = await reportAndNotify();
-        console.log(`[Step] 通知已发送 ok=${reportResult.ok} normal=${reportResult.allNormal}`);
-
     } catch (e) {
         console.error('[Error]', e);
         runRecord.status = 'error';
@@ -259,21 +221,12 @@ async function loadBlacklistAccountsFromDb() {
     } finally {
         try {
             const line = JSON.stringify(runRecord);
-            fs.appendFileSync(HISTORY_FILE, line + '\n');
+            fs.appendFileSync(HISTORY_FILE, `${line}\n`);
             console.log(`[Step] 运行历史已追加: ${HISTORY_FILE} status=${runRecord.status} actions=${runRecord.actions.length} errors=${runRecord.errors.length}`);
         } catch (err) {
             console.error('History write fail', err);
-        }
-
-        if(browser) {
-            await browser.disconnect();
-            console.log('[Step] 浏览器连接已断开');
         }
         releaseLock();
         console.log('[Exit] 本次执行结束');
     }
 })();
-
-// ==========================================
-// 辅助函数
-// ==========================================

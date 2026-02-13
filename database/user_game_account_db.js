@@ -1,6 +1,12 @@
 const { openDatabase } = require('./sqlite_client');
 
-const PLATFORM_KEYS = new Set(['zuhaowang', 'uhaozu', 'youyouzuhao']);
+const PLATFORM_KEYS = new Set(['zuhaowang', 'uhaozu', 'uuzuhao']);
+const GAME_NAME_ALIASES = new Map([
+    ['wzry', 'WZRY'],
+    ['王者荣耀', 'WZRY'],
+    ['王者', 'WZRY'],
+    ['王者荣耀手游', 'WZRY']
+]);
 
 function nowText() {
     const d = new Date();
@@ -35,6 +41,25 @@ function all(db, sql, params = []) {
     });
 }
 
+async function tableColumns(db, tableName) {
+    const rows = await all(db, `PRAGMA table_info(${tableName})`);
+    return new Set(rows.map((row) => String(row.name || '')));
+}
+
+async function tableColumnNamesInOrder(db, tableName) {
+    const rows = await all(db, `PRAGMA table_info(${tableName})`);
+    return rows.map((row) => String(row.name || ''));
+}
+
+function canonicalGameName(input) {
+    const raw = String(input || '').trim();
+    if (!raw) return 'WZRY';
+    const low = raw.toLowerCase();
+    if (GAME_NAME_ALIASES.has(raw)) return GAME_NAME_ALIASES.get(raw);
+    if (GAME_NAME_ALIASES.has(low)) return GAME_NAME_ALIASES.get(low);
+    return raw;
+}
+
 function normalizeStatusJson(input) {
     let raw = input;
     if (raw === null || raw === undefined || raw === '') raw = {};
@@ -59,23 +84,106 @@ function normalizeStatusJson(input) {
     return out;
 }
 
+function normalizePrdInfoJson(input) {
+    let raw = input;
+    if (raw === null || raw === undefined || raw === '') raw = {};
+    if (typeof raw === 'string') {
+        try {
+            raw = JSON.parse(raw);
+        } catch {
+            throw new Error('channel_prd_info 必须是合法 JSON');
+        }
+    }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        throw new Error('channel_prd_info 必须是 JSON 对象');
+    }
+
+    const out = {};
+    for (const [k, v] of Object.entries(raw)) {
+        if (!PLATFORM_KEYS.has(k)) continue;
+        if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+        out[k] = v;
+    }
+    return out;
+}
+
 function rowToAccount(row = {}) {
     let channelStatus = {};
+    let channelPrdInfo = {};
     try {
         channelStatus = JSON.parse(String(row.channel_status || '{}')) || {};
     } catch {
         channelStatus = {};
     }
+    try {
+        channelPrdInfo = JSON.parse(String(row.channel_prd_info || '{}')) || {};
+    } catch {
+        channelPrdInfo = {};
+    }
     return {
         id: Number(row.id || 0),
         user_id: Number(row.user_id || 0),
         game_account: String(row.game_account || ''),
-        game_name: String(row.game_name || 'WZRY'),
+        account_remark: String(row.account_remark || ''),
+        game_name: canonicalGameName(row.game_name || 'WZRY'),
         channel_status: channelStatus,
+        channel_prd_info: channelPrdInfo,
         modify_date: String(row.modify_date || ''),
         is_deleted: Number(row.is_deleted || 0),
         desc: String(row.desc || '')
     };
+}
+
+async function reorderUserGameAccountColumnsIfNeeded(db) {
+    const expected = [
+        'id',
+        'user_id',
+        'game_account',
+        'account_remark',
+        'game_name',
+        'channel_status',
+        'channel_prd_info',
+        'modify_date',
+        'is_deleted',
+        'desc'
+    ];
+    const actual = await tableColumnNamesInOrder(db, 'user_game_account');
+    if (actual.length === expected.length && actual.every((name, i) => name === expected[i])) {
+        return;
+    }
+
+    await run(db, `ALTER TABLE user_game_account RENAME TO user_game_account_old`);
+    await run(db, `
+        CREATE TABLE user_game_account (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            game_account TEXT NOT NULL,
+            account_remark TEXT NOT NULL DEFAULT '',
+            game_name TEXT NOT NULL DEFAULT 'WZRY',
+            channel_status TEXT NOT NULL DEFAULT '{}',
+            channel_prd_info TEXT NOT NULL DEFAULT '{}',
+            modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            desc TEXT NOT NULL DEFAULT ''
+        )
+    `);
+    await run(db, `
+        INSERT INTO user_game_account
+        (id, user_id, game_account, account_remark, game_name, channel_status, channel_prd_info, modify_date, is_deleted, desc)
+        SELECT
+            id,
+            user_id,
+            game_account,
+            COALESCE(account_remark, ''),
+            COALESCE(game_name, 'WZRY'),
+            COALESCE(channel_status, '{}'),
+            COALESCE(channel_prd_info, '{}'),
+            COALESCE(modify_date, CURRENT_TIMESTAMP),
+            COALESCE(is_deleted, 0),
+            COALESCE(desc, '')
+        FROM user_game_account_old
+    `);
+    await run(db, `DROP TABLE user_game_account_old`);
 }
 
 async function initUserGameAccountDb() {
@@ -87,12 +195,22 @@ async function initUserGameAccountDb() {
                 user_id INTEGER NOT NULL,
                 game_account TEXT NOT NULL,
                 game_name TEXT NOT NULL DEFAULT 'WZRY',
+                account_remark TEXT NOT NULL DEFAULT '',
                 channel_status TEXT NOT NULL DEFAULT '{}',
+                channel_prd_info TEXT NOT NULL DEFAULT '{}',
                 modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 is_deleted INTEGER NOT NULL DEFAULT 0,
                 desc TEXT NOT NULL DEFAULT ''
             )
         `);
+        const cols = await tableColumns(db, 'user_game_account');
+        if (!cols.has('account_remark')) {
+            await run(db, `ALTER TABLE user_game_account ADD COLUMN account_remark TEXT NOT NULL DEFAULT ''`);
+        }
+        if (!cols.has('channel_prd_info')) {
+            await run(db, `ALTER TABLE user_game_account ADD COLUMN channel_prd_info TEXT NOT NULL DEFAULT '{}'`);
+        }
+        await reorderUserGameAccountColumnsIfNeeded(db);
         await run(db, `
             CREATE UNIQUE INDEX IF NOT EXISTS uq_user_game_account_alive
             ON user_game_account(user_id, game_name, game_account, is_deleted)
@@ -101,8 +219,73 @@ async function initUserGameAccountDb() {
             CREATE INDEX IF NOT EXISTS idx_user_game_account_user_alive
             ON user_game_account(user_id, is_deleted)
         `);
+        await compactCanonicalGameNames(db);
     } finally {
         db.close();
+    }
+}
+
+function parseJsonObject(raw) {
+    try {
+        const v = JSON.parse(String(raw || '{}')) || {};
+        if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+        return v;
+    } catch {
+        return {};
+    }
+}
+
+async function compactCanonicalGameNames(db) {
+    const rows = await all(db, `
+        SELECT id, user_id, game_account, game_name, account_remark, channel_status, channel_prd_info
+        FROM user_game_account
+        WHERE is_deleted = 0
+        ORDER BY id ASC
+    `);
+
+    const groups = new Map();
+    for (const row of rows) {
+        const gameName = canonicalGameName(row.game_name || 'WZRY');
+        const key = `${Number(row.user_id || 0)}::${gameName}::${String(row.game_account || '').trim()}`;
+        const arr = groups.get(key) || [];
+        arr.push({ ...row, game_name: gameName });
+        groups.set(key, arr);
+    }
+
+    for (const list of groups.values()) {
+        if (!Array.isArray(list) || list.length === 0) continue;
+        const keeper = list[list.length - 1];
+        let mergedStatus = {};
+        let mergedPrdInfo = {};
+        let accountRemark = '';
+        for (const row of list) {
+            mergedStatus = { ...mergedStatus, ...parseJsonObject(row.channel_status) };
+            mergedPrdInfo = { ...mergedPrdInfo, ...parseJsonObject(row.channel_prd_info) };
+            const remark = String(row.account_remark || '').trim();
+            if (remark) accountRemark = remark;
+        }
+
+        for (const row of list) {
+            if (Number(row.id) === Number(keeper.id)) continue;
+            await run(db, `
+                UPDATE user_game_account
+                SET is_deleted = 1, modify_date = ?, desc = ?
+                WHERE id = ?
+            `, [nowText(), 'dedupe by canonical game_name', Number(row.id)]);
+        }
+
+        await run(db, `
+            UPDATE user_game_account
+            SET game_name = ?, account_remark = ?, channel_status = ?, channel_prd_info = ?, modify_date = ?
+            WHERE id = ?
+        `, [
+            keeper.game_name,
+            accountRemark,
+            JSON.stringify(mergedStatus),
+            JSON.stringify(mergedPrdInfo),
+            nowText(),
+            Number(keeper.id)
+        ]);
     }
 }
 
@@ -110,8 +293,10 @@ async function upsertUserGameAccount(input = {}) {
     await initUserGameAccountDb();
     const userId = Number(input.user_id || 0);
     const gameAccount = String(input.game_account || '').trim();
-    const gameName = String(input.game_name || 'WZRY').trim() || 'WZRY';
+    const gameName = canonicalGameName(String(input.game_name || 'WZRY').trim() || 'WZRY');
+    const accountRemark = String(input.account_remark || '').trim();
     const nextStatus = normalizeStatusJson(input.channel_status || {});
+    const nextPrdInfo = normalizePrdInfoJson(input.channel_prd_info || {});
     const desc = String(input.desc || '').trim();
 
     if (!userId) throw new Error('user_id 不合法');
@@ -128,22 +313,30 @@ async function upsertUserGameAccount(input = {}) {
         if (!row) {
             await run(db, `
                 INSERT INTO user_game_account
-                (user_id, game_account, game_name, channel_status, modify_date, is_deleted, desc)
-                VALUES (?, ?, ?, ?, ?, 0, ?)
-            `, [userId, gameAccount, gameName, JSON.stringify(nextStatus), nowText(), desc]);
+                (user_id, game_account, account_remark, game_name, channel_status, channel_prd_info, modify_date, is_deleted, desc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+            `, [userId, gameAccount, accountRemark, gameName, JSON.stringify(nextStatus), JSON.stringify(nextPrdInfo), nowText(), desc]);
         } else {
-            let current = {};
+            let currentStatus = {};
+            let currentPrdInfo = {};
             try {
-                current = JSON.parse(String(row.channel_status || '{}')) || {};
+                currentStatus = JSON.parse(String(row.channel_status || '{}')) || {};
             } catch {
-                current = {};
+                currentStatus = {};
             }
-            const merged = { ...current, ...nextStatus };
+            try {
+                currentPrdInfo = JSON.parse(String(row.channel_prd_info || '{}')) || {};
+            } catch {
+                currentPrdInfo = {};
+            }
+            const mergedStatus = { ...currentStatus, ...nextStatus };
+            const mergedPrdInfo = { ...currentPrdInfo, ...nextPrdInfo };
+            const mergedRemark = accountRemark || String(row.account_remark || '');
             await run(db, `
                 UPDATE user_game_account
-                SET channel_status = ?, modify_date = ?, desc = ?
+                SET account_remark = ?, channel_status = ?, channel_prd_info = ?, modify_date = ?, desc = ?
                 WHERE id = ?
-            `, [JSON.stringify(merged), nowText(), desc || String(row.desc || ''), row.id]);
+            `, [mergedRemark, JSON.stringify(mergedStatus), JSON.stringify(mergedPrdInfo), nowText(), desc || String(row.desc || ''), row.id]);
         }
 
         const updated = await get(db, `
@@ -166,17 +359,22 @@ async function clearPlatformStatusForUser(userId, platform) {
 
     const db = openDatabase();
     try {
-        const rows = await all(db, `SELECT id, channel_status FROM user_game_account WHERE user_id = ? AND is_deleted = 0`, [uid]);
+        const rows = await all(db, `SELECT id, channel_status, channel_prd_info FROM user_game_account WHERE user_id = ? AND is_deleted = 0`, [uid]);
         for (const row of rows) {
             let status = {};
+            let prdInfo = {};
             try { status = JSON.parse(String(row.channel_status || '{}')) || {}; } catch { status = {}; }
-            if (!(key in status)) continue;
-            delete status[key];
+            try { prdInfo = JSON.parse(String(row.channel_prd_info || '{}')) || {}; } catch { prdInfo = {}; }
+            const hasStatus = key in status;
+            const hasPrdInfo = key in prdInfo;
+            if (!hasStatus && !hasPrdInfo) continue;
+            if (hasStatus) delete status[key];
+            if (hasPrdInfo) delete prdInfo[key];
             await run(db, `
                 UPDATE user_game_account
-                SET channel_status = ?, modify_date = ?
+                SET channel_status = ?, channel_prd_info = ?, modify_date = ?
                 WHERE id = ?
-            `, [JSON.stringify(status), nowText(), row.id]);
+            `, [JSON.stringify(status), JSON.stringify(prdInfo), nowText(), row.id]);
         }
     } finally {
         db.close();

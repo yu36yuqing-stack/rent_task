@@ -5,8 +5,7 @@ const {
     getActiveBlacklist,
     upsertBlacklistEntry,
     removeBlacklistEntry,
-    exportBlacklistToFile,
-    ensureBlacklistSyncedFromFile
+    exportBlacklistToFile
 } = require('../database/blacklist_db');
 
 const TASK_DIR = path.resolve(__dirname, '..');
@@ -31,7 +30,7 @@ async function main() {
 
     if (cmd === 'help') {
         console.log('Usage:');
-        console.log('  node api/blacklist_api.js sync-file');
+        console.log('  node api/blacklist_api.js sync-file (disabled)');
         console.log('  node api/blacklist_api.js list');
         console.log('  node api/blacklist_api.js upsert --account 123 --remark 名称 --reason 原因 --create_time "2026-02-12 12:00" --action off');
         console.log('  node api/blacklist_api.js remove --account 123');
@@ -40,12 +39,11 @@ async function main() {
     }
 
     if (cmd === 'sync-file') {
-        const r = await ensureBlacklistSyncedFromFile(BLACKLIST_FILE, {
-            source: String(args.source || 'openclaw_telegram'),
-            operator: String(args.operator || 'openclaw'),
-            desc: String(args.desc || 'telegram change sync')
-        });
-        console.log(JSON.stringify({ ok: true, command: cmd, ...r }));
+        console.log(JSON.stringify({
+            ok: false,
+            command: cmd,
+            error: 'sync-file disabled: 现阶段不再从文件加载黑名单'
+        }));
         return;
     }
 
@@ -96,4 +94,3 @@ main().catch((err) => {
     console.error(JSON.stringify({ ok: false, error: err.message }));
     process.exit(1);
 });
-

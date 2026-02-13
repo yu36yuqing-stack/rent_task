@@ -1,20 +1,33 @@
 // 租号王 API 模块 (zuhaowan_api.js)
 const { exec } = require('child_process');
 
-const TOKEN_GET = '7C1myCgHfwGQr8M3kOzp12kJ+ywIEaAaLcSEqWhpTlxpAEjoQpIRnEMa8DtSU8kYh/HwH2uHezdhjI1uxKkKeA==';
-const TOKEN_POST = '7C1myCgHfwGQr8M3kOzp1/w2TS+3Q0LmMDaxxsQ5BJSps5p83XRFFgjRecXb9oEG2Vx2rjV3Pw0aq5dlCSfldw==';
-const DEVICE_ID = 'b1e4d7ab291044b7b6167ce9bde98b5f';
-const PACKAGE_NAME = 'com.duodian.freehire';
+const DEFAULT_SOURCE = 'android';
+
+function resolveAuth(auth = {}) {
+    const cfg = {
+        token_get: String(auth.token_get || '').trim(),
+        token_post: String(auth.token_post || '').trim(),
+        device_id: String(auth.device_id || '').trim(),
+        package_name: String(auth.package_name || '').trim(),
+        source: String(auth.source || DEFAULT_SOURCE).trim() || DEFAULT_SOURCE
+    };
+    if (!cfg.token_get) throw new Error('zuhaowang token_get 未配置');
+    if (!cfg.token_post) throw new Error('zuhaowang token_post 未配置');
+    if (!cfg.device_id) throw new Error('zuhaowang device_id 未配置');
+    if (!cfg.package_name) throw new Error('zuhaowang package_name 未配置');
+    return cfg;
+}
 
 // Curl 封装
-function curlRequest(url, method, data = null, token) {
+function curlRequest(url, method, data = null, token, auth = {}) {
+    const cfg = resolveAuth(auth);
     return new Promise((resolve, reject) => {
         let cmd = `curl -s -X ${method} '${url}'`;
         // Headers
         cmd += ` -H 'token: ${token}'`;
-        cmd += ` -H 'deviceid: ${DEVICE_ID}'`;
-        cmd += ` -H 'packagename: ${PACKAGE_NAME}'`;
-        cmd += ` -H 'source: android'`;
+        cmd += ` -H 'deviceid: ${cfg.device_id}'`;
+        cmd += ` -H 'packagename: ${cfg.package_name}'`;
+        cmd += ` -H 'source: ${cfg.source}'`;
         
         if (data) {
             cmd += ` -H 'content-type: application/json; charset=UTF-8'`;
@@ -38,9 +51,10 @@ function curlRequest(url, method, data = null, token) {
 }
 
 // 获取商品列表
-async function getGoodsList() {
+async function getGoodsList(auth = {}) {
+    const cfg = resolveAuth(auth);
     const url = 'https://api-game.duodian.cn/api/accountManage/getManageList?gameId&sort=0&status=0';
-    const res = await curlRequest(url, 'GET', null, TOKEN_GET);
+    const res = await curlRequest(url, 'GET', null, cfg.token_get, cfg);
     
     if (!res || res.code !== '0') {
         throw new Error(res ? res.desc : 'API Error');
@@ -73,7 +87,8 @@ async function getGoodsList() {
 
 // 变更状态
 // type: 1=上架, 2=下架
-async function changeStatus(accountNo, gameId, type) {
+async function changeStatus(accountNo, gameId, type, auth = {}) {
+    const cfg = resolveAuth(auth);
     const url = 'https://api-game.duodian.cn/api/accountManage/changeStatus';
     const payload = { 
         "accountNo": String(accountNo), 
@@ -82,7 +97,7 @@ async function changeStatus(accountNo, gameId, type) {
     };
     
     // Retry logic if needed, but for now simple call
-    const res = await curlRequest(url, 'POST', payload, TOKEN_POST);
+    const res = await curlRequest(url, 'POST', payload, cfg.token_post, cfg);
     
     if (res && res.code === '0') {
         return true;

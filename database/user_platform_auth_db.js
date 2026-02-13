@@ -1,9 +1,23 @@
 const crypto = require('crypto');
 const { openDatabase } = require('./sqlite_client');
 
-const PLATFORMS = new Set(['zuhaowang', 'uhaozu', 'youyouzuhao']);
+const PLATFORMS = new Set(['zuhaowang', 'uhaozu', 'uuzuhao']);
 const AUTH_TYPES = new Set(['cookie', 'token', 'session']);
 const AUTH_STATUS = new Set(['valid', 'expired', 'revoked']);
+const PLATFORM_AUTH_RULES = {
+    zuhaowang: {
+        types: new Set(['token']),
+        requiredKeys: ['token_get', 'token_post', 'device_id', 'package_name']
+    },
+    uhaozu: {
+        types: new Set(['cookie']),
+        requiredKeys: ['cookie']
+    },
+    uuzuhao: {
+        types: new Set(['token']),
+        requiredKeys: ['app_key', 'app_secret']
+    }
+};
 
 function nowText() {
     const d = new Date();
@@ -56,32 +70,42 @@ function normalizeAuthStatus(value) {
     return status;
 }
 
-function normalizeAuthPayload(payload) {
-    if (payload === undefined || payload === null || payload === '') return '{}';
+function parseAuthPayload(payload) {
+    if (payload === undefined || payload === null || payload === '') return {};
     if (typeof payload === 'string') {
         try {
-            const parsed = JSON.parse(payload);
-            return JSON.stringify(parsed || {});
+            return JSON.parse(payload) || {};
         } catch {
             throw new Error('auth_payload 必须是合法 JSON');
         }
     }
-    if (typeof payload === 'object') return JSON.stringify(payload);
+    if (typeof payload === 'object' && !Array.isArray(payload)) return payload;
     throw new Error('auth_payload 必须是 JSON 对象或 JSON 字符串');
+}
+
+function ensureNonEmptyStringField(obj, key) {
+    const value = String((obj || {})[key] || '').trim();
+    return value.length > 0;
+}
+
+function validatePlatformAuth(platform, authType, payloadObj) {
+    const rule = PLATFORM_AUTH_RULES[platform];
+    if (!rule) return;
+
+    if (!rule.types.has(authType)) {
+        throw new Error(`${platform} 仅支持 auth_type=${Array.from(rule.types).join('/')}`);
+    }
+
+    for (const key of rule.requiredKeys) {
+        if (!ensureNonEmptyStringField(payloadObj, key)) {
+            throw new Error(`${platform} 缺少必要凭据字段: ${key}`);
+        }
+    }
 }
 
 function getAesKey() {
     const raw = String(process.env.AUTH_PAYLOAD_AES_KEY || 'rent_task_default_auth_key_change_me').trim();
     return crypto.createHash('sha256').update(raw, 'utf8').digest();
-}
-
-function encryptText(plainText) {
-    const iv = crypto.randomBytes(12);
-    const key = getAesKey();
-    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-    const encrypted = Buffer.concat([cipher.update(String(plainText), 'utf8'), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    return `v1:${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
 }
 
 function decryptText(token) {
@@ -97,6 +121,43 @@ function decryptText(token) {
     decipher.setAuthTag(tag);
     const plain = Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
     return plain;
+}
+
+function parseStoredPayload(rawPayload) {
+    const raw = String(rawPayload || '');
+    if (!raw) return {};
+    if (raw.startsWith('v1:')) {
+        try {
+            const plain = decryptText(raw);
+            return JSON.parse(plain);
+        } catch {
+            return null;
+        }
+    }
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+}
+
+async function migrateAuthPayloadToPlaintext(db) {
+    const rows = await all(db, `
+        SELECT id, auth_payload
+        FROM user_platform_auth
+        WHERE is_deleted = 0
+          AND auth_payload LIKE 'v1:%'
+    `);
+
+    for (const row of rows) {
+        const parsed = parseStoredPayload(row.auth_payload);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+        await run(db, `
+            UPDATE user_platform_auth
+            SET auth_payload = ?, modify_date = ?
+            WHERE id = ?
+        `, [JSON.stringify(parsed), nowText(), Number(row.id)]);
+    }
 }
 
 function isExpired(expireAt) {
@@ -121,12 +182,7 @@ function rowToAuth(row = {}, options = {}) {
     };
 
     if (options.with_payload === true) {
-        try {
-            const plain = decryptText(String(row.auth_payload || ''));
-            out.auth_payload = JSON.parse(plain);
-        } catch {
-            out.auth_payload = null;
-        }
+        out.auth_payload = parseStoredPayload(row.auth_payload);
     }
     return out;
 }
@@ -156,6 +212,7 @@ async function initUserPlatformAuthDb() {
             CREATE INDEX IF NOT EXISTS idx_user_platform_auth_status
             ON user_platform_auth(user_id, auth_status, is_deleted)
         `);
+        await migrateAuthPayloadToPlaintext(db);
     } finally {
         db.close();
     }
@@ -167,13 +224,14 @@ async function upsertUserPlatformAuth(input = {}) {
     const platform = normalizePlatform(input.platform);
     const authType = normalizeAuthType(input.auth_type);
     const authStatus = normalizeAuthStatus(input.auth_status || 'valid');
-    const authPayload = normalizeAuthPayload(input.auth_payload);
+    const authPayloadObj = parseAuthPayload(input.auth_payload);
     const expireAt = String(input.expire_at || '').trim();
     const desc = String(input.desc || '').trim();
 
     if (!userId) throw new Error('user_id 不合法');
+    validatePlatformAuth(platform, authType, authPayloadObj);
 
-    const encrypted = encryptText(authPayload);
+    const plainPayload = JSON.stringify(authPayloadObj);
     const db = openDatabase();
     try {
         const row = await get(db, `
@@ -187,13 +245,13 @@ async function upsertUserPlatformAuth(input = {}) {
                 INSERT INTO user_platform_auth
                 (user_id, platform, auth_type, auth_payload, auth_status, expire_at, modify_date, is_deleted, desc)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
-            `, [userId, platform, authType, encrypted, authStatus, expireAt, nowText(), desc]);
+            `, [userId, platform, authType, plainPayload, authStatus, expireAt, nowText(), desc]);
         } else {
             await run(db, `
                 UPDATE user_platform_auth
                 SET auth_type = ?, auth_payload = ?, auth_status = ?, expire_at = ?, modify_date = ?, desc = ?
                 WHERE id = ?
-            `, [authType, encrypted, authStatus, expireAt, nowText(), desc, row.id]);
+            `, [authType, plainPayload, authStatus, expireAt, nowText(), desc, row.id]);
         }
 
         const updated = await get(db, `

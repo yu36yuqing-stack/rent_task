@@ -75,3 +75,36 @@ bash /Users/mac/.openclaw/scripts/trigger_rent_smart.sh --now
   2. `cd rent_task && npm ci`
   3. `bash /Users/mac/.openclaw/scripts/trigger_rent_smart.sh --now` 验证
   4. 保持 LaunchAgent 持续调度
+
+### 密码模式一键同步（已打通）
+
+适用于当前远端：
+- 主机：`mac@139.196.84.63`
+- 端口：`3333`
+- 目录：`/Users/mac/.openclaw/workspace/rent_task/`
+
+仓库内已提供脚本：`scripts/sync_remote_password.sh`
+
+执行方式（覆盖同步 + 关键文件哈希校验）：
+
+```bash
+cd /Users/rs/Downloads/Code/rent_task
+REMOTE_SSH_PASS='你的SSH密码' bash scripts/sync_remote_password.sh
+```
+
+脚本行为：
+- 使用 `rsync --delete` 覆盖远端目录（排除 `.git`、`node_modules`、`.DS_Store`）。
+- 同步后自动对比以下文件的本地/远端 `shasum`：
+  - `database/user_blacklist_db.js`
+  - `report/report_rent_status.js`
+  - `rent_robot_main.js`
+- 输出 `[OK] 哈希一致，远端已与本地同步` 即表示同步成功。
+
+安全建议：
+- 不要把明文密码写入仓库；仅通过环境变量 `REMOTE_SSH_PASS` 临时传入。
+- 长期建议改为 SSH Key 免密登录，减少密码链路维护成本。
+
+### TODO（准确性 vs 风控）
+
+- 当前主流程已暂时关闭“执行上下架后立即二次全量拉取”的逻辑，以降低请求频次和风控风险。
+- 后续待设计并实现：在不明显增加调用次数的前提下，提升通知状态准确性（例如仅对成功动作做增量校验、延迟抽样复核、失败动作不触发回拉）。

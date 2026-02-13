@@ -8,6 +8,8 @@ function shortState(s) {
         .replace('下架', '下');
 }
 
+const REPORT_VERSION = 'v1.0.3';
+
 function pickIcon(acc) {
     const y = acc.youpin;
     const u = acc.uhaozu;
@@ -27,8 +29,11 @@ function buildDingdingMessage(payload) {
         return payload?.message || '⚠️ 暂无状态数据 (任务可能未运行)';
     }
 
+    const owner = String(payload?.report_owner || '').trim();
+    const title = owner ? `${owner} 租号状态汇报` : '租号状态汇报';
+
     const lines = [];
-    lines.push(`📊 租号状态汇报 ${payload.hhmm}`);
+    lines.push(`📊 ${title} ${payload.hhmm}`);
 
     const actions = Array.isArray(payload.recentActions) ? payload.recentActions : [];
     lines.push('🛠️ 近1小时自动操作');
@@ -47,13 +52,16 @@ function buildDingdingMessage(payload) {
         const u = shortState(acc.uhaozu);
         const z = shortState(acc.zuhaowan);
         const icon = pickIcon(acc);
+        const onlineTag = String(acc.online_tag || '').trim();
+        const onlineBadge = onlineTag ? `(${onlineTag})` : '';
         const tag = acc.suffix ? ` ${acc.suffix.replace(/[()]/g, '')}` : '';
         const hint = String(acc.hint || '');
-        lines.push(`${icon} ${acc.remark || acc.account} Y${y}/U${u}/Z${z}${tag}${hint}`);
+        lines.push(`${icon}${onlineBadge} ${acc.remark || acc.account} Y${y}/U${u}/Z${z}${tag}${hint}`);
     });
 
     lines.push('');
     lines.push(payload.allNormal ? '✅ 所有状态正常 (三方一致或无冲突)' : '⚠️ 检测到待修复状态');
+    lines.push(`版本: ${REPORT_VERSION}`);
     return lines.join('\n');
 }
 
