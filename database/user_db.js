@@ -9,6 +9,9 @@ const USER_STATUS_DISABLED = 'disabled';
 
 const ALLOWED_USER_TYPES = new Set([USER_TYPE_ADMIN, USER_TYPE_INTERNAL, USER_TYPE_EXTERNAL]);
 const ALLOWED_STATUS = new Set([USER_STATUS_ENABLED, USER_STATUS_DISABLED]);
+const DEFAULT_USER_SWITCH = Object.freeze({
+    order_3_off: true
+});
 
 function nowText() {
     const d = new Date();
@@ -78,6 +81,28 @@ function normalizeNotifyConfig(input) {
     throw new Error('notify_config 必须是 JSON 对象或 JSON 字符串');
 }
 
+function normalizeUserSwitch(input) {
+    if (input === undefined || input === null || input === '') {
+        return JSON.stringify(DEFAULT_USER_SWITCH);
+    }
+    let raw = input;
+    if (typeof raw === 'string') {
+        try {
+            raw = JSON.parse(raw);
+        } catch {
+            throw new Error('switch 必须是合法 JSON');
+        }
+    }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        throw new Error('switch 必须是 JSON 对象');
+    }
+    return JSON.stringify({
+        ...DEFAULT_USER_SWITCH,
+        ...raw,
+        order_3_off: raw.order_3_off === undefined ? true : Boolean(raw.order_3_off)
+    });
+}
+
 function hashPassword(rawPassword) {
     const salt = crypto.randomBytes(16).toString('hex');
     const hashed = crypto.pbkdf2Sync(String(rawPassword), salt, 120000, 32, 'sha256').toString('hex');
@@ -96,6 +121,18 @@ function verifyPassword(rawPassword, encoded) {
 }
 
 function rowToPublicUser(row = {}) {
+    const userSwitch = (() => {
+        try {
+            const parsed = JSON.parse(String(row.switch || '{}')) || {};
+            return {
+                ...DEFAULT_USER_SWITCH,
+                ...parsed,
+                order_3_off: parsed.order_3_off === undefined ? true : Boolean(parsed.order_3_off)
+            };
+        } catch {
+            return { ...DEFAULT_USER_SWITCH };
+        }
+    })();
     return {
         id: Number(row.id || 0),
         account: String(row.account || ''),
@@ -109,6 +146,7 @@ function rowToPublicUser(row = {}) {
             }
         })(),
         user_type: String(row.user_type || USER_TYPE_EXTERNAL),
+        switch: userSwitch,
         status: String(row.status || USER_STATUS_ENABLED),
         last_login_at: String(row.last_login_at || ''),
         modify_date: String(row.modify_date || ''),
@@ -129,6 +167,7 @@ async function initUserDb() {
                 phone TEXT DEFAULT '',
                 notify_config TEXT DEFAULT '{}',
                 user_type TEXT DEFAULT '外部',
+                switch TEXT DEFAULT '{"order_3_off":true}',
                 create_date TEXT DEFAULT CURRENT_TIMESTAMP,
                 status TEXT NOT NULL DEFAULT 'enabled',
                 last_login_at TEXT DEFAULT '',
@@ -141,6 +180,9 @@ async function initUserDb() {
         const cols = await tableColumns(db, 'user');
         if (!cols.has('status')) {
             await run(db, `ALTER TABLE user ADD COLUMN status TEXT NOT NULL DEFAULT 'enabled'`);
+        }
+        if (!cols.has('switch')) {
+            await run(db, `ALTER TABLE user ADD COLUMN switch TEXT DEFAULT '{"order_3_off":true}'`);
         }
         if (!cols.has('last_login_at')) {
             await run(db, `ALTER TABLE user ADD COLUMN last_login_at TEXT DEFAULT ''`);
@@ -169,6 +211,7 @@ async function createUserByAdmin(input = {}) {
     const name = String(input.name || '').trim();
     const phone = String(input.phone || '').trim();
     const notifyConfig = normalizeNotifyConfig(input.notify_config);
+    const userSwitch = normalizeUserSwitch(input.switch);
     const userType = normalizeUserType(input.user_type);
     const status = normalizeUserStatus(input.status || USER_STATUS_ENABLED);
     const desc = String(input.desc || '').trim();
@@ -186,9 +229,9 @@ async function createUserByAdmin(input = {}) {
         const encodedPassword = hashPassword(rawPassword);
         await run(db, `
             INSERT INTO user
-            (account, password, name, phone, notify_config, user_type, status, last_login_at, modify_date, is_deleted, desc)
-            VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, 0, ?)
-        `, [account, encodedPassword, name, phone, notifyConfig, userType, status, nowText(), desc]);
+            (account, password, name, phone, notify_config, user_type, switch, status, last_login_at, modify_date, is_deleted, desc)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, 0, ?)
+        `, [account, encodedPassword, name, phone, notifyConfig, userType, userSwitch, status, nowText(), desc]);
 
         const row = await get(db, `SELECT * FROM user WHERE account = ? AND is_deleted = 0`, [account]);
         return rowToPublicUser(row);
@@ -240,6 +283,50 @@ async function touchUserLastLogin(userId) {
     }
 }
 
+async function updateUserSwitchByUserId(userId, switchPatch = {}, desc = '') {
+    await initUserDb();
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+
+    const db = openDatabase();
+    try {
+        const row = await get(db, `SELECT id, switch FROM user WHERE id = ? AND is_deleted = 0`, [uid]);
+        if (!row) throw new Error('用户不存在');
+        let current = {};
+        try { current = JSON.parse(String(row.switch || '{}')) || {}; } catch { current = {}; }
+
+        let patchObj = switchPatch;
+        if (typeof patchObj === 'string') {
+            try {
+                patchObj = JSON.parse(patchObj);
+            } catch {
+                throw new Error('switch_patch 必须是合法 JSON');
+            }
+        }
+        if (!patchObj || typeof patchObj !== 'object' || Array.isArray(patchObj)) {
+            throw new Error('switch_patch 必须是 JSON 对象');
+        }
+
+        const merged = {
+            ...DEFAULT_USER_SWITCH,
+            ...current,
+            ...patchObj,
+            order_3_off: patchObj.order_3_off === undefined
+                ? (current.order_3_off === undefined ? true : Boolean(current.order_3_off))
+                : Boolean(patchObj.order_3_off)
+        };
+        await run(db, `
+            UPDATE user
+            SET switch = ?, modify_date = ?, desc = ?
+            WHERE id = ? AND is_deleted = 0
+        `, [JSON.stringify(merged), nowText(), String(desc || ''), uid]);
+        const updated = await get(db, `SELECT * FROM user WHERE id = ? AND is_deleted = 0`, [uid]);
+        return rowToPublicUser(updated);
+    } finally {
+        db.close();
+    }
+}
+
 async function verifyUserLogin(account, rawPassword) {
     await initUserDb();
     const target = String(account || '').trim();
@@ -285,5 +372,6 @@ module.exports = {
     getActiveUserById,
     verifyUserLogin,
     touchUserLastLogin,
+    updateUserSwitchByUserId,
     listActiveUsers
 };

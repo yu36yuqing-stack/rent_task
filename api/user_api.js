@@ -4,6 +4,7 @@ const {
     createUserByAdmin,
     verifyUserLogin,
     listActiveUsers,
+    updateUserSwitchByUserId,
     USER_TYPE_ADMIN
 } = require('../database/user_db');
 const { initUserGameAccountDb, listUserGameAccounts } = require('../database/user_game_account_db');
@@ -174,6 +175,29 @@ async function cmdAccountsList(args) {
     return { ok: true, command: 'accounts-list', ...rows };
 }
 
+async function cmdUserSwitchSet(args) {
+    await initAll();
+    const { user } = await requireAccessToken(args);
+    const targetUserId = Number(args.user_id || user.id || 0);
+    const isAdmin = String(user.user_type || '') === USER_TYPE_ADMIN;
+    if (!targetUserId) throw new Error('user_id 非法');
+    if (!isAdmin && targetUserId !== Number(user.id)) {
+        throw new Error('仅管理员可修改其他用户开关');
+    }
+
+    let patch = args.switch_patch;
+    if (!patch) {
+        if (args.order_3_off === undefined) {
+            throw new Error('请提供 switch_patch 或 order_3_off');
+        }
+        patch = JSON.stringify({
+            order_3_off: toBool(args.order_3_off)
+        });
+    }
+    const updated = await updateUserSwitchByUserId(targetUserId, patch, String(args.desc || 'update user switch'));
+    return { ok: true, command: 'user-switch-set', user: updated };
+}
+
 function printHelp() {
     console.log('Usage:');
     console.log('  node api/user_api.js init-db');
@@ -186,6 +210,7 @@ function printHelp() {
     console.log('  node api/user_api.js platform-auth-list --access_token <token> [--with_payload true]');
     console.log('  node api/user_api.js accounts-sync --access_token <token>');
     console.log('  node api/user_api.js accounts-list --access_token <token> [--page 1 --page_size 50]');
+    console.log('  node api/user_api.js user-switch-set --access_token <token> [--user_id 7] --order_3_off true|false');
     console.log('');
     console.log('Notes:');
     console.log('  1) create-user 支持引导模式：不带 actor_access_token 时允许直接创建首批账号。');
@@ -212,6 +237,7 @@ async function main() {
     else if (cmd === 'platform-auth-list') result = await cmdPlatformAuthList(args);
     else if (cmd === 'accounts-sync') result = await cmdAccountsSync(args);
     else if (cmd === 'accounts-list') result = await cmdAccountsList(args);
+    else if (cmd === 'user-switch-set') result = await cmdUserSwitchSet(args);
     else throw new Error(`unknown command: ${cmd}`);
 
     console.log(JSON.stringify(result, null, 2));

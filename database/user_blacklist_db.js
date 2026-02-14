@@ -259,6 +259,31 @@ async function listUserBlacklistByUser(userId) {
     }
 }
 
+async function listUserBlacklistByUserWithMeta(userId) {
+    await initUserBlacklistDb();
+    const uid = normalizeUserId(userId);
+    if (!uid) return [];
+    const db = openDatabase();
+    try {
+        const rows = await all(db, `
+            SELECT game_account, remark, reason, create_date, modify_date, desc
+            FROM user_blacklist
+            WHERE user_id = ? AND is_deleted = 0
+            ORDER BY id ASC
+        `, [uid]);
+        return rows.map((row) => ({
+            game_account: String(row.game_account || '').trim(),
+            remark: String(row.remark || '').trim(),
+            reason: String(row.reason || '').trim(),
+            create_date: String(row.create_date || '').trim(),
+            modify_date: String(row.modify_date || '').trim(),
+            desc: String(row.desc || '').trim()
+        })).filter((x) => x.game_account);
+    } finally {
+        db.close();
+    }
+}
+
 async function upsertUserBlacklistEntry(userId, entry, opts = {}) {
     await initUserBlacklistDb();
     const uid = normalizeUserId(userId);
@@ -267,6 +292,7 @@ async function upsertUserBlacklistEntry(userId, entry, opts = {}) {
     const source = String(opts.source || 'api').trim();
     const operator = String(opts.operator || 'system').trim();
     const desc = String(opts.desc || '').trim();
+    const customCreateDate = String(opts.create_date || '').trim();
     const normalized = normalizeBlacklistEntry(entry);
     if (!normalized.game_account) throw new Error('game_account 不能为空');
 
@@ -284,18 +310,34 @@ async function upsertUserBlacklistEntry(userId, entry, opts = {}) {
             const finalRemark = roleName || normalized.remark || String((oldRow && oldRow.remark) || '').trim();
 
             if (oldRow) {
-                await run(db, `
-                    UPDATE user_blacklist
-                    SET remark = ?, reason = ?, modify_date = ?, desc = ?, is_deleted = 0
-                    WHERE user_id = ? AND game_account = ? AND is_deleted = 0
-                `, [
-                    finalRemark,
-                    normalized.reason,
-                    now,
-                    desc,
-                    uid,
-                    normalized.game_account
-                ]);
+                if (customCreateDate) {
+                    await run(db, `
+                        UPDATE user_blacklist
+                        SET remark = ?, reason = ?, create_date = ?, modify_date = ?, desc = ?, is_deleted = 0
+                        WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+                    `, [
+                        finalRemark,
+                        normalized.reason,
+                        customCreateDate,
+                        now,
+                        desc,
+                        uid,
+                        normalized.game_account
+                    ]);
+                } else {
+                    await run(db, `
+                        UPDATE user_blacklist
+                        SET remark = ?, reason = ?, modify_date = ?, desc = ?, is_deleted = 0
+                        WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+                    `, [
+                        finalRemark,
+                        normalized.reason,
+                        now,
+                        desc,
+                        uid,
+                        normalized.game_account
+                    ]);
+                }
             } else {
                 await run(db, `
                     INSERT INTO user_blacklist
@@ -306,7 +348,7 @@ async function upsertUserBlacklistEntry(userId, entry, opts = {}) {
                     normalized.game_account,
                     finalRemark,
                     normalized.reason,
-                    now,
+                    customCreateDate || now,
                     now,
                     desc
                 ]);
@@ -391,10 +433,66 @@ async function removeUserBlacklistEntry(userId, gameAccount, opts = {}) {
     }
 }
 
+async function hardDeleteUserBlacklistEntry(userId, gameAccount, opts = {}) {
+    await initUserBlacklistDb();
+    const uid = normalizeUserId(userId);
+    const acc = String(gameAccount || '').trim();
+    if (!uid) throw new Error('user_id 非法');
+    if (!acc) throw new Error('game_account 不能为空');
+
+    const source = String(opts.source || 'api').trim();
+    const operator = String(opts.operator || 'system').trim();
+    const desc = String(opts.desc || '').trim();
+    const reasonExpected = opts.reason_expected === undefined
+        ? ''
+        : String(opts.reason_expected || '').trim();
+
+    const db = openDatabase();
+    try {
+        return await inTx(db, async () => {
+            const now = nowText();
+            const oldRow = await get(db, `
+                SELECT * FROM user_blacklist
+                WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            `, [uid, acc]);
+            if (!oldRow) return false;
+            if (reasonExpected && String(oldRow.reason || '').trim() !== reasonExpected) {
+                return false;
+            }
+
+            const oldPayload = rowToPublicEntry(oldRow);
+            await run(db, `
+                DELETE FROM user_blacklist
+                WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            `, [uid, acc]);
+
+            await run(db, `
+                INSERT INTO user_blacklist_history
+                (user_id, event_type, game_account, before_data, after_data, source, operator, modify_date, desc)
+                VALUES (?, 'hard_delete', ?, ?, ?, ?, ?, ?, ?)
+            `, [
+                uid,
+                acc,
+                stableJson(oldPayload),
+                stableJson(null),
+                source,
+                operator,
+                now,
+                desc
+            ]);
+            return true;
+        });
+    } finally {
+        db.close();
+    }
+}
+
 module.exports = {
     initUserBlacklistDb,
     listBlacklistedAccountsByUser,
     listUserBlacklistByUser,
+    listUserBlacklistByUserWithMeta,
     upsertUserBlacklistEntry,
-    removeUserBlacklistEntry
+    removeUserBlacklistEntry,
+    hardDeleteUserBlacklistEntry
 };

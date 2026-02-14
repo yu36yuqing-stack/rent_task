@@ -4,12 +4,15 @@ const util = require('util');
 const {
     sendTelegram,
     toReportAccountFromUserGameRow,
+    fillTodayOrderCounts,
+    buildRecentActionsForUser,
     buildPayloadForOneUser,
     notifyUserByPayload
 } = require('./report/report_rent_status.js');
 const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('./database/user_db.js');
 const { syncUserAccountsByAuth, listAllUserGameAccountsByUser, fillOnlineTagsByYouyou } = require('./product/product');
-const { loadUserBlacklistSet } = require('./user/user');
+const { startOrderSyncWorkerIfNeeded } = require('./order/order');
+const { loadUserBlacklistSet, loadUserBlacklistReasonMap } = require('./user/user');
 const { executeUserActionsIfNeeded } = require('./action_engine/action_engine.js');
 
 // ===== 基础目录与运行开关 =====
@@ -21,6 +24,10 @@ const MAIN_LOG_FILE = path.join(LOG_DIR, 'rent_robot_main.log');
 
 const ACTION_READ_ONLY = ['1', 'true', 'yes', 'on'].includes(String(process.env.ACTION_READ_ONLY || 'false').toLowerCase());
 const ACTION_ENABLED = !['0', 'false', 'no', 'off'].includes(String(process.env.ACTION_ENABLE || 'true').toLowerCase());
+const ORDER_ASYNC_ENABLED = !['0', 'false', 'no', 'off'].includes(String(process.env.ORDER_ASYNC_ENABLE || 'true').toLowerCase());
+const ORDER_SYNC_INTERVAL_MIN = Math.max(1, Number(process.env.ORDER_SYNC_INTERVAL_MIN || 30));
+const ORDER_SYNC_WINDOW_SEC = Math.max(0, Number(process.env.ORDER_SYNC_WINDOW_SEC || 90));
+const ORDER_SYNC_FORCE = ['1', 'true', 'yes', 'on'].includes(String(process.env.ORDER_SYNC_FORCE || 'false').toLowerCase());
 
 // 主日志: 保留控制台输出，同时落盘到 log/rent_robot_main.log
 function setupMainLogger() {
@@ -49,6 +56,7 @@ function setupMainLogger() {
 setupMainLogger();
 console.log(`[Boot] rent_robot_main.js 启动 pid=${process.pid} args=${process.argv.slice(2).join(' ') || '(none)'}`);
 console.log(`[Config] ACTION_ENABLE=${ACTION_ENABLED} ACTION_READ_ONLY=${ACTION_READ_ONLY}`);
+console.log(`[Config] ORDER_ASYNC_ENABLE=${ORDER_ASYNC_ENABLED} ORDER_SYNC_INTERVAL_MIN=${ORDER_SYNC_INTERVAL_MIN} ORDER_SYNC_WINDOW_SEC=${ORDER_SYNC_WINDOW_SEC} ORDER_SYNC_FORCE=${ORDER_SYNC_FORCE}`);
 
 process.on('unhandledRejection', (reason) => {
     console.error('[UnhandledRejection]', reason);
@@ -113,6 +121,7 @@ async function runPipeline(runRecord) {
     for (const user of targets) {
         let rows = [];
         let blacklistSet = new Set();
+        let blacklistReasonMap = {};
 
         try {
             console.log(`[User] 开始处理 user_id=${user.id} account=${user.account}`);
@@ -120,6 +129,7 @@ async function runPipeline(runRecord) {
             await syncUserAccountsByAuth(user.id);
             rows = await listAllUserGameAccountsByUser(user.id);
             blacklistSet = await loadUserBlacklistSet(user.id);
+            blacklistReasonMap = await loadUserBlacklistReasonMap(user.id);
 
             // Step 2: 策略计算并执行（ACTION_ENABLE/ACTION_READ_ONLY 控制）
             const actionResult = await executeUserActionsIfNeeded({
@@ -146,10 +156,13 @@ async function runPipeline(runRecord) {
             // }
 
             // Step 4: 组装并发送用户通知（Telegram/Dingding）
-            const accounts = rows.map((r) => toReportAccountFromUserGameRow(r, blacklistSet));
+            const accounts = rows.map((r) => toReportAccountFromUserGameRow(r, blacklistSet, blacklistReasonMap));
+            await fillTodayOrderCounts(user.id, accounts);
             await fillOnlineTagsByYouyou(user, accounts);
+            const recentActions = await buildRecentActionsForUser(user.id, { limit: 8 });
             const payload = buildPayloadForOneUser(accounts, {
-                report_owner: String(user.name || user.account || '').trim()
+                report_owner: String(user.name || user.account || '').trim(),
+                recentActions
             });
 
             const notifyResult = await notifyUserByPayload(user, payload);
@@ -201,6 +214,15 @@ async function runPipeline(runRecord) {
 
     try {
         // 顶层编排入口：执行完整链路
+        startOrderSyncWorkerIfNeeded({
+            enabled: ORDER_ASYNC_ENABLED,
+            interval_min: ORDER_SYNC_INTERVAL_MIN,
+            window_sec: ORDER_SYNC_WINDOW_SEC,
+            force: ORDER_SYNC_FORCE,
+            task_dir: TASK_DIR,
+            run_record: runRecord,
+            logger: console
+        });
         console.log('[Step] 启动用户清单主干（拉取/策略/执行/通知）');
         const route = await runPipeline(runRecord);
         console.log(`[Step] 主流程完成 routed=${route.routed} users=${route.routed_user_count || 0} processed=${route.processed_user_count || 0}`);

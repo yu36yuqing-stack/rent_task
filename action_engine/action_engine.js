@@ -3,8 +3,15 @@ const { buildAuthMap } = require('../user/user');
 const { youpinOffShelf, youpinOnShelf } = require('../uuzuhao/uuzuhao_api');
 const { uhaozuOffShelf, uhaozuOnShelf } = require('../uhaozu/uhaozu_api');
 const { changeStatus: changeZhwStatus } = require('../zuhaowang/zuhaowang_api');
+const { appendProductOnoffHistory } = require('../database/product_onoff_history_db');
+const {
+    RESTRICT_REASON,
+    upsertPlatformRestrict,
+    removePlatformRestrict,
+    listPlatformRestrictByUserAndAccounts
+} = require('../database/user_platform_restrict_db');
 
-function detectConflictsAndBuildSnapshot({ youpinData, uhaozuData, zhwData, blacklistAccounts }) {
+function detectConflictsAndBuildSnapshot({ youpinData, uhaozuData, zhwData, blacklistAccounts, platformRestrictSet = new Set() }) {
     const snapshot = {
         timestamp: Date.now(),
         accounts: []
@@ -64,9 +71,15 @@ function detectConflictsAndBuildSnapshot({ youpinData, uhaozuData, zhwData, blac
                 if (statZ === '上架') actions.push({ type: 'off_z', item: z, reason: `${reasonMsg}，同步下架租号王` });
             } else {
                 // 正常状态下：无租赁，且无系统惩罚 -> 全部上架
-                if (statY === '下架') actions.push({ type: 'on_y', item: { account: acc }, reason: '无租赁，自动补上架悠悠' });
-                if (statU === '下架') actions.push({ type: 'on_u', item: { account: acc }, reason: '无租赁，自动补上架U号租' });
-                if (statZ === '下架') actions.push({ type: 'on_z', item: { account: acc, gameId: z ? z.gameId : 1104466820 }, reason: '无租赁，自动补上架租号王' });
+                if (statY === '下架' && !platformRestrictSet.has(`${acc}::uuzuhao`)) {
+                    actions.push({ type: 'on_y', item: { account: acc }, reason: '无租赁，自动补上架悠悠' });
+                }
+                if (statU === '下架' && !platformRestrictSet.has(`${acc}::uhaozu`)) {
+                    actions.push({ type: 'on_u', item: { account: acc }, reason: '无租赁，自动补上架U号租' });
+                }
+                if (statZ === '下架' && !platformRestrictSet.has(`${acc}::zuhaowang`)) {
+                    actions.push({ type: 'on_z', item: { account: acc, gameId: z ? z.gameId : 1104466820 }, reason: '无租赁，自动补上架租号王' });
+                }
             }
         }
     }
@@ -75,6 +88,7 @@ function detectConflictsAndBuildSnapshot({ youpinData, uhaozuData, zhwData, blac
 }
 
 async function executeActions({
+    user,
     actions,
     runRecord,
     youpinPage,
@@ -100,11 +114,31 @@ async function executeActions({
         try {
             if (readOnly) {
                 runRecord.actions.push({ ...action, time: Date.now(), success: true, skipped: true, mode: 'read_only' });
+                await appendProductOnoffHistory({
+                    user_id: user && user.id,
+                    user_account: user && user.account,
+                    action_type: action.type,
+                    game_account: action.item && action.item.account,
+                    reason: action.reason,
+                    success: true,
+                    skipped: true,
+                    mode: 'read_only',
+                    event_time: Date.now(),
+                    desc: 'sync read_only skip'
+                });
                 console.log(`[Result] 已跳过(只读): ${action.type} -> ${action.item.account}`);
                 continue;
             }
 
             let success = false;
+            let detail = { code: 0, msg: '' };
+            const platform = action.type.endsWith('_y')
+                ? 'uuzuhao'
+                : action.type.endsWith('_u')
+                ? 'uhaozu'
+                : action.type.endsWith('_z')
+                ? 'zuhaowang'
+                : '';
 
             // U号租
             if (action.type === 'off_u') success = await uhaozuOffShelf(uhaozuPage, action.item.account);
@@ -112,7 +146,11 @@ async function executeActions({
 
             // 悠悠租号
             else if (action.type === 'off_y') success = await youpinOffShelf(youpinPage, action.item.account);
-            else if (action.type === 'on_y') success = await youpinOnShelf(youpinPage, action.item.account);
+            else if (action.type === 'on_y') {
+                const out = await youpinOnShelf(youpinPage, action.item.account, { with_detail: true });
+                success = Boolean(out && out.ok);
+                detail = out && typeof out === 'object' ? { code: Number(out.code || 0), msg: String(out.msg || '') } : { code: 0, msg: '' };
+            }
 
             // 租号王 (API)
             else if (action.type === 'off_z') {
@@ -127,9 +165,56 @@ async function executeActions({
 
             if (success) {
                 console.log(`[Result] 成功: ${action.type} -> ${action.item.account}`);
+                if (platform && action.type.startsWith('on_')) {
+                    await removePlatformRestrict(
+                        user && user.id,
+                        action.item && action.item.account,
+                        platform,
+                        'auto clear by on success'
+                    ).catch(() => {});
+                }
                 runRecord.actions.push({ ...action, time: Date.now(), success: true });
+                await appendProductOnoffHistory({
+                    user_id: user && user.id,
+                    user_account: user && user.account,
+                    action_type: action.type,
+                    game_account: action.item && action.item.account,
+                    reason: action.reason,
+                    success: true,
+                    skipped: false,
+                    mode: '',
+                    event_time: Date.now(),
+                    desc: 'sync action success'
+                });
             } else {
                 console.warn(`[Result] 失败: ${action.type} -> ${action.item.account}`);
+                if (platform === 'uuzuhao' && action.type === 'on_y' && Number(detail.code || 0) === 12101012) {
+                    await upsertPlatformRestrict(
+                        user && user.id,
+                        action.item && action.item.account,
+                        'uuzuhao',
+                        {
+                            platform: 'uuzuhao',
+                            code: 12101012,
+                            msg: String(detail.msg || '仅卖家下架状态支持直接上架'),
+                            event_time: Date.now()
+                        },
+                        `platform block code=12101012 msg=${String(detail.msg || '')}`
+                    ).catch(() => {});
+                    await appendProductOnoffHistory({
+                        user_id: user && user.id,
+                        user_account: user && user.account,
+                        action_type: action.type,
+                        platform: 'uuzuhao',
+                        game_account: action.item && action.item.account,
+                        reason: RESTRICT_REASON,
+                        success: false,
+                        skipped: true,
+                        mode: 'platform_restrict',
+                        event_time: Date.now(),
+                        desc: `code=12101012 msg=${String(detail.msg || '')}`
+                    });
+                }
                 runRecord.errors.push(`操作失败: ${action.reason} -> ${action.item.account}`);
             }
         } catch (err) {
@@ -194,11 +279,36 @@ async function executeUserActionsIfNeeded({
     const authRows = await listUserPlatformAuth(user.id, { with_payload: true });
     const authMap = buildAuthMap(authRows);
     const { youpinData, uhaozuData, zhwData } = buildPlatformRowsFromUserAccounts(rows);
+    const accounts = [...new Set((rows || []).map((r) => String((r && r.game_account) || '').trim()).filter(Boolean))];
+    const restrictRows = await listPlatformRestrictByUserAndAccounts(user.id, accounts);
+    const platformRestrictSet = new Set(
+        restrictRows.map((r) => `${String(r.game_account || '').trim()}::${String(r.platform || '').trim()}`).filter(Boolean)
+    );
+
+    // 平台状态已非“下架”时，自动清理限制标记，避免永久冻结。
+    for (const row of rows || []) {
+        const acc = String((row && row.game_account) || '').trim();
+        const st = row && typeof row.channel_status === 'object' ? row.channel_status : {};
+        if (!acc) continue;
+        if (String(st.uuzuhao || '').trim() && String(st.uuzuhao || '').trim() !== '下架' && platformRestrictSet.has(`${acc}::uuzuhao`)) {
+            await removePlatformRestrict(user.id, acc, 'uuzuhao', 'auto clear by status != 下架').catch(() => {});
+            platformRestrictSet.delete(`${acc}::uuzuhao`);
+        }
+        if (String(st.uhaozu || '').trim() && String(st.uhaozu || '').trim() !== '下架' && platformRestrictSet.has(`${acc}::uhaozu`)) {
+            await removePlatformRestrict(user.id, acc, 'uhaozu', 'auto clear by status != 下架').catch(() => {});
+            platformRestrictSet.delete(`${acc}::uhaozu`);
+        }
+        if (String(st.zuhaowang || '').trim() && String(st.zuhaowang || '').trim() !== '下架' && platformRestrictSet.has(`${acc}::zuhaowang`)) {
+            await removePlatformRestrict(user.id, acc, 'zuhaowang', 'auto clear by status != 下架').catch(() => {});
+            platformRestrictSet.delete(`${acc}::zuhaowang`);
+        }
+    }
     const { actions } = detectConflictsAndBuildSnapshot({
         youpinData,
         uhaozuData,
         zhwData,
-        blacklistAccounts: blacklistSet
+        blacklistAccounts: blacklistSet,
+        platformRestrictSet
     });
 
     const requiredPlatforms = new Set();
@@ -217,6 +327,7 @@ async function executeUserActionsIfNeeded({
 
     const runRecord = { actions: [], errors: [] };
     await executeActions({
+        user,
         actions,
         runRecord,
         youpinPage: null,
@@ -229,7 +340,7 @@ async function executeUserActionsIfNeeded({
         youpinOnShelf: (_page, account) => {
             const auth = authMap.uuzuhao;
             if (!auth) return false;
-            return youpinOnShelf(null, account, { auth });
+            return youpinOnShelf(null, account, { auth, with_detail: true });
         },
         uhaozuOffShelf: (_page, account) => {
             const auth = authMap.uhaozu;

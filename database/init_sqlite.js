@@ -2,7 +2,11 @@ const { openDatabase, DB_FILE } = require('./sqlite_client');
 const { initUserDb } = require('./user_db');
 const { initUserGameAccountDb } = require('./user_game_account_db');
 const { initUserPlatformAuthDb } = require('./user_platform_auth_db');
+const { initUserPlatformRestrictDb } = require('./user_platform_restrict_db');
 const { initUserSessionDb } = require('./user_session_db');
+const { initUserRuleDb } = require('./user_rule_db');
+const { initOrderDb } = require('./order_db');
+const { initOrderSyncDb } = require('./order_sync_db');
 
 function run(db, sql, params = []) {
     return new Promise((resolve, reject) => {
@@ -26,7 +30,11 @@ async function main() {
     await initUserDb();
     await initUserGameAccountDb();
     await initUserPlatformAuthDb();
+    await initUserPlatformRestrictDb();
     await initUserSessionDb();
+    await initUserRuleDb();
+    await initOrderDb();
+    await initOrderSyncDb();
 
     const db = openDatabase();
     try {

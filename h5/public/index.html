@@ -1,0 +1,832 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Rent Task H5</title>
+  <style>
+    :root {
+      --bg: #f1f4f9;
+      --ink: #111c2d;
+      --muted: #6d7a8a;
+      --line: #dce3ec;
+      --card: #ffffff;
+      --brand: #0a66c2;
+      --brand-deep: #084d95;
+      --ok: #178a5b;
+      --btn-green-bg: #e9f8f1;
+      --btn-green-border: #c6ead9;
+      --btn-green-text: #2b6b51;
+      --warn: #c78314;
+      --danger: #cc2f47;
+      --shadow: 0 10px 28px rgba(17, 39, 67, 0.1);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 380px at 50% -120px, #d4e6fb 0%, rgba(212, 230, 251, 0) 64%),
+        linear-gradient(180deg, #eef3fa 0%, var(--bg) 34%, #edf2f8 100%);
+      font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 580px;
+      margin: 0 auto;
+      padding: 14px 14px 26px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border-radius: 18px;
+      padding: 16px;
+      margin-bottom: 14px;
+      background: linear-gradient(135deg, #0d5eb9, #0a78d8 62%, #16a8e6);
+      color: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 160px;
+      height: 160px;
+      right: -40px;
+      top: -70px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.18);
+      filter: blur(0.5px);
+    }
+
+    .hero h1 {
+      position: relative;
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: 0.3px;
+    }
+
+    .hero .sub {
+      position: relative;
+      margin-top: 4px;
+      color: rgba(255, 255, 255, 0.88);
+      font-size: 13px;
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: 0 5px 14px rgba(31, 45, 67, 0.06);
+    }
+
+    .login-panel {
+      max-width: 430px;
+      margin: 0 auto;
+    }
+
+    .field { margin-top: 10px; }
+
+    .field label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .field input {
+      width: 100%;
+      border: 1px solid #d3dbe5;
+      border-radius: 12px;
+      padding: 11px 12px;
+      font-size: 16px;
+      background: #fbfdff;
+      outline: none;
+      transition: border-color .2s ease, box-shadow .2s ease;
+    }
+
+    .field input:focus {
+      border-color: #5fa3eb;
+      box-shadow: 0 0 0 3px rgba(36, 127, 226, 0.15);
+    }
+
+    .btn {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform .16s ease, opacity .16s ease;
+    }
+
+    .btn:active { transform: scale(0.985); }
+
+    .btn[disabled] {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      width: 100%;
+      margin-top: 14px;
+      color: var(--btn-green-text);
+      background: linear-gradient(135deg, #eafaf2, #def5ea);
+      border: 1px solid var(--btn-green-border);
+      box-shadow: 0 6px 14px rgba(48, 128, 90, 0.18);
+    }
+
+    .btn-ghost {
+      color: var(--btn-green-text);
+      background: var(--btn-green-bg);
+      border: 1px solid var(--btn-green-border);
+    }
+
+    .btn-ok {
+      color: var(--ok);
+      background: #e9f8f1;
+      border: 1px solid #c6ead9;
+    }
+
+    .btn-danger {
+      color: var(--danger);
+      background: #ffeef1;
+      border: 1px solid #f3c6ce;
+    }
+
+    .error {
+      color: var(--danger);
+      font-size: 12px;
+      min-height: 16px;
+      margin-top: 8px;
+    }
+
+    .hidden { display: none; }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      gap: 10px;
+    }
+
+    .topbar h2 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: .2px;
+    }
+
+    .hello {
+      margin-top: 3px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .filters {
+      margin-bottom: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .filter-tab {
+      cursor: pointer;
+      padding: 9px 10px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #f8fbff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      transition: all .18s ease;
+    }
+
+    .filter-tab.active {
+      border-color: #83b7ec;
+      background: linear-gradient(135deg, #f0f7ff, #e5f1ff);
+      box-shadow: 0 5px 12px rgba(20, 101, 181, 0.12);
+    }
+
+    .filter-tab .num,
+    .filter-tab .txt {
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.2;
+      color: #22384f;
+      margin: 0;
+    }
+
+    .order-total {
+      margin: 0 0 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .list-item {
+      margin-top: 10px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: #fff;
+      padding: 12px;
+      box-shadow: 0 4px 12px rgba(24, 40, 63, 0.06);
+      animation: rise .22s ease both;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 650;
+      max-width: 72%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .account {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      word-break: break-all;
+    }
+
+    .account-row {
+      margin-top: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .copy-btn {
+      border: 1px solid var(--btn-green-border);
+      background: var(--btn-green-bg);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 1;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all .14s ease;
+    }
+
+    .copy-btn:active {
+      transform: scale(0.97);
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 9px;
+      border: 1px solid #d7e0ea;
+      background: #f7fbff;
+      color: #33445a;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .chip-black {
+      color: var(--danger);
+      border-color: #f1c8cf;
+      background: #fff4f6;
+    }
+
+    .meta-grid {
+      margin-top: 9px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .meta {
+      border: 1px solid #e0e7ef;
+      border-radius: 10px;
+      padding: 8px;
+      background: #fcfeff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .meta .k,
+    .meta .v {
+      font-size: 12px;
+      font-weight: 600;
+      color: #22384f;
+      margin: 0;
+      line-height: 1.2;
+    }
+
+    .mode-val {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .info-dot {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 1px solid #b9c8d9;
+      background: #f3f8ff;
+      color: #5a6e84;
+      font-size: 11px;
+      line-height: 14px;
+      text-align: center;
+      cursor: pointer;
+      padding: 0;
+      flex: 0 0 auto;
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(7, 20, 36, 0.42);
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      padding: 14px;
+      z-index: 999;
+    }
+
+    .overlay.hidden { display: none; }
+
+    .overlay-card {
+      width: min(560px, 100%);
+      background: #fff;
+      border-radius: 14px;
+      border: 1px solid #dbe3ec;
+      box-shadow: 0 16px 34px rgba(16, 30, 51, 0.24);
+      overflow: hidden;
+    }
+
+    .overlay-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid #e2e8f0;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .overlay-close {
+      border: 0;
+      background: transparent;
+      color: #6b7f95;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .overlay-body {
+      padding: 12px 14px 16px;
+      font-size: 13px;
+      color: #22384f;
+      line-height: 1.6;
+      word-break: break-all;
+    }
+
+    .platforms {
+      margin-top: 9px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .plat {
+      font-size: 11px;
+      padding: 4px 7px;
+      border-radius: 8px;
+      border: 1px solid #d6e0eb;
+      background: #f4f8fc;
+      color: #2a3b51;
+    }
+
+    .ops {
+      margin-top: 10px;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .btn-chip {
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      line-height: 1;
+      font-weight: 600;
+      border: 1px solid var(--btn-green-border);
+      background: var(--btn-green-bg);
+      color: var(--btn-green-text);
+      box-shadow: 0 2px 6px rgba(25, 42, 66, 0.08);
+      transition: transform .14s ease, box-shadow .14s ease, background .14s ease;
+    }
+
+    .btn-chip:hover {
+      box-shadow: 0 4px 10px rgba(25, 42, 66, 0.14);
+    }
+
+    .btn-chip:active {
+      transform: translateY(1px) scale(0.985);
+    }
+
+    .btn-chip-ok {
+      color: var(--btn-green-text);
+      border-color: var(--btn-green-border);
+      background: var(--btn-green-bg);
+    }
+
+    .btn-chip-danger {
+      color: var(--btn-green-text);
+      border-color: var(--btn-green-border);
+      background: var(--btn-green-bg);
+    }
+
+    .pager {
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 10px;
+    }
+
+    .page-info {
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+      flex: 1;
+    }
+
+    @media (max-width: 360px) {
+      .title { max-width: 64%; }
+      .filters { grid-template-columns: 1fr 1fr; }
+      .meta-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>Rent Task 控制台</h1>
+      <div class="sub">移动端 · 本地联调版本</div>
+    </section>
+
+    <section id="loginView" class="panel login-panel">
+      <div class="field">
+        <label for="account">账号</label>
+        <input id="account" autocomplete="username" placeholder="请输入用户名">
+      </div>
+      <div class="field">
+        <label for="password">密码</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="请输入密码">
+      </div>
+      <button id="btnLogin" class="btn btn-primary">登录并进入商品列表</button>
+      <div id="loginErr" class="error"></div>
+    </section>
+
+    <section id="listView" class="hidden">
+      <div class="topbar">
+        <div>
+          <h2>商品列表</h2>
+          <div id="hello" class="hello"></div>
+        </div>
+        <button id="btnLogout" class="btn btn-ghost">退出</button>
+      </div>
+
+      <div id="filters" class="filters"></div>
+      <p id="orderTotal" class="order-total"></p>
+      <div id="listContainer"></div>
+
+      <div class="pager">
+        <button id="prevPage" class="btn btn-ghost">上一页</button>
+        <span id="pageInfo" class="page-info"></span>
+        <button id="nextPage" class="btn btn-ghost">下一页</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="reasonOverlay" class="overlay hidden">
+    <div class="overlay-card">
+      <div class="overlay-head">
+        <span>限制原因</span>
+        <button id="overlayClose" class="overlay-close">×</button>
+      </div>
+      <div id="overlayBody" class="overlay-body"></div>
+    </div>
+  </div>
+
+  <script>
+    const state = {
+      token: localStorage.getItem('h5_token') || '',
+      user: JSON.parse(localStorage.getItem('h5_user') || 'null'),
+      filter: 'all',
+      page: 1,
+      pageSize: 20,
+      total: 0,
+      list: [],
+      stats: { total_all: 0, total_blacklisted: 0, total_paid: 0 }
+    };
+    const API_BASE = window.location.pathname.startsWith('/h5local') ? '/h5local' : '';
+
+    const els = {
+      loginView: document.getElementById('loginView'),
+      listView: document.getElementById('listView'),
+      account: document.getElementById('account'),
+      password: document.getElementById('password'),
+      loginErr: document.getElementById('loginErr'),
+      btnLogin: document.getElementById('btnLogin'),
+      btnLogout: document.getElementById('btnLogout'),
+      hello: document.getElementById('hello'),
+      filters: document.getElementById('filters'),
+      orderTotal: document.getElementById('orderTotal'),
+      listContainer: document.getElementById('listContainer'),
+      prevPage: document.getElementById('prevPage'),
+      nextPage: document.getElementById('nextPage'),
+      pageInfo: document.getElementById('pageInfo'),
+      reasonOverlay: document.getElementById('reasonOverlay'),
+      overlayBody: document.getElementById('overlayBody'),
+      overlayClose: document.getElementById('overlayClose')
+    };
+
+    function setAuth(token, user) {
+      state.token = token || '';
+      state.user = user || null;
+      if (state.token) localStorage.setItem('h5_token', state.token);
+      else localStorage.removeItem('h5_token');
+      if (state.user) localStorage.setItem('h5_user', JSON.stringify(state.user));
+      else localStorage.removeItem('h5_user');
+    }
+
+    async function request(path, options = {}) {
+      const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
+      if (state.token) headers.Authorization = `Bearer ${state.token}`;
+      const fullPath = `${API_BASE}${path}`;
+      const res = await fetch(fullPath, Object.assign({}, options, { headers }));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        throw new Error(data.message || `请求失败(${res.status})`);
+      }
+      return data;
+    }
+
+    async function login() {
+      els.loginErr.textContent = '';
+      const account = els.account.value.trim();
+      const password = els.password.value;
+      if (!account || !password) {
+        els.loginErr.textContent = '账号和密码不能为空';
+        return;
+      }
+      try {
+        const data = await request('/api/login', {
+          method: 'POST',
+          body: JSON.stringify({ account, password })
+        });
+        setAuth(data.token, data.user || null);
+        state.page = 1;
+        await loadList();
+        render();
+      } catch (e) {
+        els.loginErr.textContent = e.message;
+      }
+    }
+
+    async function loadList() {
+      const data = await request(`/api/products?page=${state.page}&page_size=${state.pageSize}&filter=${state.filter}`);
+      state.list = Array.isArray(data.list) ? data.list : [];
+      state.total = Number(data.total || 0);
+      state.stats = data.stats || { total_all: 0, total_blacklisted: 0, total_paid: 0 };
+    }
+
+    function platformBadges(v) {
+      const s = v || {};
+      return [
+        `悠悠: ${s.uuzuhao || '未'}`,
+        `U号: ${s.uhaozu || '未'}`,
+        `租号王: ${s.zuhaowang || '未'}`
+      ];
+    }
+
+    async function copyAccount(text) {
+      const val = String(text || '').trim();
+      if (!val) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(val);
+        } else {
+          const t = document.createElement('textarea');
+          t.value = val;
+          t.style.position = 'fixed';
+          t.style.left = '-9999px';
+          document.body.appendChild(t);
+          t.select();
+          document.execCommand('copy');
+          document.body.removeChild(t);
+        }
+        alert('账号已复制');
+      } catch (_) {
+        alert('复制失败，请手动复制');
+      }
+    }
+
+    async function toggleBlacklist(item) {
+      try {
+        if (item.blacklisted) {
+          await request('/api/blacklist/remove', {
+            method: 'POST',
+            body: JSON.stringify({ game_account: item.game_account })
+          });
+        } else {
+          await request('/api/blacklist/add', {
+            method: 'POST',
+            body: JSON.stringify({ game_account: item.game_account, reason: '人工下架' })
+          });
+        }
+        await loadList();
+        renderList();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    function showReason(reason) {
+      els.overlayBody.textContent = String(reason || '').trim() || '暂无具体原因';
+      els.reasonOverlay.classList.remove('hidden');
+    }
+
+    function hideReason() {
+      els.reasonOverlay.classList.add('hidden');
+    }
+
+    function renderFilters() {
+      const allActive = state.filter === 'all';
+      const blackActive = state.filter === 'blacklist';
+      els.filters.innerHTML = `
+        <div class="filter-tab ${allActive ? 'active' : ''}" data-filter="all">
+          <div class="txt">总账号数</div>
+          <div class="num">${state.stats.total_all || 0}</div>
+        </div>
+        <div class="filter-tab ${blackActive ? 'active' : ''}" data-filter="blacklist">
+          <div class="txt">黑名单中</div>
+          <div class="num">${state.stats.total_blacklisted || 0}</div>
+        </div>
+      `;
+      els.orderTotal.textContent = `今日有效订单总数：${state.stats.total_paid || 0}`;
+      Array.from(els.filters.querySelectorAll('.filter-tab')).forEach((n) => {
+        n.addEventListener('click', async () => {
+          const nextFilter = n.getAttribute('data-filter') || 'all';
+          if (nextFilter === state.filter) return;
+          state.filter = nextFilter;
+          state.page = 1;
+          await loadList();
+          renderList();
+        });
+      });
+    }
+
+    function renderList() {
+      const root = els.listContainer;
+      root.innerHTML = '';
+      renderFilters();
+
+      if (state.list.length === 0) {
+        root.innerHTML = '<div class="panel"><div style="color:#6d7a8a;font-size:13px;">暂无数据</div></div>';
+      } else {
+        state.list.forEach((item, idx) => {
+          const node = document.createElement('div');
+          node.className = 'list-item';
+          const plat = platformBadges(item.channel_status).map((x) => `<span class="plat">${x}</span>`).join('');
+          const statusText = item.blacklisted
+            ? `黑名单 · ${item.blacklist_reason || '无原因'}`
+            : (item.mode_restricted ? '渠道受限' : '状态正常');
+          const statusClass = statusText === '状态正常' ? '' : 'chip-black';
+          node.style.animationDelay = `${Math.min(idx * 35, 220)}ms`;
+          node.innerHTML = `
+            <div class="row">
+              <p class="title">${item.role_name || item.game_account}</p>
+              <span class="chip ${statusClass}">
+                ${statusText}
+              </span>
+            </div>
+            <div class="account-row">
+              <div class="account">账号：${item.game_account}</div>
+              <button class="copy-btn" data-copy="${item.game_account}">复制</button>
+            </div>
+            <div class="meta-grid">
+              <div class="meta"><div class="k">今日订单</div><div class="v">${item.today_paid_count}</div></div>
+              <div class="meta">
+                <div class="k">模式</div>
+                <div class="v mode-val">
+                  ${(item.mode_restricted ? '限制中' : '可出租')}
+                  ${(item.mode_restricted ? `<button class="info-dot" data-reason="${(item.mode_reason || '').replace(/"/g, '&quot;')}">?</button>` : '')}
+                </div>
+              </div>
+            </div>
+            <div class="platforms">${plat}</div>
+            <div class="ops">
+              <button class="btn btn-chip ${item.blacklisted ? 'btn-chip-danger' : 'btn-chip-ok'}" data-op="blacklist-toggle">
+                ${item.blacklisted ? '移出黑名单' : '加入黑名单'}
+              </button>
+            </div>
+          `;
+          node.querySelector('.copy-btn').addEventListener('click', (e) => {
+            const v = e.currentTarget.getAttribute('data-copy') || '';
+            copyAccount(v);
+          });
+          const info = node.querySelector('.info-dot');
+          if (info) {
+            info.addEventListener('click', (e) => {
+              const r = e.currentTarget.getAttribute('data-reason') || '';
+              showReason(r);
+            });
+          }
+          node.querySelector('[data-op=\"blacklist-toggle\"]').addEventListener('click', () => toggleBlacklist(item));
+          root.appendChild(node);
+        });
+      }
+
+      const totalPages = Math.max(1, Math.ceil(state.total / state.pageSize));
+      els.pageInfo.textContent = `第 ${state.page} / ${totalPages} 页 · 每页 ${state.pageSize} 条`;
+      els.prevPage.disabled = state.page <= 1;
+      els.nextPage.disabled = state.page >= totalPages;
+    }
+
+    function render() {
+      const loggedIn = Boolean(state.token && state.user);
+      els.loginView.classList.toggle('hidden', loggedIn);
+      els.listView.classList.toggle('hidden', !loggedIn);
+      if (loggedIn) {
+        els.hello.textContent = `当前用户：${state.user.name || state.user.account}`;
+        renderList();
+      }
+    }
+
+    els.btnLogin.addEventListener('click', login);
+    els.btnLogout.addEventListener('click', () => {
+      setAuth('', null);
+      state.list = [];
+      state.total = 0;
+      state.page = 1;
+      render();
+    });
+
+    els.prevPage.addEventListener('click', async () => {
+      if (state.page <= 1) return;
+      state.page -= 1;
+      await loadList();
+      renderList();
+    });
+
+    els.nextPage.addEventListener('click', async () => {
+      const totalPages = Math.max(1, Math.ceil(state.total / state.pageSize));
+      if (state.page >= totalPages) return;
+      state.page += 1;
+      await loadList();
+      renderList();
+    });
+
+    els.overlayClose.addEventListener('click', hideReason);
+    els.reasonOverlay.addEventListener('click', (e) => {
+      if (e.target === els.reasonOverlay) hideReason();
+    });
+
+    (async () => {
+      if (state.token && state.user) {
+        try {
+          await loadList();
+        } catch {
+          setAuth('', null);
+        }
+      }
+      render();
+    })();
+  </script>
+</body>
+</html>

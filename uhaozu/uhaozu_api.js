@@ -29,6 +29,13 @@ function buildDefaultHeaders(cookie) {
 };
 }
 
+function buildOrderHeaders(cookie) {
+    return {
+        ...buildDefaultHeaders(cookie),
+        Referer: 'https://b.uhaozu.com/order'
+    };
+}
+
 function resolveAuth(auth = {}) {
     const cfg = {
         api_base: String(auth.api_base || DEFAULT_UHAOZU_API_BASE),
@@ -213,6 +220,88 @@ async function listGoodsPage(page = 1, pageSize = 30, overrides = {}, auth = {})
         throw new Error(`U号租列表API失败: ${json.message || json.msg || JSON.stringify(json).slice(0, 200)}`);
     }
     return json;
+}
+
+function buildOrderListPayload(pageNum = 1, pageSize = 30, overrides = {}) {
+    const ext = { ...overrides };
+    delete ext.pageNum;
+    delete ext.pageSize;
+    delete ext.__path;
+    return {
+        pageNum,
+        pageSize,
+        startDate: '',
+        endDate: '',
+        timeType: 1,
+        unionType: '',
+        dealComplain: 0,
+        status: '',
+        complainStatus: '',
+        createrNames: [],
+        ...ext
+    };
+}
+
+function extractOrderListAndMeta(json = {}) {
+    const list = Array.isArray(json.object) ? json.object : [];
+    const pages = Number(json.pages || 0);
+    const totalCount = Number(json.totalCount || list.length || 0);
+    return { list, pages, totalCount };
+}
+
+async function listOrderPage(pageNum = 1, pageSize = 30, overrides = {}, auth = {}) {
+    const cfg = resolveAuth(auth);
+    const headers = buildOrderHeaders(cfg.cookie);
+    const path = String(overrides.__path || auth.order_list_path || '/merchants/order/submit/orderList').trim();
+    const url = `${cfg.api_base}${path}`;
+    const payload = buildOrderListPayload(pageNum, pageSize, overrides);
+    const json = await requestJson(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload)
+    }, cfg.timeout_ms);
+
+    if (!isApiSuccess(json) || String(json.responseCode || '') !== '0000') {
+        throw new Error(`U号租订单API失败: ${json.responseMsg || json.message || json.msg || JSON.stringify(json).slice(0, 200)}`);
+    }
+    const isCountOnly = json && json.object && !Array.isArray(json.object)
+        && json.object.dealComplainCount !== undefined
+        && json.object.leaseCount !== undefined
+        && json.object.lockingCount !== undefined
+        && json.pages === undefined
+        && json.totalCount === undefined;
+    if (isCountOnly) {
+        throw new Error(`U号租订单接口返回计数对象而非列表，请确认 order_list_path。当前 path=${path}`);
+    }
+    return json;
+}
+
+async function listAllOrderPages(pageSize = 30, overrides = {}, auth = {}) {
+    const all = [];
+    let pageNum = Number(overrides.pageNum || 1);
+    let pages = 0;
+    let totalCount = 0;
+    let guard = 0;
+
+    while (guard++ < 200) {
+        const json = await listOrderPage(pageNum, pageSize, overrides, auth);
+        const meta = extractOrderListAndMeta(json);
+        if (pageNum === Number(overrides.pageNum || 1)) {
+            pages = meta.pages;
+            totalCount = meta.totalCount;
+        }
+        if (!Array.isArray(meta.list) || meta.list.length === 0) break;
+        all.push(...meta.list);
+        if (pages > 0 && pageNum >= pages) break;
+        if (all.length >= totalCount && totalCount > 0) break;
+        pageNum += 1;
+    }
+
+    return {
+        order_list: all,
+        total_count: totalCount || all.length,
+        pages
+    };
 }
 
 async function listAllGoods(pageSize = 30, auth = {}) {
@@ -491,6 +580,8 @@ module.exports = {
     collectUhaozuData,
     uhaozuOffShelf,
     uhaozuOnShelf,
+    listOrderPage,
+    listAllOrderPages,
 
     // 便于单测/诊断
     _internals: {
@@ -515,6 +606,9 @@ module.exports = {
         listAllGoods,
         findGoodsByAccount,
         callUnshelf,
-        callShelf
+        callShelf,
+        buildOrderHeaders,
+        buildOrderListPayload,
+        extractOrderListAndMeta
     }
 };

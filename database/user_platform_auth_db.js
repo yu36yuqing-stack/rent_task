@@ -1,13 +1,17 @@
 const crypto = require('crypto');
 const { openDatabase } = require('./sqlite_client');
 
-const PLATFORMS = new Set(['zuhaowang', 'uhaozu', 'uuzuhao']);
+const PLATFORMS = new Set(['zuhaowang', 'zuhaowang-yuanbao', 'uhaozu', 'uuzuhao']);
 const AUTH_TYPES = new Set(['cookie', 'token', 'session']);
 const AUTH_STATUS = new Set(['valid', 'expired', 'revoked']);
 const PLATFORM_AUTH_RULES = {
     zuhaowang: {
         types: new Set(['token']),
         requiredKeys: ['token_get', 'token_post', 'device_id', 'package_name']
+    },
+    'zuhaowang-yuanbao': {
+        types: new Set(['token']),
+        requiredKeys: ['token', 'device_id', 'package_name']
     },
     uhaozu: {
         types: new Set(['cookie']),

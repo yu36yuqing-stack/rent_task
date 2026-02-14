@@ -7,6 +7,7 @@ const PATH_LIST = '/api/youpin/rent-connector/product/v1/list';
 const PATH_ON = '/api/youpin/rent-connector/product/v1/on';
 const PATH_OFF = '/api/youpin/rent-connector/product/v1/off';
 const PATH_GAME_ONLINE = '/api/youpin/rent-connector/product/v1/game/online';
+const PATH_ORDER_LIST = '/api/youpin/rent-connector/order/v1/list';
 
 const GAME_ID_BY_NAME = {
     WZRY: 1
@@ -204,20 +205,31 @@ async function youpinOffShelf(_page, account, options = {}) {
     }
 }
 
+function parseApiErrorMessage(msg = '') {
+    const text = String(msg || '').trim();
+    const m = /code=(\d+),\s*msg=(.*)$/i.exec(text);
+    if (!m) return { code: 0, msg: text };
+    return {
+        code: Number(m[1] || 0),
+        msg: String(m[2] || '').trim()
+    };
+}
+
 async function youpinOnShelf(_page, account, options = {}) {
     const auth = options.auth || {};
     try {
         const product = await findProductByAccount(account, auth);
         if (!product) {
             console.log(`[YouyouAPI] 上架失败，未找到账号: ${account}`);
-            return false;
+            return options.with_detail ? { ok: false, code: 0, msg: '未找到账号' } : false;
         }
         await postSigned(PATH_ON, { productId: String(product.productId) }, auth);
         console.log(`[YouyouAPI] 上架成功: account=${account}, productId=${product.productId}`);
-        return true;
+        return options.with_detail ? { ok: true, code: 0, msg: '' } : true;
     } catch (e) {
         console.error(`[YouyouAPI] 上架异常: account=${account}, err=${e.message}`);
-        return false;
+        const parsed = parseApiErrorMessage(e && e.message);
+        return options.with_detail ? { ok: false, code: parsed.code, msg: parsed.msg || String(e && e.message || '') } : false;
     }
 }
 
@@ -253,11 +265,79 @@ async function queryAccountOnlineStatus(accountId, gameName = 'WZRY', options = 
     };
 }
 
+function sanitizeOrderListParams(params = {}) {
+    const orderStatus = Number(params.orderStatus);
+    if (!Number.isFinite(orderStatus)) {
+        throw new Error('orderStatus 必填且必须是数字');
+    }
+
+    const page = Math.max(1, Number(params.page || 1));
+    const pageSize = Math.min(50, Math.max(1, Number(params.pageSize || 10)));
+    const req = { orderStatus, page, pageSize };
+
+    if (params.updateStartTime !== undefined && params.updateStartTime !== null && params.updateStartTime !== '') {
+        req.updateStartTime = Number(params.updateStartTime);
+    }
+    if (params.updateEndTime !== undefined && params.updateEndTime !== null && params.updateEndTime !== '') {
+        req.updateEndTime = Number(params.updateEndTime);
+    }
+    if (params.userId !== undefined && params.userId !== null && params.userId !== '') {
+        req.userId = Number(params.userId);
+    }
+    return req;
+}
+
+// 获取订单列表（单页）：
+// - 对接文档 3.2.2 /order/v1/list
+// - 鉴权与签名复用 postSigned（appKey+timestamp+sign）
+async function listOrders(params = {}, options = {}) {
+    const auth = options.auth || {};
+    const req = sanitizeOrderListParams(params);
+    const json = await postSigned(PATH_ORDER_LIST, req, auth);
+    const data = json && json.data ? json.data : {};
+    const orderList = Array.isArray(data.orderList) ? data.orderList : [];
+    const totalCount = Number(data.totalCount || 0);
+    return {
+        order_list: orderList,
+        total_count: totalCount,
+        page: req.page,
+        page_size: req.pageSize,
+        raw: json
+    };
+}
+
+// 获取订单列表（分页聚合）
+async function listAllOrders(params = {}, options = {}) {
+    const base = sanitizeOrderListParams(params);
+    const maxPages = Math.max(1, Number(options.maxPages || 100));
+    const all = [];
+    let page = base.page;
+    let total = 0;
+
+    for (let i = 0; i < maxPages; i += 1) {
+        const res = await listOrders({ ...base, page }, options);
+        total = res.total_count;
+        all.push(...res.order_list);
+        if (res.order_list.length < base.pageSize) break;
+        if (all.length >= total && total > 0) break;
+        page += 1;
+    }
+
+    return {
+        order_list: all,
+        total_count: total,
+        page_start: base.page,
+        page_size: base.pageSize
+    };
+}
+
 module.exports = {
     collectYoupinData,
     youpinOffShelf,
     youpinOnShelf,
     queryAccountOnlineStatus,
+    listOrders,
+    listAllOrders,
 
     // 便于单测/诊断
     _internals: {
@@ -267,6 +347,7 @@ module.exports = {
         listAllProducts,
         findProductByAccount,
         mapProductToRobotItem,
-        resolveGameIdByName
+        resolveGameIdByName,
+        sanitizeOrderListParams
     }
 };

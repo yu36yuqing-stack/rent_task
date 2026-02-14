@@ -359,22 +359,17 @@ async function clearPlatformStatusForUser(userId, platform) {
 
     const db = openDatabase();
     try {
-        const rows = await all(db, `SELECT id, channel_status, channel_prd_info FROM user_game_account WHERE user_id = ? AND is_deleted = 0`, [uid]);
+        const rows = await all(db, `SELECT id, channel_status FROM user_game_account WHERE user_id = ? AND is_deleted = 0`, [uid]);
         for (const row of rows) {
             let status = {};
-            let prdInfo = {};
             try { status = JSON.parse(String(row.channel_status || '{}')) || {}; } catch { status = {}; }
-            try { prdInfo = JSON.parse(String(row.channel_prd_info || '{}')) || {}; } catch { prdInfo = {}; }
-            const hasStatus = key in status;
-            const hasPrdInfo = key in prdInfo;
-            if (!hasStatus && !hasPrdInfo) continue;
-            if (hasStatus) delete status[key];
-            if (hasPrdInfo) delete prdInfo[key];
+            if (!(key in status)) continue;
+            delete status[key];
             await run(db, `
                 UPDATE user_game_account
-                SET channel_status = ?, channel_prd_info = ?, modify_date = ?
+                SET channel_status = ?, modify_date = ?
                 WHERE id = ?
-            `, [JSON.stringify(status), JSON.stringify(prdInfo), nowText(), row.id]);
+            `, [JSON.stringify(status), nowText(), row.id]);
         }
     } finally {
         db.close();
@@ -471,6 +466,38 @@ async function listOwnersByGameAccounts(gameAccounts = [], gameName = '') {
     }
 }
 
+async function listAccountRemarksByUserAndAccounts(userId, gameAccounts = []) {
+    await initUserGameAccountDb();
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+    const accs = [...new Set((Array.isArray(gameAccounts) ? gameAccounts : [])
+        .map((v) => String(v || '').trim())
+        .filter(Boolean))];
+    if (accs.length === 0) return {};
+
+    const db = openDatabase();
+    try {
+        const placeholders = accs.map(() => '?').join(',');
+        const rows = await all(db, `
+            SELECT game_account, account_remark, id
+            FROM user_game_account
+            WHERE user_id = ? AND is_deleted = 0
+              AND game_account IN (${placeholders})
+            ORDER BY id DESC
+        `, [uid, ...accs]);
+
+        const out = {};
+        for (const row of rows) {
+            const acc = String(row.game_account || '').trim();
+            if (!acc || out[acc] !== undefined) continue;
+            out[acc] = String(row.account_remark || '').trim();
+        }
+        return out;
+    } finally {
+        db.close();
+    }
+}
+
 module.exports = {
     PLATFORM_KEYS,
     initUserGameAccountDb,
@@ -478,5 +505,6 @@ module.exports = {
     clearPlatformStatusForUser,
     softDeleteEmptyAccountsByUser,
     listUserGameAccounts,
-    listOwnersByGameAccounts
+    listOwnersByGameAccounts,
+    listAccountRemarksByUserAndAccounts
 };

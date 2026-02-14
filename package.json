@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "h5:local": "node h5/local_h5_server.js"
+  },
   "dependencies": {
     "puppeteer-core": "^24.37.2",
     "sqlite3": "^5.1.7",

@@ -111,7 +111,8 @@ async function syncUserAccountsByAuth(userId) {
     if (validAuthRows.length === 0) {
         throw new Error('当前用户没有可用的平台授权，请先 upsert 平台授权');
     }
-    // 先清空三平台历史状态，避免已撤销授权的平台残留旧数据干扰策略判断。
+    // 先清空三平台历史状态，避免已撤销授权的平台残留旧状态干扰策略判断。
+    // 注意：channel_prd_info 不清空，只在后续 upsert 时增量更新，保留稳定的平台商品映射。
     for (const platform of [PLATFORM_ZHW, PLATFORM_UHZ, PLATFORM_YYZ]) {
         await clearPlatformStatusForUser(uid, platform);
     }

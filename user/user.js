@@ -6,7 +6,7 @@ const {
     getActiveUserById,
     listActiveUsers
 } = require('../database/user_db');
-const { listBlacklistedAccountsByUser } = require('../database/user_blacklist_db');
+const { listBlacklistedAccountsByUser, listUserBlacklistByUser } = require('../database/user_blacklist_db');
 
 async function initUserModule() {
     await initUserDb();
@@ -52,6 +52,22 @@ async function loadUserBlacklistSet(userId) {
     }
 }
 
+async function loadUserBlacklistReasonMap(userId) {
+    try {
+        const rows = await listUserBlacklistByUser(userId);
+        const out = {};
+        for (const row of rows) {
+            const acc = String((row && row.game_account) || '').trim();
+            if (!acc) continue;
+            out[acc] = String((row && row.reason) || '').trim();
+        }
+        return out;
+    } catch (e) {
+        console.warn(`[Blacklist] 读取用户黑名单原因失败 user=${userId}: ${e.message}`);
+        return {};
+    }
+}
+
 module.exports = {
     initUserModule,
     login,
@@ -59,6 +75,7 @@ module.exports = {
     isAuthUsable,
     buildAuthMap,
     loadUserBlacklistSet,
+    loadUserBlacklistReasonMap,
     createUserByAdmin,
     getActiveUserByAccount,
     getActiveUserById,

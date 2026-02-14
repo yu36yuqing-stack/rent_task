@@ -5,5 +5,12 @@
     "reason": "手动加入黑名单",
     "create_time": "2026-02-12 22:29",
     "action": "off"
+  },
+  {
+    "account": "满所老二",
+    "remark": "满所老二",
+    "reason": "触发人脸",
+    "create_time": "2026-02-13 23:30:41",
+    "action": "off"
   }
 ]

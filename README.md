@@ -17,6 +17,7 @@
 后续按照阿里和字节的规范执行数据库建表。每次新建表都要包含必要公共字段，至少包括：
 
 - `id`（主键）
+- `create_date`（创建时间）
 - `modify_date`（修改时间）
 - `is_deleted`（逻辑删除标记）
 - `desc`（备注/说明）
@@ -34,23 +35,22 @@ node rent_robot_main.js --run
 node report/report_rent_status.js
 ```
 
-## 黑名单数据库接口（给 OpenClaw 调用）
+## H5 本地联调
+
+已提供本地 H5 页面（登录 + 商品列表 + 黑名单进出）：
 
 ```bash
 cd rent_task
-
-# 文件改动后同步到数据库（会先写历史，再落 current 表）
-node api/blacklist_api.js sync-file --source openclaw_telegram --operator openclaw
-
-# 新增/更新黑名单（写库后自动回写 blacklist.json）
-node api/blacklist_api.js upsert --account 123456 --remark "示例账号" --reason "触发人脸识别" --create_time "2026-02-12 11:30" --action off --source openclaw_telegram --operator openclaw
-
-# 删除黑名单（软删除，写历史，自动回写 blacklist.json）
-node api/blacklist_api.js remove --account 123456 --source openclaw_telegram --operator openclaw
-
-# 查看当前黑名单（来自数据库）
-node api/blacklist_api.js list
+npm run h5:local
 ```
+
+打开：`http://127.0.0.1:8080`
+
+本地 API：
+- `POST /api/login`
+- `GET /api/products?page=1&page_size=20`
+- `POST /api/blacklist/add`
+- `POST /api/blacklist/remove`
 
 ## 生产触发（本机）
 
