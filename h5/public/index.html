@@ -191,7 +191,7 @@
     .filters {
       margin-bottom: 10px;
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
     }
 
@@ -486,7 +486,10 @@
 
     @media (max-width: 360px) {
       .title { max-width: 64%; }
-      .filters { grid-template-columns: 1fr 1fr; }
+      .filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .filter-tab { padding: 8px 6px; }
+      .filter-tab .num,
+      .filter-tab .txt { font-size: 11px; }
       .meta-grid { grid-template-columns: 1fr 1fr; }
     }
   </style>
@@ -495,7 +498,7 @@
   <div class="wrap">
     <section class="hero">
       <h1>Rent Task 控制台</h1>
-      <div class="sub">移动端 · 本地联调版本</div>
+      <div class="sub">移动端 · 内部体验版本</div>
     </section>
 
     <section id="loginView" class="panel login-panel">
@@ -551,7 +554,7 @@
       pageSize: 20,
       total: 0,
       list: [],
-      stats: { total_all: 0, total_blacklisted: 0, total_paid: 0 }
+      stats: { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_normal: 0, total_paid: 0 }
     };
     const API_BASE = window.location.pathname.startsWith('/h5local') ? '/h5local' : '';
 
@@ -622,7 +625,7 @@
       const data = await request(`/api/products?page=${state.page}&page_size=${state.pageSize}&filter=${state.filter}`);
       state.list = Array.isArray(data.list) ? data.list : [];
       state.total = Number(data.total || 0);
-      state.stats = data.stats || { total_all: 0, total_blacklisted: 0, total_paid: 0 };
+      state.stats = data.stats || { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_normal: 0, total_paid: 0 };
     }
 
     function platformBadges(v) {
@@ -687,15 +690,20 @@
 
     function renderFilters() {
       const allActive = state.filter === 'all';
-      const blackActive = state.filter === 'blacklist';
+      const restrictedActive = state.filter === 'restricted';
+      const normalActive = state.filter === 'normal';
       els.filters.innerHTML = `
         <div class="filter-tab ${allActive ? 'active' : ''}" data-filter="all">
-          <div class="txt">总账号数</div>
+          <div class="txt">总账号</div>
           <div class="num">${state.stats.total_all || 0}</div>
         </div>
-        <div class="filter-tab ${blackActive ? 'active' : ''}" data-filter="blacklist">
-          <div class="txt">黑名单中</div>
-          <div class="num">${state.stats.total_blacklisted || 0}</div>
+        <div class="filter-tab ${restrictedActive ? 'active' : ''}" data-filter="restricted">
+          <div class="txt">限制中</div>
+          <div class="num">${state.stats.total_restricted || 0}</div>
+        </div>
+        <div class="filter-tab ${normalActive ? 'active' : ''}" data-filter="normal">
+          <div class="txt">正常</div>
+          <div class="num">${state.stats.total_normal || 0}</div>
         </div>
       `;
       els.orderTotal.textContent = `今日有效订单总数：${state.stats.total_paid || 0}`;

@@ -115,8 +115,9 @@ async function handleProducts(req, res, urlObj) {
     const user = await requireAuth(req);
     const page = normalizePage(urlObj.searchParams.get('page'), 1);
     const pageSize = Math.min(200, normalizePage(urlObj.searchParams.get('page_size'), 20));
-    const filter = String(urlObj.searchParams.get('filter') || 'all').trim().toLowerCase() === 'blacklist'
-        ? 'blacklist'
+    const filterRaw = String(urlObj.searchParams.get('filter') || 'all').trim().toLowerCase();
+    const filter = (filterRaw === 'restricted' || filterRaw === 'normal' || filterRaw === 'all')
+        ? filterRaw
         : 'all';
     const blacklistRows = await listUserBlacklistByUserWithMeta(user.id);
     const blacklistMap = {};
@@ -148,14 +149,7 @@ async function handleProducts(req, res, urlObj) {
         const text = platformName && msg ? `${platformName}: ${msg}` : (msg || platformName || RESTRICT_REASON);
         restrictMap[acc].push(text);
     }
-    const sourceList = filter === 'blacklist'
-        ? allRows.list.filter((x) => Boolean(blacklistMap[String(x.game_account || '').trim()]))
-        : allRows.list;
-    const total = sourceList.length;
-    const offset = (page - 1) * pageSize;
-    const pageList = sourceList.slice(offset, offset + pageSize);
-
-    const list = pageList.map((x) => {
+    const fullList = allRows.list.map((x) => {
         const acc = String(x.game_account || '').trim();
         const bl = blacklistMap[acc] || null;
         const restrictList = Array.isArray(restrictMap[acc]) ? restrictMap[acc] : [];
@@ -176,14 +170,24 @@ async function handleProducts(req, res, urlObj) {
             mode_reason: modeReason
         };
     });
+    const sourceList = filter === 'restricted'
+        ? fullList.filter((x) => Boolean(x.mode_restricted))
+        : filter === 'normal'
+        ? fullList.filter((x) => !x.mode_restricted)
+        : fullList;
+    const total = sourceList.length;
+    const offset = (page - 1) * pageSize;
+    const pageList = sourceList.slice(offset, offset + pageSize);
+    const list = pageList;
 
     const totalBlacklisted = allRows.list.reduce((sum, x) => {
         const acc = String(x.game_account || '').trim();
         return sum + (blacklistMap[acc] ? 1 : 0);
     }, 0);
+    const totalRestricted = fullList.reduce((sum, x) => sum + (x.mode_restricted ? 1 : 0), 0);
+    const totalNormal = fullList.length - totalRestricted;
     const totalPaid = sourceList.reduce((sum, x) => {
-        const acc = String(x.game_account || '').trim();
-        return sum + Number(paidMap[acc] || 0);
+        return sum + Number(x.today_paid_count || 0);
     }, 0);
 
     return json(res, 200, {
@@ -195,6 +199,8 @@ async function handleProducts(req, res, urlObj) {
         stats: {
             total_all: allRows.total,
             total_blacklisted: totalBlacklisted,
+            total_restricted: totalRestricted,
+            total_normal: totalNormal,
             total_paid: totalPaid
         },
         list
