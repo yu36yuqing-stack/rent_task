@@ -571,7 +571,8 @@
       list: [],
       stats: { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_normal: 0, total_paid: 0 },
       onlineStatusMap: {},
-      onlineLoadingMap: {}
+      onlineLoadingMap: {},
+      cardNodeMap: {}
     };
     const API_BASE = window.location.pathname.startsWith('/h5local') ? '/h5local' : '';
 
@@ -700,7 +701,7 @@
       const account = String(item && item.game_account || '').trim();
       if (!account) return;
       state.onlineLoadingMap[account] = true;
-      renderList();
+      renderOnlinePart(account);
       try {
         const res = await request('/api/products/online', {
           method: 'POST',
@@ -712,7 +713,33 @@
         alert(e.message || '在线查询失败');
       } finally {
         state.onlineLoadingMap[account] = false;
-        renderList();
+        renderOnlinePart(account);
+      }
+    }
+
+    function buildOnlineChipHtml(account) {
+      const onlineText = String(state.onlineStatusMap[account] || '').trim();
+      if (!onlineText) return '';
+      const onlineClass = onlineText === '在线' ? 'chip-online' : 'chip-offline';
+      return `<span class="chip ${onlineClass}">${onlineText}</span>`;
+    }
+
+    function renderOnlinePart(account) {
+      const acc = String(account || '').trim();
+      if (!acc) return;
+      const card = state.cardNodeMap[acc];
+      if (!card) return;
+
+      const chipSlot = card.querySelector('[data-slot="online-chip"]');
+      if (chipSlot) {
+        chipSlot.innerHTML = buildOnlineChipHtml(acc);
+      }
+
+      const btn = card.querySelector('[data-op="online-query"]');
+      if (btn) {
+        const querying = Boolean(state.onlineLoadingMap[acc]);
+        btn.disabled = querying;
+        btn.textContent = querying ? '查询中...' : '在线查询';
       }
     }
 
@@ -759,6 +786,7 @@
     function renderList() {
       const root = els.listContainer;
       root.innerHTML = '';
+      state.cardNodeMap = {};
       renderFilters();
 
       if (state.list.length === 0) {
@@ -769,8 +797,6 @@
           node.className = 'list-item';
           const plat = platformBadges(item.channel_status).map((x) => `<span class="plat">${x}</span>`).join('');
           const account = String(item.game_account || '').trim();
-          const onlineText = String(state.onlineStatusMap[account] || '').trim();
-          const onlineClass = onlineText === '在线' ? 'chip-online' : 'chip-offline';
           const querying = Boolean(state.onlineLoadingMap[account]);
           const statusText = item.blacklisted
             ? `黑名单 · ${item.blacklist_reason || '无原因'}`
@@ -781,7 +807,7 @@
             <div class="row">
               <p class="title">${item.role_name || item.game_account}</p>
               <div style="display:flex;align-items:center;gap:6px;">
-                ${onlineText ? `<span class="chip ${onlineClass}">${onlineText}</span>` : ''}
+                <span data-slot="online-chip">${buildOnlineChipHtml(account)}</span>
                 <span class="chip ${statusClass}">
                   ${statusText}
                 </span>
@@ -824,6 +850,7 @@
           }
           node.querySelector('[data-op=\"online-query\"]').addEventListener('click', () => queryOnline(item));
           node.querySelector('[data-op=\"blacklist-toggle\"]').addEventListener('click', () => toggleBlacklist(item));
+          state.cardNodeMap[account] = node;
           root.appendChild(node);
         });
       }
@@ -852,6 +879,7 @@
       state.page = 1;
       state.onlineStatusMap = {};
       state.onlineLoadingMap = {};
+      state.cardNodeMap = {};
       render();
     });
 
