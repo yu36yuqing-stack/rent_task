@@ -73,6 +73,11 @@ function normalizePage(v, fallback) {
     return Math.max(1, Math.floor(n));
 }
 
+function isRentingByChannelStatus(channelStatus) {
+    const s = channelStatus && typeof channelStatus === 'object' ? channelStatus : {};
+    return ['uuzuhao', 'uhaozu', 'zuhaowang'].some((k) => String(s[k] || '').trim() === '租赁中');
+}
+
 async function listAllAccountsByUser(userId) {
     let page = 1;
     const pageSize = 200;
@@ -118,7 +123,7 @@ async function handleProducts(req, res, urlObj) {
     const page = normalizePage(urlObj.searchParams.get('page'), 1);
     const pageSize = Math.min(200, normalizePage(urlObj.searchParams.get('page_size'), 20));
     const filterRaw = String(urlObj.searchParams.get('filter') || 'all').trim().toLowerCase();
-    const filter = (filterRaw === 'restricted' || filterRaw === 'normal' || filterRaw === 'all')
+    const filter = (filterRaw === 'restricted' || filterRaw === 'renting' || filterRaw === 'all')
         ? filterRaw
         : 'all';
     const blacklistRows = await listUserBlacklistByUserWithMeta(user.id);
@@ -174,8 +179,8 @@ async function handleProducts(req, res, urlObj) {
     });
     const sourceList = filter === 'restricted'
         ? fullList.filter((x) => Boolean(x.mode_restricted))
-        : filter === 'normal'
-        ? fullList.filter((x) => !x.mode_restricted)
+        : filter === 'renting'
+        ? fullList.filter((x) => isRentingByChannelStatus(x.channel_status))
         : fullList;
     const total = sourceList.length;
     const offset = (page - 1) * pageSize;
@@ -187,7 +192,9 @@ async function handleProducts(req, res, urlObj) {
         return sum + (blacklistMap[acc] ? 1 : 0);
     }, 0);
     const totalRestricted = fullList.reduce((sum, x) => sum + (x.mode_restricted ? 1 : 0), 0);
-    const totalNormal = fullList.length - totalRestricted;
+    const totalRenting = fullList.reduce((sum, x) => {
+        return sum + (isRentingByChannelStatus(x.channel_status) ? 1 : 0);
+    }, 0);
     const totalPaid = sourceList.reduce((sum, x) => {
         return sum + Number(x.today_paid_count || 0);
     }, 0);
@@ -202,7 +209,7 @@ async function handleProducts(req, res, urlObj) {
             total_all: allRows.total,
             total_blacklisted: totalBlacklisted,
             total_restricted: totalRestricted,
-            total_normal: totalNormal,
+            total_renting: totalRenting,
             total_paid: totalPaid
         },
         list

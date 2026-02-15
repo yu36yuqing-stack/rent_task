@@ -195,6 +195,99 @@
       gap: 8px;
     }
 
+    .topbar-main {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .menu-trigger {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid var(--btn-green-border);
+      background: var(--btn-green-bg);
+      color: #3a4f67;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .drawer-mask {
+      position: fixed;
+      inset: 0;
+      background: rgba(7, 20, 36, 0.38);
+      z-index: 1000;
+      opacity: 1;
+      transition: opacity .2s ease;
+    }
+
+    .drawer-mask.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .side-drawer {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: min(82vw, 300px);
+      height: 100vh;
+      background: #ffffff;
+      border-right: 1px solid #dbe4ee;
+      box-shadow: 8px 0 24px rgba(17, 39, 67, 0.16);
+      z-index: 1001;
+      transform: translateX(0);
+      transition: transform .22s ease;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .side-drawer.hidden {
+      transform: translateX(-104%);
+    }
+
+    .drawer-head {
+      padding: 14px;
+      border-bottom: 1px solid #e4ebf3;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #22384f;
+    }
+
+    .drawer-close {
+      border: 0;
+      background: transparent;
+      color: #6b7f95;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 4px;
+    }
+
+    .drawer-list {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .drawer-item {
+      border: 1px solid #dde6f0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: #f8fbff;
+      color: #23364d;
+      font-size: 13px;
+      text-align: left;
+      cursor: pointer;
+    }
+
     .filter-tab {
       cursor: pointer;
       padding: 9px 10px;
@@ -531,9 +624,12 @@
 
     <section id="listView" class="hidden">
       <div class="topbar">
-        <div>
+        <div class="topbar-main">
+          <button id="menuTrigger" class="menu-trigger" aria-label="打开菜单">☰</button>
+          <div>
           <h2>商品列表</h2>
           <div id="hello" class="hello"></div>
+          </div>
         </div>
         <button id="btnLogout" class="btn btn-ghost">退出</button>
       </div>
@@ -548,6 +644,19 @@
         <button id="nextPage" class="btn btn-ghost">下一页</button>
       </div>
     </section>
+
+    <div id="drawerMask" class="drawer-mask hidden"></div>
+    <aside id="sideDrawer" class="side-drawer hidden" aria-hidden="true">
+      <div class="drawer-head">
+        <span>功能菜单</span>
+        <button id="drawerClose" class="drawer-close" aria-label="关闭菜单">×</button>
+      </div>
+      <div class="drawer-list">
+        <button class="drawer-item" data-menu="products">商品列表（当前）</button>
+        <button class="drawer-item" data-menu="orders">订单列表（开发中）</button>
+        <button class="drawer-item" data-menu="auth">授权管理（开发中）</button>
+      </div>
+    </aside>
   </div>
 
   <div id="reasonOverlay" class="overlay hidden">
@@ -569,7 +678,8 @@
       pageSize: 20,
       total: 0,
       list: [],
-      stats: { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_normal: 0, total_paid: 0 },
+      drawerOpen: false,
+      stats: { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_renting: 0, total_paid: 0 },
       onlineStatusMap: {},
       onlineLoadingMap: {},
       cardNodeMap: {}
@@ -591,6 +701,10 @@
       prevPage: document.getElementById('prevPage'),
       nextPage: document.getElementById('nextPage'),
       pageInfo: document.getElementById('pageInfo'),
+      menuTrigger: document.getElementById('menuTrigger'),
+      drawerMask: document.getElementById('drawerMask'),
+      sideDrawer: document.getElementById('sideDrawer'),
+      drawerClose: document.getElementById('drawerClose'),
       reasonOverlay: document.getElementById('reasonOverlay'),
       overlayBody: document.getElementById('overlayBody'),
       overlayClose: document.getElementById('overlayClose')
@@ -643,7 +757,7 @@
       const data = await request(`/api/products?page=${state.page}&page_size=${state.pageSize}&filter=${state.filter}`);
       state.list = Array.isArray(data.list) ? data.list : [];
       state.total = Number(data.total || 0);
-      state.stats = data.stats || { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_normal: 0, total_paid: 0 };
+      state.stats = data.stats || { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_renting: 0, total_paid: 0 };
     }
 
     function platformBadges(v) {
@@ -755,7 +869,7 @@
     function renderFilters() {
       const allActive = state.filter === 'all';
       const restrictedActive = state.filter === 'restricted';
-      const normalActive = state.filter === 'normal';
+      const rentingActive = state.filter === 'renting';
       els.filters.innerHTML = `
         <div class="filter-tab ${allActive ? 'active' : ''}" data-filter="all">
           <div class="txt">总账号</div>
@@ -765,9 +879,9 @@
           <div class="txt">限制中</div>
           <div class="num">${state.stats.total_restricted || 0}</div>
         </div>
-        <div class="filter-tab ${normalActive ? 'active' : ''}" data-filter="normal">
-          <div class="txt">正常</div>
-          <div class="num">${state.stats.total_normal || 0}</div>
+        <div class="filter-tab ${rentingActive ? 'active' : ''}" data-filter="renting">
+          <div class="txt">租赁中</div>
+          <div class="num">${state.stats.total_renting || 0}</div>
         </div>
       `;
       els.orderTotal.textContent = `今日有效订单总数：${state.stats.total_paid || 0}`;
@@ -861,6 +975,23 @@
       els.nextPage.disabled = state.page >= totalPages;
     }
 
+    function renderDrawer() {
+      const opened = Boolean(state.drawerOpen);
+      els.drawerMask.classList.toggle('hidden', !opened);
+      els.sideDrawer.classList.toggle('hidden', !opened);
+      els.sideDrawer.setAttribute('aria-hidden', opened ? 'false' : 'true');
+    }
+
+    function openDrawer() {
+      state.drawerOpen = true;
+      renderDrawer();
+    }
+
+    function closeDrawer() {
+      state.drawerOpen = false;
+      renderDrawer();
+    }
+
     function render() {
       const loggedIn = Boolean(state.token && state.user);
       els.loginView.classList.toggle('hidden', loggedIn);
@@ -868,6 +999,7 @@
       if (loggedIn) {
         els.hello.textContent = `当前用户：${state.user.name || state.user.account}`;
         renderList();
+        renderDrawer();
       }
     }
 
@@ -877,6 +1009,7 @@
       state.list = [];
       state.total = 0;
       state.page = 1;
+      state.drawerOpen = false;
       state.onlineStatusMap = {};
       state.onlineLoadingMap = {};
       state.cardNodeMap = {};
@@ -901,6 +1034,18 @@
     els.overlayClose.addEventListener('click', hideReason);
     els.reasonOverlay.addEventListener('click', (e) => {
       if (e.target === els.reasonOverlay) hideReason();
+    });
+
+    els.menuTrigger.addEventListener('click', openDrawer);
+    els.drawerClose.addEventListener('click', closeDrawer);
+    els.drawerMask.addEventListener('click', closeDrawer);
+    Array.from(document.querySelectorAll('.drawer-item')).forEach((n) => {
+      n.addEventListener('click', () => {
+        const key = String(n.getAttribute('data-menu') || '').trim();
+        closeDrawer();
+        if (key === 'products') return;
+        alert('该功能正在开发中');
+      });
     });
 
     (async () => {
