@@ -430,12 +430,14 @@
     }
 
     .pull-refresh {
-      height: 0;
-      overflow: visible;
+      position: fixed;
+      left: 50%;
+      top: 34%;
+      transform: translate(-50%, -50%);
+      z-index: 1200;
       display: flex;
       justify-content: center;
       pointer-events: none;
-      margin-bottom: 4px;
     }
 
     .pull-refresh.hidden {
@@ -443,26 +445,25 @@
     }
 
     .pull-refresh-inner {
-      transform: translateY(-36px);
-      transition: transform .16s ease;
+      transition: opacity .16s ease;
       background: #f0f7ff;
       border: 1px solid #c9ddf3;
-      border-radius: 999px;
+      border-radius: 14px;
       color: #345577;
-      font-size: 11px;
-      font-weight: 600;
-      padding: 5px 10px;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 9px 14px;
       line-height: 1;
-      box-shadow: 0 4px 10px rgba(35, 71, 109, 0.12);
+      box-shadow: 0 10px 24px rgba(35, 71, 109, 0.2);
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
 
     .pull-spinner {
-      width: 12px;
-      height: 12px;
-      border: 2px solid #adc8e6;
+      width: 18px;
+      height: 18px;
+      border: 3px solid #adc8e6;
       border-top-color: #2f79bc;
       border-radius: 50%;
       animation: pull-spin .8s linear infinite;
@@ -1379,8 +1380,7 @@
       if (!loggedIn) return;
       if (!SUPPORT_TOUCH_PULL) return;
 
-      const visibleY = pr.loading ? 18 : -36;
-      els.pullRefreshInner.style.transform = `translateY(${visibleY}px)`;
+      els.pullRefreshInner.style.opacity = pr.loading ? '1' : '0';
     }
 
     function resetPullRefreshUi() {
@@ -1403,8 +1403,8 @@
         alert(e.message || '刷新失败');
       } finally {
         const elapsed = Date.now() - start;
-        if (elapsed < 150) {
-          await new Promise((resolve) => setTimeout(resolve, 150 - elapsed));
+        if (elapsed < 300) {
+          await new Promise((resolve) => setTimeout(resolve, 300 - elapsed));
         }
         state.pullRefresh.loading = false;
         resetPullRefreshUi();
