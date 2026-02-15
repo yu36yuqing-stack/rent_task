@@ -517,6 +517,55 @@
       word-break: break-all;
     }
 
+    .sheet {
+      position: fixed;
+      inset: 0;
+      background: rgba(7, 20, 36, 0.42);
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      padding: 12px;
+      z-index: 1002;
+    }
+
+    .sheet.hidden { display: none; }
+
+    .sheet-card {
+      width: min(560px, 100%);
+      background: #fff;
+      border-radius: 14px;
+      border: 1px solid #dbe3ec;
+      box-shadow: 0 16px 34px rgba(16, 30, 51, 0.24);
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .sheet-title {
+      padding: 8px 8px 4px;
+      font-size: 13px;
+      color: #31445b;
+      font-weight: 600;
+    }
+
+    .sheet-btn {
+      border: 1px solid #d7e1eb;
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: #f8fbff;
+      color: #22384f;
+      font-size: 14px;
+      text-align: left;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .sheet-btn.warn {
+      color: #b5423b;
+      border-color: #efc9c5;
+      background: #fff4f3;
+    }
+
     .platforms {
       margin-top: 9px;
       display: flex;
@@ -538,6 +587,22 @@
       display: flex;
       gap: 8px;
       justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .forbidden-tip {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #5f6f83;
+      min-height: 16px;
+    }
+
+    .forbidden-tip.ok {
+      color: #0b6a40;
+    }
+
+    .forbidden-tip.err {
+      color: #b5423b;
     }
 
     .btn-chip {
@@ -669,6 +734,15 @@
     </div>
   </div>
 
+  <div id="forbiddenSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div id="forbiddenSheetTitle" class="sheet-title">处理禁玩</div>
+      <button id="sheetEnableForbidden" class="sheet-btn warn">开启禁玩</button>
+      <button id="sheetDisableForbidden" class="sheet-btn">解除禁玩</button>
+      <button id="sheetCancelForbidden" class="sheet-btn">取消</button>
+    </div>
+  </div>
+
   <script>
     const state = {
       token: localStorage.getItem('h5_token') || '',
@@ -682,6 +756,9 @@
       stats: { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_renting: 0, total_paid: 0 },
       onlineStatusMap: {},
       onlineLoadingMap: {},
+      forbiddenLoadingMap: {},
+      forbiddenResultMap: {},
+      forbiddenSheet: { open: false, account: '', role_name: '' },
       cardNodeMap: {}
     };
     const API_BASE = window.location.pathname.startsWith('/h5local') ? '/h5local' : '';
@@ -707,7 +784,12 @@
       drawerClose: document.getElementById('drawerClose'),
       reasonOverlay: document.getElementById('reasonOverlay'),
       overlayBody: document.getElementById('overlayBody'),
-      overlayClose: document.getElementById('overlayClose')
+      overlayClose: document.getElementById('overlayClose'),
+      forbiddenSheet: document.getElementById('forbiddenSheet'),
+      forbiddenSheetTitle: document.getElementById('forbiddenSheetTitle'),
+      sheetEnableForbidden: document.getElementById('sheetEnableForbidden'),
+      sheetDisableForbidden: document.getElementById('sheetDisableForbidden'),
+      sheetCancelForbidden: document.getElementById('sheetCancelForbidden')
     };
 
     function setAuth(token, user) {
@@ -857,6 +939,83 @@
       }
     }
 
+    function buildForbiddenTip(account) {
+      const m = state.forbiddenResultMap[account] || null;
+      if (!m || !m.text) return { cls: '', text: '' };
+      const type = String(m.type || '').trim().toLowerCase();
+      return {
+        cls: type === 'ok' ? 'ok' : type === 'err' ? 'err' : '',
+        text: String(m.text || '')
+      };
+    }
+
+    function renderForbiddenPart(account) {
+      const acc = String(account || '').trim();
+      if (!acc) return;
+      const card = state.cardNodeMap[acc];
+      if (!card) return;
+
+      const btn = card.querySelector('[data-op="forbidden-play"]');
+      if (btn) {
+        const loading = Boolean(state.forbiddenLoadingMap[acc]);
+        btn.disabled = loading;
+        btn.textContent = loading ? '处理中...' : '处理禁玩';
+      }
+
+      const tipNode = card.querySelector('[data-slot="forbidden-tip"]');
+      if (tipNode) {
+        const tip = buildForbiddenTip(acc);
+        tipNode.className = `forbidden-tip ${tip.cls}`;
+        tipNode.textContent = tip.text;
+      }
+    }
+
+    function renderForbiddenSheet() {
+      const opened = Boolean(state.forbiddenSheet && state.forbiddenSheet.open);
+      els.forbiddenSheet.classList.toggle('hidden', !opened);
+      if (!opened) return;
+      const name = String(state.forbiddenSheet.role_name || state.forbiddenSheet.account || '').trim();
+      els.forbiddenSheetTitle.textContent = `处理禁玩 · ${name || '当前账号'}`;
+    }
+
+    function openForbiddenSheet(item) {
+      const account = String(item && item.game_account || '').trim();
+      if (!account) return;
+      state.forbiddenSheet = {
+        open: true,
+        account,
+        role_name: String(item && (item.role_name || item.game_account) || '').trim()
+      };
+      renderForbiddenSheet();
+    }
+
+    function closeForbiddenSheet() {
+      state.forbiddenSheet = { open: false, account: '', role_name: '' };
+      renderForbiddenSheet();
+    }
+
+    async function submitForbidden(enabled) {
+      const account = String((state.forbiddenSheet || {}).account || '').trim();
+      if (!account) return;
+      closeForbiddenSheet();
+      state.forbiddenLoadingMap[account] = true;
+      state.forbiddenResultMap[account] = { type: '', text: '' };
+      renderForbiddenPart(account);
+      try {
+        const out = await request('/api/products/forbidden/play', {
+          method: 'POST',
+          body: JSON.stringify({ game_account: account, game_name: 'WZRY', enabled: Boolean(enabled) })
+        });
+        const on = Boolean(out && out.data && out.data.enabled);
+        state.forbiddenResultMap[account] = { type: 'ok', text: on ? '禁玩已开启' : '禁玩已解除' };
+      } catch (e) {
+        state.forbiddenResultMap[account] = { type: 'err', text: String(e && e.message ? e.message : '禁玩操作失败') };
+      } finally {
+        state.forbiddenLoadingMap[account] = false;
+        renderForbiddenPart(account);
+      }
+    }
+
     function showReason(reason) {
       els.overlayBody.textContent = String(reason || '').trim() || '暂无具体原因';
       els.reasonOverlay.classList.remove('hidden');
@@ -912,6 +1071,8 @@
           const plat = platformBadges(item.channel_status).map((x) => `<span class="plat">${x}</span>`).join('');
           const account = String(item.game_account || '').trim();
           const querying = Boolean(state.onlineLoadingMap[account]);
+          const forbiddenLoading = Boolean(state.forbiddenLoadingMap[account]);
+          const forbiddenTip = buildForbiddenTip(account);
           const statusText = item.blacklisted
             ? `黑名单 · ${item.blacklist_reason || '无原因'}`
             : (item.mode_restricted ? '渠道受限' : '状态正常');
@@ -946,10 +1107,14 @@
               <button class="btn btn-chip btn-chip-ok" data-op="online-query" ${querying ? 'disabled' : ''}>
                 ${querying ? '查询中...' : '在线查询'}
               </button>
+              <button class="btn btn-chip btn-chip-ok" data-op="forbidden-play" ${forbiddenLoading ? 'disabled' : ''}>
+                ${forbiddenLoading ? '处理中...' : '处理禁玩'}
+              </button>
               <button class="btn btn-chip ${item.blacklisted ? 'btn-chip-danger' : 'btn-chip-ok'}" data-op="blacklist-toggle">
                 ${item.blacklisted ? '移出黑名单' : '加入黑名单'}
               </button>
             </div>
+            <div class="forbidden-tip ${forbiddenTip.cls}" data-slot="forbidden-tip">${forbiddenTip.text}</div>
           `;
           node.querySelector('.copy-btn').addEventListener('click', (e) => {
             const v = e.currentTarget.getAttribute('data-copy') || '';
@@ -963,6 +1128,7 @@
             });
           }
           node.querySelector('[data-op=\"online-query\"]').addEventListener('click', () => queryOnline(item));
+          node.querySelector('[data-op=\"forbidden-play\"]').addEventListener('click', () => openForbiddenSheet(item));
           node.querySelector('[data-op=\"blacklist-toggle\"]').addEventListener('click', () => toggleBlacklist(item));
           state.cardNodeMap[account] = node;
           root.appendChild(node);
@@ -1000,6 +1166,9 @@
         els.hello.textContent = `当前用户：${state.user.name || state.user.account}`;
         renderList();
         renderDrawer();
+        renderForbiddenSheet();
+      } else {
+        closeForbiddenSheet();
       }
     }
 
@@ -1012,6 +1181,9 @@
       state.drawerOpen = false;
       state.onlineStatusMap = {};
       state.onlineLoadingMap = {};
+      state.forbiddenLoadingMap = {};
+      state.forbiddenResultMap = {};
+      state.forbiddenSheet = { open: false, account: '', role_name: '' };
       state.cardNodeMap = {};
       render();
     });
@@ -1034,6 +1206,12 @@
     els.overlayClose.addEventListener('click', hideReason);
     els.reasonOverlay.addEventListener('click', (e) => {
       if (e.target === els.reasonOverlay) hideReason();
+    });
+    els.sheetEnableForbidden.addEventListener('click', () => submitForbidden(true));
+    els.sheetDisableForbidden.addEventListener('click', () => submitForbidden(false));
+    els.sheetCancelForbidden.addEventListener('click', closeForbiddenSheet);
+    els.forbiddenSheet.addEventListener('click', (e) => {
+      if (e.target === els.forbiddenSheet) closeForbiddenSheet();
     });
 
     els.menuTrigger.addEventListener('click', openDrawer);

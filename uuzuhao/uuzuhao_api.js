@@ -7,6 +7,7 @@ const PATH_LIST = '/api/youpin/rent-connector/product/v1/list';
 const PATH_ON = '/api/youpin/rent-connector/product/v1/on';
 const PATH_OFF = '/api/youpin/rent-connector/product/v1/off';
 const PATH_GAME_ONLINE = '/api/youpin/rent-connector/product/v1/game/online';
+const PATH_FORBIDDEN_PLAY = '/api/youpin/rent-connector/product/v1/forbidden/play';
 const PATH_ORDER_LIST = '/api/youpin/rent-connector/order/v1/list';
 
 const GAME_ID_BY_NAME = {
@@ -265,6 +266,51 @@ async function queryAccountOnlineStatus(accountId, gameName = 'WZRY', options = 
     };
 }
 
+function normalizeForbiddenEnabled(enabled) {
+    if (enabled === true || String(enabled).trim().toLowerCase() === 'true') return 'true';
+    if (enabled === false || String(enabled).trim().toLowerCase() === 'false') return 'false';
+    throw new Error('enabled 仅支持 true/false');
+}
+
+// 账号禁玩开关：
+// - enabled=true 开启禁玩
+// - enabled=false 取消禁玩
+// - type 默认 2（与抓包示例一致）
+async function setForbiddenPlay(accountId, enabled, options = {}) {
+    const auth = options.auth || {};
+    const acc = String(accountId || '').trim();
+    if (!acc) throw new Error('accountId 不能为空');
+
+    const gameName = String(options.game_name || 'WZRY').trim().toUpperCase();
+    const gameId = Number(options.game_id || resolveGameIdByName(gameName));
+    const type = Number(options.type || 2);
+    const enabledText = normalizeForbiddenEnabled(enabled);
+
+    const json = await postSigned(PATH_FORBIDDEN_PLAY, {
+        gameId,
+        accountId: acc,
+        type,
+        enabled: enabledText
+    }, auth);
+
+    return {
+        account: acc,
+        game_name: gameName,
+        game_id: gameId,
+        type,
+        enabled: Boolean(json && json.data && json.data.enabled),
+        raw: json
+    };
+}
+
+async function enableForbiddenPlay(accountId, options = {}) {
+    return setForbiddenPlay(accountId, true, options);
+}
+
+async function disableForbiddenPlay(accountId, options = {}) {
+    return setForbiddenPlay(accountId, false, options);
+}
+
 function sanitizeOrderListParams(params = {}) {
     const orderStatus = Number(params.orderStatus);
     if (!Number.isFinite(orderStatus)) {
@@ -336,6 +382,9 @@ module.exports = {
     youpinOffShelf,
     youpinOnShelf,
     queryAccountOnlineStatus,
+    setForbiddenPlay,
+    enableForbiddenPlay,
+    disableForbiddenPlay,
     listOrders,
     listAllOrders,
 
@@ -348,6 +397,7 @@ module.exports = {
         findProductByAccount,
         mapProductToRobotItem,
         resolveGameIdByName,
-        sanitizeOrderListParams
+        sanitizeOrderListParams,
+        normalizeForbiddenEnabled
     }
 };

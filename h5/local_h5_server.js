@@ -20,7 +20,7 @@ const { initOrderDb, listTodayPaidOrderCountByAccounts } = require('../database/
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { createAccessToken } = require('../user/auth_token');
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
-const { queryAccountOnlineStatus } = require('../uuzuhao/uuzuhao_api');
+const { queryAccountOnlineStatus, setForbiddenPlay } = require('../uuzuhao/uuzuhao_api');
 
 const HOST = process.env.H5_HOST || '0.0.0.0';
 const PORT = Number(process.env.H5_PORT || 8080);
@@ -283,6 +283,32 @@ async function handleProductOnlineQuery(req, res) {
     });
 }
 
+async function handleProductForbiddenPlay(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const gameAccount = String(body.game_account || '').trim();
+    const gameName = String(body.game_name || 'WZRY').trim() || 'WZRY';
+    const enabledRaw = body.enabled;
+
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    if (enabledRaw === undefined || enabledRaw === null || enabledRaw === '') {
+        return json(res, 400, { ok: false, message: 'enabled 不能为空' });
+    }
+
+    const enabled = (enabledRaw === true) || String(enabledRaw).trim().toLowerCase() === 'true';
+    const auth = await resolveUuzuhaoAuthByUser(user.id);
+    const result = await setForbiddenPlay(gameAccount, enabled, { auth, game_name: gameName, type: 2 });
+
+    return json(res, 200, {
+        ok: true,
+        data: {
+            game_account: gameAccount,
+            game_name: result.game_name,
+            enabled: Boolean(result.enabled)
+        }
+    });
+}
+
 function tryServeStatic(urlObj, res) {
     const reqPath = urlObj.pathname === '/' ? '/index.html' : urlObj.pathname;
     const fullPath = path.resolve(PUBLIC_DIR, `.${reqPath}`);
@@ -314,6 +340,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/login') return await handleLogin(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/products') return await handleProducts(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/online') return await handleProductOnlineQuery(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/play') return await handleProductForbiddenPlay(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/add') return await handleBlacklistAdd(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/remove') return await handleBlacklistRemove(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/ping') return json(res, 200, { ok: true, ts: Date.now() });

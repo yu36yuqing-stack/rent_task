@@ -788,3 +788,27 @@ POST /api/youpin/rent-connector/order/v1/list
 2.  商品列表接口入参增加账号和备注搜索，出参增加remarkName（商家备注）字段
     
 3.  订单列表和详情接口增加remarkName（备注）和accountNo（游戏账号）字段
+
+
+## 禁玩和取消禁玩能力
+curl --location 'http://t1-rent-connecter.youpin898.com:18080/product/v1/forbidden/play' \
+--header 'Content-Type: application/json' \
+--data '{
+    "gameId": 1,
+    "accountId": "1499416343",
+    "type": 2,
+    "enabled": "false"
+}'
+
+"enabled": "true" 开启禁玩
+"enabled": "false" 取消禁玩
+
+### 返回值
+{
+    "code": 0,
+    "msg": "成功",
+    "timestamp": 1771039997761,
+    "data": {
+        "enabled": false
+    }
+}
