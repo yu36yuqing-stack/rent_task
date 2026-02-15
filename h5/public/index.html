@@ -313,6 +313,20 @@
       background: #fff4f6;
     }
 
+    .chip-online {
+      color: #0b6a40;
+      border-color: #bfe5d1;
+      background: #eaf8f1;
+      font-weight: 600;
+    }
+
+    .chip-offline {
+      color: #8a5d13;
+      border-color: #eed8b3;
+      background: #fff7e8;
+      font-weight: 600;
+    }
+
     .meta-grid {
       margin-top: 9px;
       display: grid;
@@ -429,6 +443,7 @@
     .ops {
       margin-top: 10px;
       display: flex;
+      gap: 8px;
       justify-content: flex-end;
     }
 
@@ -554,7 +569,9 @@
       pageSize: 20,
       total: 0,
       list: [],
-      stats: { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_normal: 0, total_paid: 0 }
+      stats: { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_normal: 0, total_paid: 0 },
+      onlineStatusMap: {},
+      onlineLoadingMap: {}
     };
     const API_BASE = window.location.pathname.startsWith('/h5local') ? '/h5local' : '';
 
@@ -679,6 +696,26 @@
       }
     }
 
+    async function queryOnline(item) {
+      const account = String(item && item.game_account || '').trim();
+      if (!account) return;
+      state.onlineLoadingMap[account] = true;
+      renderList();
+      try {
+        const res = await request('/api/products/online', {
+          method: 'POST',
+          body: JSON.stringify({ game_account: account, game_name: 'WZRY' })
+        });
+        const online = Boolean(res && res.data && res.data.online);
+        state.onlineStatusMap[account] = online ? '在线' : '离线';
+      } catch (e) {
+        alert(e.message || '在线查询失败');
+      } finally {
+        state.onlineLoadingMap[account] = false;
+        renderList();
+      }
+    }
+
     function showReason(reason) {
       els.overlayBody.textContent = String(reason || '').trim() || '暂无具体原因';
       els.reasonOverlay.classList.remove('hidden');
@@ -731,6 +768,10 @@
           const node = document.createElement('div');
           node.className = 'list-item';
           const plat = platformBadges(item.channel_status).map((x) => `<span class="plat">${x}</span>`).join('');
+          const account = String(item.game_account || '').trim();
+          const onlineText = String(state.onlineStatusMap[account] || '').trim();
+          const onlineClass = onlineText === '在线' ? 'chip-online' : 'chip-offline';
+          const querying = Boolean(state.onlineLoadingMap[account]);
           const statusText = item.blacklisted
             ? `黑名单 · ${item.blacklist_reason || '无原因'}`
             : (item.mode_restricted ? '渠道受限' : '状态正常');
@@ -739,9 +780,12 @@
           node.innerHTML = `
             <div class="row">
               <p class="title">${item.role_name || item.game_account}</p>
-              <span class="chip ${statusClass}">
-                ${statusText}
-              </span>
+              <div style="display:flex;align-items:center;gap:6px;">
+                ${onlineText ? `<span class="chip ${onlineClass}">${onlineText}</span>` : ''}
+                <span class="chip ${statusClass}">
+                  ${statusText}
+                </span>
+              </div>
             </div>
             <div class="account-row">
               <div class="account">账号：${item.game_account}</div>
@@ -759,6 +803,9 @@
             </div>
             <div class="platforms">${plat}</div>
             <div class="ops">
+              <button class="btn btn-chip btn-chip-ok" data-op="online-query" ${querying ? 'disabled' : ''}>
+                ${querying ? '查询中...' : '在线查询'}
+              </button>
               <button class="btn btn-chip ${item.blacklisted ? 'btn-chip-danger' : 'btn-chip-ok'}" data-op="blacklist-toggle">
                 ${item.blacklisted ? '移出黑名单' : '加入黑名单'}
               </button>
@@ -775,6 +822,7 @@
               showReason(r);
             });
           }
+          node.querySelector('[data-op=\"online-query\"]').addEventListener('click', () => queryOnline(item));
           node.querySelector('[data-op=\"blacklist-toggle\"]').addEventListener('click', () => toggleBlacklist(item));
           root.appendChild(node);
         });
@@ -802,6 +850,8 @@
       state.list = [];
       state.total = 0;
       state.page = 1;
+      state.onlineStatusMap = {};
+      state.onlineLoadingMap = {};
       render();
     });
 

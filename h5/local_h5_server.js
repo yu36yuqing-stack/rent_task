@@ -17,8 +17,10 @@ const {
     listPlatformRestrictByUserAndAccounts
 } = require('../database/user_platform_restrict_db');
 const { initOrderDb, listTodayPaidOrderCountByAccounts } = require('../database/order_db');
+const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { createAccessToken } = require('../user/auth_token');
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
+const { queryAccountOnlineStatus } = require('../uuzuhao/uuzuhao_api');
 
 const HOST = process.env.H5_HOST || '0.0.0.0';
 const PORT = Number(process.env.H5_PORT || 8080);
@@ -241,6 +243,39 @@ async function handleBlacklistRemove(req, res) {
     return json(res, 200, { ok: true, removed: ok });
 }
 
+async function resolveUuzuhaoAuthByUser(userId) {
+    const rows = await listUserPlatformAuth(userId, { with_payload: true });
+    const hit = rows.find((r) => String(r.platform || '') === 'uuzuhao' && String(r.auth_status || '') === 'valid');
+    if (!hit) throw new Error('缺少可用的 uuzuhao 授权');
+
+    const payload = hit && typeof hit.auth_payload === 'object' ? hit.auth_payload : {};
+    const appKey = String(payload.app_key || '').trim();
+    const appSecret = String(payload.app_secret || '').trim();
+    if (!appKey || !appSecret) {
+        throw new Error('uuzuhao 授权缺少 app_key/app_secret');
+    }
+    return payload;
+}
+
+async function handleProductOnlineQuery(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const gameAccount = String(body.game_account || '').trim();
+    const gameName = String(body.game_name || 'WZRY').trim() || 'WZRY';
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+
+    const auth = await resolveUuzuhaoAuthByUser(user.id);
+    const result = await queryAccountOnlineStatus(gameAccount, gameName, { auth });
+    return json(res, 200, {
+        ok: true,
+        data: {
+            game_account: gameAccount,
+            game_name: result.game_name,
+            online: Boolean(result.online)
+        }
+    });
+}
+
 function tryServeStatic(urlObj, res) {
     const reqPath = urlObj.pathname === '/' ? '/index.html' : urlObj.pathname;
     const fullPath = path.resolve(PUBLIC_DIR, `.${reqPath}`);
@@ -271,6 +306,7 @@ async function bootstrap() {
         try {
             if (req.method === 'POST' && urlObj.pathname === '/api/login') return await handleLogin(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/products') return await handleProducts(req, res, urlObj);
+            if (req.method === 'POST' && urlObj.pathname === '/api/products/online') return await handleProductOnlineQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/add') return await handleBlacklistAdd(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/remove') return await handleBlacklistRemove(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/ping') return json(res, 200, { ok: true, ts: Date.now() });
