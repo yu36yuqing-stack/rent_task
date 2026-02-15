@@ -77,6 +77,40 @@
       font-size: 13px;
     }
 
+    .hero-toolbar {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .hero-menu-trigger {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      background: rgba(255, 255, 255, 0.2);
+      color: #fff;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0;
+      flex: 0 0 auto;
+    }
+
+    .hero-menu-title {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: .3px;
+      font-weight: 700;
+      color: #fff;
+      text-shadow: 0 1px 1px rgba(3, 30, 64, 0.2);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
     .panel {
       background: var(--card);
       border: 1px solid var(--line);
@@ -113,6 +147,28 @@
     .field input:focus {
       border-color: #5fa3eb;
       box-shadow: 0 0 0 3px rgba(36, 127, 226, 0.15);
+    }
+
+    .remember-row {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+    }
+
+    .remember-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .remember-label input {
+      width: 14px;
+      height: 14px;
+      accent-color: #1f76d2;
     }
 
     .btn {
@@ -248,33 +304,78 @@
       transform: translateX(-104%);
     }
 
-    .drawer-head {
-      padding: 14px;
-      border-bottom: 1px solid #e4ebf3;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      font-size: 14px;
-      font-weight: 700;
-      color: #22384f;
-    }
-
-    .drawer-close {
-      border: 0;
-      background: transparent;
-      color: #6b7f95;
-      font-size: 18px;
-      line-height: 1;
-      cursor: pointer;
-      padding: 0 4px;
-    }
-
     .drawer-list {
       padding: 10px;
       display: flex;
       flex-direction: column;
       gap: 6px;
+    }
+
+    .drawer-user {
+      position: relative;
+      overflow: hidden;
+      margin: 10px 10px 8px;
+      border: 1px solid #cfe1f3;
+      border-radius: 14px;
+      padding: 12px;
+      background: linear-gradient(135deg, #f2f8ff, #e9f3ff 68%, #edf7ff);
+      display: grid;
+      gap: 8px;
+    }
+
+    .drawer-user::after {
+      content: "";
+      position: absolute;
+      width: 84px;
+      height: 84px;
+      right: -18px;
+      top: -32px;
+      border-radius: 50%;
+      background: rgba(51, 139, 223, 0.12);
+    }
+
+    .drawer-user-name {
+      position: relative;
+      z-index: 1;
+      font-size: 13px;
+      font-weight: 700;
+      color: #22384f;
+      margin: 0;
+    }
+
+    .drawer-user-head {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .drawer-logout-btn {
+      position: relative;
+      z-index: 1;
+      border: 1px solid #cddaea;
+      background: rgba(255, 255, 255, 0.72);
+      color: #5c7088;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1;
+      cursor: pointer;
+      flex: 0 0 auto;
+      transition: all .14s ease;
+    }
+
+    .drawer-logout-btn:active {
+      transform: scale(0.98);
+    }
+
+    .drawer-logout-btn:hover {
+      border-color: #bbccdf;
+      background: rgba(255, 255, 255, 0.9);
+      color: #49627d;
     }
 
     .drawer-item {
@@ -286,6 +387,12 @@
       font-size: 13px;
       text-align: left;
       cursor: pointer;
+    }
+
+    .drawer-item.active {
+      border-color: #83b7ec;
+      background: linear-gradient(135deg, #f0f7ff, #e5f1ff);
+      box-shadow: 0 4px 10px rgba(20, 101, 181, 0.12);
     }
 
     .filter-tab {
@@ -320,6 +427,51 @@
       margin: 0 0 10px;
       font-size: 12px;
       color: var(--muted);
+    }
+
+    .pull-refresh {
+      height: 0;
+      overflow: visible;
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+      margin-bottom: 4px;
+    }
+
+    .pull-refresh.hidden {
+      display: none;
+    }
+
+    .pull-refresh-inner {
+      transform: translateY(-36px);
+      transition: transform .16s ease;
+      background: #f0f7ff;
+      border: 1px solid #c9ddf3;
+      border-radius: 999px;
+      color: #345577;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 5px 10px;
+      line-height: 1;
+      box-shadow: 0 4px 10px rgba(35, 71, 109, 0.12);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .pull-spinner {
+      width: 12px;
+      height: 12px;
+      border: 2px solid #adc8e6;
+      border-top-color: #2f79bc;
+      border-radius: 50%;
+      animation: pull-spin .8s linear infinite;
+      flex: 0 0 auto;
+    }
+
+    @keyframes pull-spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
     }
 
     .list-item {
@@ -716,8 +868,14 @@
 <body>
   <div class="wrap">
     <section class="hero">
-      <h1>Rent Task 控制台</h1>
-      <div class="sub">移动端 · 内部体验版本</div>
+      <div id="heroLoginView">
+        <h1>Rent Task 控制台</h1>
+        <div class="sub">移动端 · 内部体验版本</div>
+      </div>
+      <div id="heroAppView" class="hero-toolbar hidden">
+        <button id="menuTrigger" class="hero-menu-trigger" aria-label="打开菜单">☰</button>
+        <h1 id="heroMenuTitle" class="hero-menu-title">商品列表</h1>
+      </div>
     </section>
 
     <section id="loginView" class="panel login-panel">
@@ -729,20 +887,22 @@
         <label for="password">密码</label>
         <input id="password" type="password" autocomplete="current-password" placeholder="请输入密码">
       </div>
-      <button id="btnLogin" class="btn btn-primary">登录并进入商品列表</button>
+      <div class="remember-row">
+        <label class="remember-label" for="rememberLogin">
+          <input id="rememberLogin" type="checkbox" checked>
+          记住登录（短期）
+        </label>
+      </div>
+      <button id="btnLogin" class="btn btn-primary">登录</button>
       <div id="loginErr" class="error"></div>
     </section>
 
     <section id="listView" class="hidden">
-      <div class="topbar">
-        <div class="topbar-main">
-          <button id="menuTrigger" class="menu-trigger" aria-label="打开菜单">☰</button>
-          <div>
-          <h2>商品列表</h2>
-          <div id="hello" class="hello"></div>
-          </div>
+      <div id="pullRefresh" class="pull-refresh hidden">
+        <div id="pullRefreshInner" class="pull-refresh-inner">
+          <span class="pull-spinner"></span>
+          <span>加载中...</span>
         </div>
-        <button id="btnLogout" class="btn btn-ghost">退出</button>
       </div>
 
       <div id="filters" class="filters"></div>
@@ -758,9 +918,11 @@
 
     <div id="drawerMask" class="drawer-mask hidden"></div>
     <aside id="sideDrawer" class="side-drawer hidden" aria-hidden="true">
-      <div class="drawer-head">
-        <span>功能菜单</span>
-        <button id="drawerClose" class="drawer-close" aria-label="关闭菜单">×</button>
+      <div class="drawer-user">
+        <div class="drawer-user-head">
+          <p id="drawerUserName" class="drawer-user-name">当前用户：-</p>
+          <button id="btnLogout" class="drawer-logout-btn">退出</button>
+        </div>
       </div>
       <div class="drawer-list">
         <button class="drawer-item" data-menu="products">商品列表（当前）</button>
@@ -798,15 +960,70 @@
   </div>
 
   <script>
+    const AUTH_BUNDLE_KEY = 'h5_auth_bundle';
+    const LEGACY_TOKEN_KEY = 'h5_token';
+    const LEGACY_USER_KEY = 'h5_user';
+
+    function safeParseJson(raw, fallback) {
+      try {
+        return JSON.parse(String(raw || ''));
+      } catch (_) {
+        return fallback;
+      }
+    }
+
+    function loadInitialAuth() {
+      const fromLocal = safeParseJson(localStorage.getItem(AUTH_BUNDLE_KEY), null);
+      if (fromLocal && typeof fromLocal === 'object') {
+        return {
+          token: String(fromLocal.token || fromLocal.access_token || '').trim(),
+          refreshToken: String(fromLocal.refresh_token || '').trim(),
+          remember: true,
+          user: fromLocal.user && typeof fromLocal.user === 'object' ? fromLocal.user : null
+        };
+      }
+      const fromSession = safeParseJson(sessionStorage.getItem(AUTH_BUNDLE_KEY), null);
+      if (fromSession && typeof fromSession === 'object') {
+        return {
+          token: String(fromSession.token || fromSession.access_token || '').trim(),
+          refreshToken: String(fromSession.refresh_token || '').trim(),
+          remember: false,
+          user: fromSession.user && typeof fromSession.user === 'object' ? fromSession.user : null
+        };
+      }
+      return {
+        token: String(localStorage.getItem(LEGACY_TOKEN_KEY) || '').trim(),
+        refreshToken: '',
+        remember: true,
+        user: safeParseJson(localStorage.getItem(LEGACY_USER_KEY), null)
+      };
+    }
+
+    function clearAllStoredAuth() {
+      localStorage.removeItem(AUTH_BUNDLE_KEY);
+      sessionStorage.removeItem(AUTH_BUNDLE_KEY);
+      localStorage.removeItem(LEGACY_TOKEN_KEY);
+      localStorage.removeItem(LEGACY_USER_KEY);
+      sessionStorage.removeItem(LEGACY_TOKEN_KEY);
+      sessionStorage.removeItem(LEGACY_USER_KEY);
+    }
+
+    const initialAuth = loadInitialAuth();
+    const SUPPORT_TOUCH_PULL = ('ontouchstart' in window) || Number(navigator.maxTouchPoints || 0) > 0;
+
     const state = {
-      token: localStorage.getItem('h5_token') || '',
-      user: JSON.parse(localStorage.getItem('h5_user') || 'null'),
+      token: initialAuth.token,
+      refreshToken: initialAuth.refreshToken,
+      rememberLogin: initialAuth.remember,
+      user: initialAuth.user,
       filter: 'all',
       page: 1,
       pageSize: 20,
       total: 0,
       list: [],
+      currentMenu: 'products',
       drawerOpen: false,
+      pullRefresh: { dragging: false, ready: false, loading: false, startY: 0, distance: 0 },
       stats: { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_renting: 0, total_paid: 0 },
       onlineStatusMap: {},
       onlineLoadingMap: {},
@@ -815,16 +1032,30 @@
       cardNodeMap: {}
     };
     const API_BASE = window.location.pathname.startsWith('/h5local') ? '/h5local' : '';
+    let refreshPromise = null;
+
+    function menuTitleByKey(key) {
+      const k = String(key || '').trim();
+      if (k === 'orders') return '订单列表';
+      if (k === 'auth') return '授权管理';
+      return '商品列表';
+    }
 
     const els = {
       loginView: document.getElementById('loginView'),
       listView: document.getElementById('listView'),
+      heroLoginView: document.getElementById('heroLoginView'),
+      heroAppView: document.getElementById('heroAppView'),
+      heroMenuTitle: document.getElementById('heroMenuTitle'),
       account: document.getElementById('account'),
       password: document.getElementById('password'),
+      rememberLogin: document.getElementById('rememberLogin'),
       loginErr: document.getElementById('loginErr'),
       btnLogin: document.getElementById('btnLogin'),
       btnLogout: document.getElementById('btnLogout'),
-      hello: document.getElementById('hello'),
+      drawerUserName: document.getElementById('drawerUserName'),
+      pullRefresh: document.getElementById('pullRefresh'),
+      pullRefreshInner: document.getElementById('pullRefreshInner'),
       filters: document.getElementById('filters'),
       orderTotal: document.getElementById('orderTotal'),
       listContainer: document.getElementById('listContainer'),
@@ -834,7 +1065,6 @@
       menuTrigger: document.getElementById('menuTrigger'),
       drawerMask: document.getElementById('drawerMask'),
       sideDrawer: document.getElementById('sideDrawer'),
-      drawerClose: document.getElementById('drawerClose'),
       reasonOverlay: document.getElementById('reasonOverlay'),
       overlayBody: document.getElementById('overlayBody'),
       overlayClose: document.getElementById('overlayClose'),
@@ -846,20 +1076,76 @@
       sheetCancelForbidden: document.getElementById('sheetCancelForbidden')
     };
 
-    function setAuth(token, user) {
-      state.token = token || '';
+    function setAuth(accessToken, user, refreshToken = '', rememberLogin = state.rememberLogin) {
+      state.token = String(accessToken || '').trim();
       state.user = user || null;
-      if (state.token) localStorage.setItem('h5_token', state.token);
-      else localStorage.removeItem('h5_token');
-      if (state.user) localStorage.setItem('h5_user', JSON.stringify(state.user));
-      else localStorage.removeItem('h5_user');
+      state.refreshToken = String(refreshToken || '').trim();
+      state.rememberLogin = Boolean(rememberLogin);
+      clearAllStoredAuth();
+      if (!state.token || !state.user) return;
+      const payload = JSON.stringify({
+        token: state.token,
+        access_token: state.token,
+        refresh_token: state.refreshToken,
+        user: state.user
+      });
+      if (state.rememberLogin) {
+        localStorage.setItem(AUTH_BUNDLE_KEY, payload);
+      } else {
+        sessionStorage.setItem(AUTH_BUNDLE_KEY, payload);
+      }
     }
 
-    async function request(path, options = {}) {
+    function clearAuthState() {
+      setAuth('', null, '', state.rememberLogin);
+    }
+
+    async function tryRefreshAccessToken() {
+      if (refreshPromise) return refreshPromise;
+      refreshPromise = (async () => {
+        if (!state.refreshToken) {
+          throw new Error('登录已过期，请重新登录');
+        }
+        const fullPath = `${API_BASE}/api/refresh`;
+        const res = await fetch(fullPath, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            refresh_token: state.refreshToken,
+            remember: Boolean(state.rememberLogin)
+          })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) {
+          throw new Error(data.message || '登录已过期，请重新登录');
+        }
+        const nextAccess = String(data.access_token || data.token || '').trim();
+        const nextRefresh = String(data.refresh_token || '').trim();
+        const nextUser = data.user || state.user || null;
+        setAuth(nextAccess, nextUser, nextRefresh, state.rememberLogin);
+      })();
+      try {
+        await refreshPromise;
+      } finally {
+        refreshPromise = null;
+      }
+    }
+
+    async function request(path, options = {}, triedRefresh = false) {
       const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
       if (state.token) headers.Authorization = `Bearer ${state.token}`;
       const fullPath = `${API_BASE}${path}`;
       const res = await fetch(fullPath, Object.assign({}, options, { headers }));
+      if (res.status === 401 && !triedRefresh && path !== '/api/login' && path !== '/api/refresh') {
+        try {
+          await tryRefreshAccessToken();
+        } catch (refreshErr) {
+          clearAuthState();
+          render();
+          throw refreshErr;
+        }
+        return request(path, options, true);
+      }
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
         throw new Error(data.message || `请求失败(${res.status})`);
@@ -871,6 +1157,7 @@
       els.loginErr.textContent = '';
       const account = els.account.value.trim();
       const password = els.password.value;
+      const remember = Boolean(els.rememberLogin && els.rememberLogin.checked);
       if (!account || !password) {
         els.loginErr.textContent = '账号和密码不能为空';
         return;
@@ -878,9 +1165,14 @@
       try {
         const data = await request('/api/login', {
           method: 'POST',
-          body: JSON.stringify({ account, password })
+          body: JSON.stringify({ account, password, remember })
         });
-        setAuth(data.token, data.user || null);
+        setAuth(
+          String(data.access_token || data.token || '').trim(),
+          data.user || null,
+          String(data.refresh_token || '').trim(),
+          remember
+        );
         state.page = 1;
         await loadList();
         render();
@@ -1079,6 +1371,46 @@
       els.reasonOverlay.classList.add('hidden');
     }
 
+    function updatePullRefreshUi() {
+      const pr = state.pullRefresh || {};
+      const loggedIn = Boolean(state.token && state.user);
+      const shouldShow = Boolean(loggedIn && SUPPORT_TOUCH_PULL && pr.loading);
+      els.pullRefresh.classList.toggle('hidden', !shouldShow);
+      if (!loggedIn) return;
+      if (!SUPPORT_TOUCH_PULL) return;
+
+      const visibleY = pr.loading ? 18 : -36;
+      els.pullRefreshInner.style.transform = `translateY(${visibleY}px)`;
+    }
+
+    function resetPullRefreshUi() {
+      state.pullRefresh.dragging = false;
+      state.pullRefresh.ready = false;
+      state.pullRefresh.distance = 0;
+      updatePullRefreshUi();
+    }
+
+    async function triggerPullRefresh() {
+      if (state.pullRefresh.loading) return;
+      state.pullRefresh.loading = true;
+      updatePullRefreshUi();
+      const start = Date.now();
+      try {
+        state.page = 1;
+        await loadList();
+        renderList();
+      } catch (e) {
+        alert(e.message || '刷新失败');
+      } finally {
+        const elapsed = Date.now() - start;
+        if (elapsed < 150) {
+          await new Promise((resolve) => setTimeout(resolve, 150 - elapsed));
+        }
+        state.pullRefresh.loading = false;
+        resetPullRefreshUi();
+      }
+    }
+
     function renderFilters() {
       const allActive = state.filter === 'all';
       const restrictedActive = state.filter === 'restricted';
@@ -1198,6 +1530,10 @@
       els.drawerMask.classList.toggle('hidden', !opened);
       els.sideDrawer.classList.toggle('hidden', !opened);
       els.sideDrawer.setAttribute('aria-hidden', opened ? 'false' : 'true');
+      Array.from(document.querySelectorAll('.drawer-item')).forEach((n) => {
+        const k = String(n.getAttribute('data-menu') || '').trim();
+        n.classList.toggle('active', k === state.currentMenu);
+      });
     }
 
     function openDrawer() {
@@ -1214,28 +1550,39 @@
       const loggedIn = Boolean(state.token && state.user);
       els.loginView.classList.toggle('hidden', loggedIn);
       els.listView.classList.toggle('hidden', !loggedIn);
+      els.heroLoginView.classList.toggle('hidden', loggedIn);
+      els.heroAppView.classList.toggle('hidden', !loggedIn);
+      els.heroMenuTitle.textContent = menuTitleByKey(state.currentMenu);
+      if (els.rememberLogin) {
+        els.rememberLogin.checked = Boolean(state.rememberLogin);
+      }
       if (loggedIn) {
-        els.hello.textContent = `当前用户：${state.user.name || state.user.account}`;
+        els.drawerUserName.textContent = `当前用户：${state.user.name || state.user.account}`;
         renderList();
         renderDrawer();
         renderForbiddenSheet();
+        updatePullRefreshUi();
       } else {
+        els.drawerUserName.textContent = '当前用户：-';
         closeForbiddenSheet();
+        resetPullRefreshUi();
       }
     }
 
     els.btnLogin.addEventListener('click', login);
     els.btnLogout.addEventListener('click', () => {
-      setAuth('', null);
+      clearAuthState();
       state.list = [];
       state.total = 0;
       state.page = 1;
+      state.currentMenu = 'products';
       state.drawerOpen = false;
       state.onlineStatusMap = {};
       state.onlineLoadingMap = {};
       state.forbiddenLoadingMap = {};
       state.forbiddenSheet = { open: false, account: '', role_name: '', result_text: '', result_type: '', loading: false };
       state.cardNodeMap = {};
+      state.pullRefresh = { dragging: false, ready: false, loading: false, startY: 0, distance: 0 };
       render();
     });
 
@@ -1266,23 +1613,78 @@
     });
 
     els.menuTrigger.addEventListener('click', openDrawer);
-    els.drawerClose.addEventListener('click', closeDrawer);
     els.drawerMask.addEventListener('click', closeDrawer);
     Array.from(document.querySelectorAll('.drawer-item')).forEach((n) => {
       n.addEventListener('click', () => {
         const key = String(n.getAttribute('data-menu') || '').trim();
+        state.currentMenu = key || 'products';
         closeDrawer();
+        render();
         if (key === 'products') return;
         alert('该功能正在开发中');
       });
     });
 
+    window.addEventListener('touchstart', (e) => {
+      if (!SUPPORT_TOUCH_PULL) return;
+      if (!(state.token && state.user)) return;
+      if (state.pullRefresh.loading || state.drawerOpen || (state.forbiddenSheet && state.forbiddenSheet.open)) return;
+      if (window.scrollY > 0) return;
+      const t = e.touches && e.touches[0];
+      if (!t) return;
+      state.pullRefresh.dragging = true;
+      state.pullRefresh.ready = false;
+      state.pullRefresh.startY = Number(t.clientY || 0);
+      state.pullRefresh.distance = 0;
+      updatePullRefreshUi();
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+      if (!SUPPORT_TOUCH_PULL) return;
+      const pr = state.pullRefresh;
+      if (!pr.dragging || pr.loading) return;
+      const t = e.touches && e.touches[0];
+      if (!t) return;
+      const delta = Number(t.clientY || 0) - Number(pr.startY || 0);
+      if (delta <= 0) {
+        pr.distance = 0;
+        pr.ready = false;
+        updatePullRefreshUi();
+        return;
+      }
+      if (window.scrollY > 0) {
+        resetPullRefreshUi();
+        return;
+      }
+      e.preventDefault();
+      const dist = Math.min(90, delta * 0.55);
+      pr.distance = dist;
+      pr.ready = dist >= 62;
+      updatePullRefreshUi();
+    }, { passive: false });
+
+    window.addEventListener('touchend', async () => {
+      if (!SUPPORT_TOUCH_PULL) return;
+      const pr = state.pullRefresh;
+      if (!pr.dragging || pr.loading) return;
+      const shouldRefresh = Boolean(pr.ready);
+      resetPullRefreshUi();
+      if (shouldRefresh) await triggerPullRefresh();
+    }, { passive: true });
+
     (async () => {
+      if (state.user && !state.token && state.refreshToken) {
+        try {
+          await tryRefreshAccessToken();
+        } catch {
+          clearAuthState();
+        }
+      }
       if (state.token && state.user) {
         try {
           await loadList();
         } catch {
-          setAuth('', null);
+          clearAuthState();
         }
       }
       render();

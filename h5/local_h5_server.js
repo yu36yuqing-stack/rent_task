@@ -3,7 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
-const { initUserDb, verifyUserLogin } = require('../database/user_db');
+const { initUserDb, verifyUserLogin, getActiveUserById } = require('../database/user_db');
 const { initUserGameAccountDb, listUserGameAccounts } = require('../database/user_game_account_db');
 const {
     initUserBlacklistDb,
@@ -18,13 +18,21 @@ const {
 } = require('../database/user_platform_restrict_db');
 const { initOrderDb, listTodayPaidOrderCountByAccounts } = require('../database/order_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
-const { createAccessToken } = require('../user/auth_token');
+const {
+    initUserSessionDb,
+    createRefreshSession,
+    verifyRefreshSession,
+    revokeRefreshSession
+} = require('../database/user_session_db');
+const { createAccessToken, createOpaqueRefreshToken } = require('../user/auth_token');
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
 const { queryAccountOnlineStatus, setForbiddenPlay } = require('../uuzuhao/uuzuhao_api');
 
 const HOST = process.env.H5_HOST || '0.0.0.0';
 const PORT = Number(process.env.H5_PORT || 8080);
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const H5_REFRESH_TTL_REMEMBER_SEC = Number(process.env.H5_REFRESH_TTL_REMEMBER_SEC || (7 * 24 * 3600));
+const H5_REFRESH_TTL_SESSION_SEC = Number(process.env.H5_REFRESH_TTL_SESSION_SEC || (12 * 3600));
 
 function json(res, code, payload) {
     res.writeHead(code, {
@@ -40,6 +48,12 @@ function text(res, code, payload, contentType = 'text/plain; charset=utf-8') {
         'Cache-Control': 'no-store'
     });
     res.end(payload);
+}
+
+function httpError(statusCode, message) {
+    const e = new Error(String(message || '请求失败'));
+    e.statusCode = Number(statusCode || 500);
+    return e;
 }
 
 function parseBearer(req) {
@@ -62,8 +76,13 @@ async function readJsonBody(req) {
 
 async function requireAuth(req) {
     const token = parseBearer(req);
-    if (!token) throw new Error('未登录或 token 缺失');
-    const { user } = await parseAccessTokenOrThrow(token);
+    if (!token) throw httpError(401, '未登录或 token 缺失');
+    let user = null;
+    try {
+        ({ user } = await parseAccessTokenOrThrow(token));
+    } catch (e) {
+        throw httpError(401, e.message || 'token 无效或已过期');
+    }
     return user;
 }
 
@@ -98,6 +117,7 @@ async function handleLogin(req, res) {
     const body = await readJsonBody(req);
     const account = String(body.account || '').trim();
     const password = String(body.password || '');
+    const remember = Boolean(body.remember === true || String(body.remember || '').trim().toLowerCase() === 'true');
     if (!account || !password) {
         return json(res, 400, { ok: false, message: '账号和密码不能为空' });
     }
@@ -106,14 +126,60 @@ async function handleLogin(req, res) {
         return json(res, 401, { ok: false, message: result.reason || '登录失败' });
     }
     const token = createAccessToken(result.user);
+    const refreshToken = createOpaqueRefreshToken();
+    const refreshTtlSec = remember ? H5_REFRESH_TTL_REMEMBER_SEC : H5_REFRESH_TTL_SESSION_SEC;
+    await createRefreshSession(result.user.id, refreshToken, refreshTtlSec, `h5 login remember=${remember ? '1' : '0'}`);
     return json(res, 200, {
         ok: true,
         token,
+        access_token: token,
+        refresh_token: refreshToken,
+        refresh_ttl_sec: refreshTtlSec,
+        remember,
         user: {
             id: result.user.id,
             account: result.user.account,
             name: result.user.name,
             user_type: result.user.user_type
+        }
+    });
+}
+
+async function handleRefresh(req, res) {
+    const body = await readJsonBody(req);
+    const refreshToken = String(body.refresh_token || '').trim();
+    const remember = Boolean(body.remember === true || String(body.remember || '').trim().toLowerCase() === 'true');
+    if (!refreshToken) {
+        throw httpError(401, 'refresh_token 不能为空');
+    }
+    const verify = await verifyRefreshSession(refreshToken);
+    if (!verify.ok || !verify.user_id) {
+        throw httpError(401, verify.reason || 'refresh_token 无效');
+    }
+
+    const user = await getActiveUserById(verify.user_id);
+    if (!user || String(user.status || '') !== 'enabled') {
+        await revokeRefreshSession(refreshToken);
+        throw httpError(401, '用户不存在或已禁用');
+    }
+
+    await revokeRefreshSession(refreshToken);
+    const nextRefreshToken = createOpaqueRefreshToken();
+    const refreshTtlSec = remember ? H5_REFRESH_TTL_REMEMBER_SEC : H5_REFRESH_TTL_SESSION_SEC;
+    await createRefreshSession(user.id, nextRefreshToken, refreshTtlSec, `h5 refresh remember=${remember ? '1' : '0'}`);
+    const accessToken = createAccessToken(user);
+    return json(res, 200, {
+        ok: true,
+        token: accessToken,
+        access_token: accessToken,
+        refresh_token: nextRefreshToken,
+        refresh_ttl_sec: refreshTtlSec,
+        remember,
+        user: {
+            id: user.id,
+            account: user.account,
+            name: user.name,
+            user_type: user.user_type
         }
     });
 }
@@ -333,11 +399,13 @@ async function bootstrap() {
     await initUserBlacklistDb();
     await initUserPlatformRestrictDb();
     await initOrderDb();
+    await initUserSessionDb();
 
     const server = http.createServer(async (req, res) => {
         const urlObj = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
         try {
             if (req.method === 'POST' && urlObj.pathname === '/api/login') return await handleLogin(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/refresh') return await handleRefresh(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/products') return await handleProducts(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/online') return await handleProductOnlineQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/play') return await handleProductForbiddenPlay(req, res);
@@ -348,7 +416,8 @@ async function bootstrap() {
             if (req.method === 'GET' && tryServeStatic(urlObj, res)) return;
             return json(res, 404, { ok: false, message: 'Not Found' });
         } catch (e) {
-            return json(res, 500, { ok: false, message: String(e.message || e) });
+            const statusCode = Number(e && e.statusCode) || 500;
+            return json(res, statusCode, { ok: false, message: String(e.message || e) });
         }
     });
 
