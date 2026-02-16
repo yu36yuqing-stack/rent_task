@@ -47,7 +47,7 @@ setupLogger();
     }
 
     try {
-        const recalcDays = Math.max(1, Number(process.env.ORDER_STATS_DAILY_RECALC_DAYS || 3));
+        const recalcDays = Math.max(1, Number(process.env.ORDER_STATS_DAILY_RECALC_DAYS || 60));
         console.log(`[OrderStatsWorker] 启动 pid=${process.pid} recalc_days=${recalcDays}`);
         const summary = await refreshOrderStatsDailyForAllUsers({
             days: recalcDays,

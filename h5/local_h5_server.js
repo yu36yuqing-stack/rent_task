@@ -337,7 +337,7 @@ async function handleStatsCalendar(req, res, urlObj) {
 async function handleStatsRefresh(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
-    const days = Math.max(1, Math.min(60, Number(body.days || 3)));
+    const days = Math.max(1, Math.min(60, Number(body.days || 60)));
     const gameName = String(body.game_name || 'WZRY').trim() || 'WZRY';
     const out = await refreshOrderStatsDailyByUser(user.id, {
         days,

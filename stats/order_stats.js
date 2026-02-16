@@ -19,7 +19,7 @@ const STATS_JOB_KEY_ALL_USERS = 'order_stats_daily_all_users';
 const DEFAULT_TARGET_HOUR = 2;
 const DEFAULT_TARGET_MINUTE = 0;
 const DEFAULT_WINDOW_SEC = 300;
-const DEFAULT_RECALC_DAYS = 3;
+const DEFAULT_RECALC_DAYS = 60;
 const DEFAULT_GAME_NAME = 'WZRY';
 
 function pad2(n) {
