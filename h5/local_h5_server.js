@@ -261,9 +261,10 @@ async function handleProducts(req, res, urlObj) {
     const totalRenting = fullList.reduce((sum, x) => {
         return sum + (isRentingByChannelStatus(x.channel_status) ? 1 : 0);
     }, 0);
-    const totalPaid = sourceList.reduce((sum, x) => {
-        return sum + Number(x.today_paid_count || 0);
-    }, 0);
+    // 顶部总数与卡片数强制同口径：
+    // 统一以 listTodayPaidOrderCountByAccounts 的结果聚合，不受筛选分页影响。
+    const totalPaid = Array.from(new Set(fullList.map((x) => String(x.game_account || '').trim()).filter(Boolean)))
+        .reduce((sum, acc) => sum + Number(paidMap[acc] || 0), 0);
 
     return json(res, 200, {
         ok: true,
