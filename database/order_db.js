@@ -533,7 +533,7 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
                   COALESCE(order_status, '') IN ('租赁中', '出租中')
                   OR (
                       COALESCE(order_status, '') NOT IN ('租赁中', '出租中')
-                      AND substr(start_time, 1, 10) = ?
+                      AND substr(end_time, 1, 10) = ?
                       AND COALESCE(rec_amount, 0) > 0
                   )
               )

@@ -302,6 +302,9 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     }
     const allAccounts = Array.from(accountToRemark.keys());
     const todayPaidCounts = allAccounts.length > 0 ? await listTodayPaidOrderCountByAccounts(uid, allAccounts) : {};
+    const countDetails = allAccounts
+        .map((acc) => ({ game_account: acc, count: Number(todayPaidCounts[acc] || 0) }))
+        .sort((a, b) => b.count - a.count || a.game_account.localeCompare(b.game_account));
 
     const targetSet = new Set();
     if (order3OffEnabled) {
@@ -335,6 +338,11 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
         toDelete.push(acc);
     }
 
+    console.log(`[Order3Off] user_id=${uid} enabled=${order3OffEnabled} total_accounts=${allAccounts.length} threshold=${ORDER_3_OFF_THRESHOLD}`);
+    console.log(`[Order3Off] count_details=${JSON.stringify(countDetails)}`);
+    console.log(`[Order3Off] current=${JSON.stringify(Array.from(currentSet))} target=${JSON.stringify(Array.from(targetSet))}`);
+    console.log(`[Order3Off] to_add=${JSON.stringify(toAdd)} to_delete=${JSON.stringify(toDelete)} blocked_delete=${JSON.stringify(toDeleteBlocked)}`);
+
     let added = 0;
     let deleted = 0;
     for (const acc of toAdd) {
@@ -364,6 +372,7 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
         count_basis: 'rec_amount_gt_0_or_renting',
         threshold: ORDER_3_OFF_THRESHOLD,
         total_accounts: allAccounts.length,
+        count_details: countDetails,
         hit_accounts: targetSet.size,
         added,
         deleted,
@@ -729,6 +738,7 @@ async function syncOrdersForAllUsers(options = {}) {
 module.exports = {
     shouldTriggerOrderSyncNow,
     startOrderSyncWorkerIfNeeded,
+    reconcileOrder3OffBlacklistByUser,
     syncUuzuhaoOrdersToDb,
     syncUhaozuOrdersToDb,
     syncZuhaowangOrdersToDb,

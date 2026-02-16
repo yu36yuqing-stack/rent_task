@@ -11,7 +11,7 @@ const {
 } = require('./report/report_rent_status.js');
 const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('./database/user_db.js');
 const { syncUserAccountsByAuth, listAllUserGameAccountsByUser, fillOnlineTagsByYouyou } = require('./product/product');
-const { startOrderSyncWorkerIfNeeded } = require('./order/order');
+const { startOrderSyncWorkerIfNeeded, reconcileOrder3OffBlacklistByUser } = require('./order/order');
 const { loadUserBlacklistSet, loadUserBlacklistReasonMap } = require('./user/user');
 const { executeUserActionsIfNeeded } = require('./action_engine/action_engine.js');
 
@@ -128,6 +128,16 @@ async function runPipeline(runRecord) {
             // Step 1: 拉取三平台最新数据并落到 user_game_account
             await syncUserAccountsByAuth(user.id);
             rows = await listAllUserGameAccountsByUser(user.id);
+
+            // Step 1.5: 每次主流程都基于当前订单表执行一次 3 单黑名单收敛，
+            // 保障“移出黑名单”先发生，再进入上下架决策，避免仅靠异步订单任务导致时序不一致。
+            try {
+                const reconcile = await reconcileOrder3OffBlacklistByUser(user);
+                console.log(`[Order3Off] user_id=${user.id} reconcile=${JSON.stringify(reconcile)}`);
+            } catch (e) {
+                console.warn(`[Order3Off] 收敛失败 user_id=${user.id}: ${e.message}`);
+            }
+
             blacklistSet = await loadUserBlacklistSet(user.id);
             blacklistReasonMap = await loadUserBlacklistReasonMap(user.id);
 
