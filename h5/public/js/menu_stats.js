@@ -129,23 +129,23 @@
           <p class="stats-kpi-value">¥${Number(profitability.purchase_base || 0).toFixed(2)}</p>
         </div>
         <div class="stats-kpi-card">
-          <p class="stats-kpi-key">折算年化收益率</p>
+          <p class="stats-kpi-key">年化收益率</p>
           <p class="stats-kpi-value">${(Number(profitability.annualized_return_rate || 0) * 100).toFixed(2)}%</p>
         </div>
         <div class="stats-kpi-card">
-          <p class="stats-kpi-key">总体日均单数</p>
+          <p class="stats-kpi-key">日均单数</p>
           <p class="stats-kpi-value">${Number(summary.avg_daily_order_cnt || 0).toFixed(2)}</p>
         </div>
         <div class="stats-kpi-card">
-          <p class="stats-kpi-key">总体日均时长</p>
+          <p class="stats-kpi-key">日均时长</p>
           <p class="stats-kpi-value">${Number(summary.avg_daily_rent_hour || 0).toFixed(2)}h</p>
         </div>
         <div class="stats-kpi-card">
-          <p class="stats-kpi-key">总体日均单价</p>
+          <p class="stats-kpi-key">日均单价</p>
           <p class="stats-kpi-value">¥${Number(summary.avg_order_price || 0).toFixed(2)}</p>
         </div>
         <div class="stats-kpi-card">
-          <p class="stats-kpi-key">总体日均实收</p>
+          <p class="stats-kpi-key">日均实收</p>
           <p class="stats-kpi-value">¥${Number(summary.avg_daily_rec || 0).toFixed(2)}</p>
         </div>
         <div class="stats-kpi-card">
