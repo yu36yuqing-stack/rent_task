@@ -24,6 +24,11 @@ function all(db, sql, params = []) {
     });
 }
 
+async function tableColumns(db, tableName) {
+    const rows = await all(db, `PRAGMA table_info(${tableName})`);
+    return new Set(rows.map((row) => String(row.name || '')));
+}
+
 async function initOrderStatsDailyDb() {
     const db = openDatabase();
     try {
@@ -45,6 +50,7 @@ async function initOrderStatsDailyDb() {
                 order_cnt_refund INTEGER NOT NULL DEFAULT 0,
                 order_cnt_cancel INTEGER NOT NULL DEFAULT 0,
                 order_cnt_zero_rec INTEGER NOT NULL DEFAULT 0,
+                rent_hour_sum REAL NOT NULL DEFAULT 0,
                 amount_order_sum REAL NOT NULL DEFAULT 0,
                 amount_rec_sum REAL NOT NULL DEFAULT 0,
                 amount_refund_sum REAL NOT NULL DEFAULT 0,
@@ -62,6 +68,10 @@ async function initOrderStatsDailyDb() {
             CREATE INDEX IF NOT EXISTS idx_order_stats_daily_user_date_alive
             ON order_stats_daily(user_id, stat_date, is_deleted)
         `);
+        const cols = await tableColumns(db, 'order_stats_daily');
+        if (!cols.has('rent_hour_sum')) {
+            await run(db, `ALTER TABLE order_stats_daily ADD COLUMN rent_hour_sum REAL NOT NULL DEFAULT 0`);
+        }
     } finally {
         db.close();
     }
@@ -103,9 +113,9 @@ async function replaceOrderStatsRowsForDay(userId, statDate, gameName, rows = []
                  purchase_price, purchase_date,
                  order_cnt_total, order_cnt_effective, order_cnt_progress, order_cnt_done,
                  order_cnt_refund, order_cnt_cancel, order_cnt_zero_rec,
-                 amount_order_sum, amount_rec_sum, amount_refund_sum,
+                 rent_hour_sum, amount_order_sum, amount_rec_sum, amount_refund_sum,
                  create_date, modify_date, is_deleted, desc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
             `, [
                 day,
                 uid,
@@ -122,6 +132,7 @@ async function replaceOrderStatsRowsForDay(userId, statDate, gameName, rows = []
                 Math.max(0, Math.floor(toNumber(r.order_cnt_refund, 0))),
                 Math.max(0, Math.floor(toNumber(r.order_cnt_cancel, 0))),
                 Math.max(0, Math.floor(toNumber(r.order_cnt_zero_rec, 0))),
+                toMoney2(r.rent_hour_sum),
                 toMoney2(r.amount_order_sum),
                 toMoney2(r.amount_rec_sum),
                 toMoney2(r.amount_refund_sum),

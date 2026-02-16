@@ -70,6 +70,16 @@ function toMoney2(v) {
     return Number(n.toFixed(2));
 }
 
+function dateDiffDaysInclusive(startDateText, endDateText) {
+    const [sy, sm, sd] = String(startDateText || '').split('-').map((x) => Number(x || 0));
+    const [ey, em, ed] = String(endDateText || '').split('-').map((x) => Number(x || 0));
+    const s = new Date(sy, (sm || 1) - 1, sd || 1);
+    const e = new Date(ey, (em || 1) - 1, ed || 1);
+    if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return 1;
+    const diff = Math.floor((e.getTime() - s.getTime()) / (24 * 3600 * 1000)) + 1;
+    return Math.max(1, diff);
+}
+
 function all(db, sql, params = []) {
     return new Promise((resolve, reject) => {
         db.all(sql, params, (err, rows) => {
@@ -163,6 +173,7 @@ function reduceRows(rows = []) {
         order_cnt_refund: 0,
         order_cnt_cancel: 0,
         order_cnt_zero_rec: 0,
+        rent_hour_sum: 0,
         amount_order_sum: 0,
         amount_rec_sum: 0,
         amount_refund_sum: 0
@@ -175,10 +186,12 @@ function reduceRows(rows = []) {
         out.order_cnt_refund += toNumber(row.order_cnt_refund, 0);
         out.order_cnt_cancel += toNumber(row.order_cnt_cancel, 0);
         out.order_cnt_zero_rec += toNumber(row.order_cnt_zero_rec, 0);
+        out.rent_hour_sum += toNumber(row.rent_hour_sum, 0);
         out.amount_order_sum += toNumber(row.amount_order_sum, 0);
         out.amount_rec_sum += toNumber(row.amount_rec_sum, 0);
         out.amount_refund_sum += toNumber(row.amount_refund_sum, 0);
     }
+    out.rent_hour_sum = toMoney2(out.rent_hour_sum);
     out.amount_order_sum = toMoney2(out.amount_order_sum);
     out.amount_rec_sum = toMoney2(out.amount_rec_sum);
     out.amount_refund_sum = toMoney2(out.amount_refund_sum);
@@ -203,6 +216,7 @@ function normalizeDailyRowsFromOrders(orderRows = [], configMap = new Map()) {
             order_cnt_refund: toNumber(r.order_cnt_refund, 0),
             order_cnt_cancel: toNumber(r.order_cnt_cancel, 0),
             order_cnt_zero_rec: toNumber(r.order_cnt_zero_rec, 0),
+            rent_hour_sum: toMoney2(r.rent_hour_sum),
             amount_order_sum: toMoney2(r.amount_order_sum),
             amount_rec_sum: toMoney2(r.amount_rec_sum),
             amount_refund_sum: toMoney2(r.amount_refund_sum)
@@ -241,6 +255,7 @@ async function queryDailyRowsFromOrder(userId, statDate, gameName, configuredAcc
                 SUM(CASE WHEN COALESCE(order_status, '') IN ('退款中', '已退款') THEN 1 ELSE 0 END) AS order_cnt_refund,
                 SUM(CASE WHEN COALESCE(order_status, '') IN ('已撤单', '投诉/撤单') THEN 1 ELSE 0 END) AS order_cnt_cancel,
                 SUM(CASE WHEN COALESCE(rec_amount, 0) <= 0 THEN 1 ELSE 0 END) AS order_cnt_zero_rec,
+                ROUND(SUM(COALESCE(rent_hour, 0)), 2) AS rent_hour_sum,
                 ROUND(SUM(COALESCE(order_amount, 0)), 2) AS amount_order_sum,
                 ROUND(SUM(COALESCE(rec_amount, 0)), 2) AS amount_rec_sum,
                 ROUND(SUM(CASE
@@ -420,6 +435,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     );
 
     const summary = reduceRows(rows);
+    const periodDays = dateDiffDaysInclusive(periodInfo.startDate, periodInfo.endDate);
     const byChannelMap = new Map();
     const byAccountMap = new Map();
     for (const row of rows) {
@@ -444,22 +460,43 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const by_account = Array.from(byAccountMap.entries()).map(([game_account, arr]) => {
         const s = reduceRows(arr);
         const roleName = String(latestRoleMap.get(game_account) || (arr[0] && arr[0].role_name) || '').trim();
+        const hitDays = arr.reduce((sum, r) => sum + (Number(r.order_cnt_effective || 0) >= 3 ? 1 : 0), 0);
+        const orderBase = Math.max(1, Number(s.order_cnt_effective || 0));
+        const accountPurchaseBase = toMoney2((config.configured || [])
+            .find((x) => String(x.game_account || '').trim() === game_account)?.purchase_price || 0);
+        const accountPeriodReturnRate = accountPurchaseBase > 0 ? (Number(s.amount_rec_sum || 0) / accountPurchaseBase) : 0;
+        const accountAnnualizedRate = accountPurchaseBase > 0
+            ? (accountPeriodReturnRate * (365 / periodDays))
+            : 0;
         return {
             game_account,
             role_name: roleName || game_account,
+            purchase_base: accountPurchaseBase,
+            avg_daily_order_cnt: Number((Number(s.order_cnt_effective || 0) / periodDays).toFixed(4)),
+            avg_daily_rent_hour: Number((Number(s.rent_hour_sum || 0) / periodDays).toFixed(4)),
+            avg_order_price: Number((Number(s.amount_order_sum || 0) / orderBase).toFixed(4)),
+            avg_daily_rec: Number((Number(s.amount_rec_sum || 0) / periodDays).toFixed(4)),
+            target3_hit_days: hitDays,
+            target3_rate: Number((hitDays / periodDays).toFixed(4)),
+            period_return_rate: Number(accountPeriodReturnRate.toFixed(6)),
+            annualized_return_rate: Number(accountAnnualizedRate.toFixed(6)),
             ...s
         };
     }).sort((a, b) => b.amount_rec_sum - a.amount_rec_sum);
 
-    // 月度年化收益率：基于“本月累计实收 / 采购总价”做月收益率再年化。
-    const monthRange = buildPeriodRange('month', now);
-    const monthRows = await listOrderStatsRows(uid, monthRange.startDate, monthRange.endDate, gameName);
-    const monthSummary = reduceRows(monthRows);
+    // 年化收益率统一采用单利口径：
+    // 年化 = 区间收益率 * (365 / 区间天数)
     const purchaseBase = (config.configured || []).reduce((sum, x) => sum + toMoney2(x.purchase_price), 0);
-    const monthReturnRate = purchaseBase > 0 ? (monthSummary.amount_rec_sum / purchaseBase) : 0;
-    const annualizedRate = purchaseBase > 0 ? (Math.pow(1 + monthReturnRate, 12) - 1) : 0;
+    const periodReturnRate = purchaseBase > 0 ? (summary.amount_rec_sum / purchaseBase) : 0;
+    const annualizedRate = purchaseBase > 0 ? (periodReturnRate * (365 / periodDays)) : 0;
 
     const orderBase = Math.max(1, summary.order_cnt_total);
+    const summaryHitDaysByAccount = by_account.reduce((sum, x) => sum + Number(x.target3_hit_days || 0), 0);
+    const configuredCount = Number((config.configured || []).length || 0);
+    const target3RateOverall = configuredCount > 0
+        ? Number((summaryHitDaysByAccount / (configuredCount * periodDays)).toFixed(4))
+        : 0;
+
     return {
         period: periodInfo.period,
         range: {
@@ -470,18 +507,70 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         summary: {
             ...summary,
             refund_rate: Number((summary.order_cnt_refund / orderBase).toFixed(4)),
-            cancel_rate: Number((summary.order_cnt_cancel / orderBase).toFixed(4))
+            cancel_rate: Number((summary.order_cnt_cancel / orderBase).toFixed(4)),
+            avg_daily_order_cnt: Number((Number(summary.order_cnt_effective || 0) / periodDays).toFixed(4)),
+            avg_daily_rent_hour: Number((Number(summary.rent_hour_sum || 0) / periodDays).toFixed(4)),
+            avg_order_price: Number((Number(summary.amount_order_sum || 0) / Math.max(1, Number(summary.order_cnt_effective || 0))).toFixed(4)),
+            avg_daily_rec: Number((Number(summary.amount_rec_sum || 0) / periodDays).toFixed(4)),
+            target3_rate: target3RateOverall
         },
         profitability: {
             purchase_base: toMoney2(purchaseBase),
-            month_rec_amount: toMoney2(monthSummary.amount_rec_sum),
-            month_return_rate: Number(monthReturnRate.toFixed(6)),
+            period_days: periodDays,
+            period_rec_amount: toMoney2(summary.amount_rec_sum),
+            period_return_rate: Number(periodReturnRate.toFixed(6)),
             annualized_return_rate: Number(annualizedRate.toFixed(6))
         },
         by_channel,
         by_account,
         missing_purchase_accounts: config.missing || [],
-        configured_account_count: (config.configured || []).length
+        configured_account_count: configuredCount
+    };
+}
+
+function parseMonthText(monthText, now = new Date()) {
+    const raw = String(monthText || '').trim();
+    if (/^\d{4}-\d{2}$/.test(raw)) return raw;
+    const base = getBusinessDateByNow(now);
+    return `${base.getFullYear()}-${pad2(base.getMonth() + 1)}`;
+}
+
+function monthStartEnd(monthText) {
+    const [y, m] = String(monthText).split('-').map((x) => Number(x || 0));
+    const start = new Date(y, (m || 1) - 1, 1);
+    const end = new Date(y, (m || 1), 0);
+    return {
+        startDate: toDateText(start),
+        endDate: toDateText(end)
+    };
+}
+
+async function getIncomeCalendarByUser(userId, options = {}) {
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+    await initOrderStatsDailyDb();
+    const gameName = String(options.game_name || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
+    const now = options.now instanceof Date ? options.now : new Date();
+    const month = parseMonthText(options.month, now);
+    const range = monthStartEnd(month);
+    const rows = await listOrderStatsRows(uid, range.startDate, range.endDate, gameName);
+    const dayMap = new Map();
+    for (const r of rows) {
+        const day = String(r.stat_date || '').slice(0, 10);
+        if (!day) continue;
+        dayMap.set(day, toMoney2(Number(dayMap.get(day) || 0) + Number(r.amount_rec_sum || 0)));
+    }
+    const by_day = Array.from(dayMap.entries())
+        .map(([stat_date, amount_rec_sum]) => ({ stat_date, amount_rec_sum: toMoney2(amount_rec_sum) }))
+        .sort((a, b) => String(a.stat_date).localeCompare(String(b.stat_date)));
+    const total_rec_amount = toMoney2(by_day.reduce((sum, x) => sum + Number(x.amount_rec_sum || 0), 0));
+    return {
+        month,
+        game_name: gameName,
+        start_date: range.startDate,
+        end_date: range.endDate,
+        total_rec_amount,
+        by_day
     };
 }
 
@@ -492,5 +581,6 @@ module.exports = {
     refreshOrderStatsDailyByUser,
     refreshOrderStatsDailyForAllUsers,
     getOrderStatsDashboardByUser,
-    buildPeriodRange
+    buildPeriodRange,
+    getIncomeCalendarByUser
 };

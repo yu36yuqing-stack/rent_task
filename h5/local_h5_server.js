@@ -34,7 +34,8 @@ const { queryAccountOnlineStatus, setForbiddenPlay } = require('../uuzuhao/uuzuh
 const { listOrdersForUser } = require('../order/order');
 const {
     getOrderStatsDashboardByUser,
-    refreshOrderStatsDailyByUser
+    refreshOrderStatsDailyByUser,
+    getIncomeCalendarByUser
 } = require('../stats/order_stats');
 
 const HOST = process.env.H5_HOST || '0.0.0.0';
@@ -322,6 +323,17 @@ async function handleStatsDashboard(req, res, urlObj) {
     return json(res, 200, { ok: true, ...data });
 }
 
+async function handleStatsCalendar(req, res, urlObj) {
+    const user = await requireAuth(req);
+    const month = String(urlObj.searchParams.get('month') || '').trim();
+    const gameName = String(urlObj.searchParams.get('game_name') || 'WZRY').trim() || 'WZRY';
+    const data = await getIncomeCalendarByUser(user.id, {
+        month,
+        game_name: gameName
+    });
+    return json(res, 200, { ok: true, ...data });
+}
+
 async function handleStatsRefresh(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
@@ -516,6 +528,7 @@ async function bootstrap() {
             if (req.method === 'GET' && urlObj.pathname === '/api/products') return await handleProducts(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/orders') return await handleOrders(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/dashboard') return await handleStatsDashboard(req, res, urlObj);
+            if (req.method === 'GET' && urlObj.pathname === '/api/stats/calendar') return await handleStatsCalendar(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/stats/refresh') return await handleStatsRefresh(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/online') return await handleProductOnlineQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/play') return await handleProductForbiddenPlay(req, res);
