@@ -90,11 +90,11 @@ async function replaceOrderStatsRowsForDay(userId, statDate, gameName, rows = []
     const now = nowText();
     try {
         await run(db, 'BEGIN IMMEDIATE TRANSACTION');
+        // 统计表是按天快照，重算时直接整天重建，避免历史软删除与唯一索引冲突。
         await run(db, `
-            UPDATE order_stats_daily
-            SET is_deleted = 1, modify_date = ?, desc = ?
-            WHERE user_id = ? AND stat_date = ? AND game_name = ? AND is_deleted = 0
-        `, [now, 'replace daily stats (soft delete old rows)', uid, day, g]);
+            DELETE FROM order_stats_daily
+            WHERE user_id = ? AND stat_date = ? AND game_name = ?
+        `, [uid, day, g]);
 
         for (const r of rows) {
             await run(db, `
