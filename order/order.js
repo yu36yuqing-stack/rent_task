@@ -33,6 +33,26 @@ const ORDER_3_OFF_SOURCE = 'order_3_off';
 const ORDER_3_OFF_THRESHOLD = 3;
 const ORDER_3_OFF_BLOCK_RECOVER_RULE_NAME = '3单下架-不恢复时段';
 
+function summarizeOrderRange(orderList = [], fields = {}) {
+    const startKey = String(fields.start || '');
+    const endKey = String(fields.end || '');
+    if (!Array.isArray(orderList) || orderList.length === 0 || !startKey || !endKey) {
+        return { min_start: '', max_end: '' };
+    }
+    let minStart = Number.MAX_SAFE_INTEGER;
+    let maxEnd = 0;
+    for (const row of orderList) {
+        const s = Number(row && row[startKey]);
+        const e = Number(row && row[endKey]);
+        if (Number.isFinite(s) && s > 0 && s < minStart) minStart = s;
+        if (Number.isFinite(e) && e > 0 && e > maxEnd) maxEnd = e;
+    }
+    return {
+        min_start: minStart === Number.MAX_SAFE_INTEGER ? '' : new Date(minStart > 1e12 ? minStart : minStart * 1000).toISOString(),
+        max_end: maxEnd > 0 ? new Date(maxEnd > 1e12 ? maxEnd : maxEnd * 1000).toISOString() : ''
+    };
+}
+
 function shouldTriggerOrderSyncNow(options = {}) {
     const now = options.now instanceof Date ? options.now : new Date();
     const intervalMin = Math.max(1, Number(options.interval_min || 30));
@@ -412,10 +432,19 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
         page: options.page,
         pageSize: options.pageSize
     };
+    console.log(`[OrderSync][uuzuhao] user_id=${uid} begin window=${JSON.stringify({
+        updateStartTime: query.updateStartTime,
+        updateEndTime: query.updateEndTime,
+        updateStartTimeText: new Date(query.updateStartTime * 1000).toISOString(),
+        updateEndTimeText: new Date(query.updateEndTime * 1000).toISOString(),
+        last_sync_ts: lastSyncTs
+    })}`);
     const productIndex = await buildUuzuhaoProductIndex(uid);
 
     const pulled = await listAllOrders(query, { auth, maxPages: options.maxPages });
     const orderList = Array.isArray(pulled.order_list) ? pulled.order_list : [];
+    const range = summarizeOrderRange(orderList, { start: 'rentStartTime', end: 'rentEndTime' });
+    console.log(`[OrderSync][uuzuhao] user_id=${uid} pulled=${orderList.length} total_count=${Number(pulled.total_count || 0)} page_start=${pulled.page_start || 1} page_size=${pulled.page_size || 0} order_range=${JSON.stringify(range)}`);
 
     await initOrderDb();
     let upserted = 0;
@@ -436,6 +465,7 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
         upserted += 1;
     }
     await setLastSyncTimestamp(uid, CHANNEL_UUZUHAO, nowSec, 'order sync watermark');
+    console.log(`[OrderSync][uuzuhao] user_id=${uid} upserted=${upserted} linked=${linked} unlinked=${unlinked} set_last_sync_ts=${nowSec}`);
 
     return {
         user_id: uid,
@@ -484,10 +514,21 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
         createrNames: Array.isArray(options.createrNames) ? options.createrNames : [],
         __path: options.order_path || ''
     };
+    console.log(`[OrderSync][uhaozu] user_id=${uid} begin window=${JSON.stringify({
+        startDate: query.startDate,
+        endDate: query.endDate,
+        timeType: query.timeType,
+        pageNum: query.pageNum,
+        pageSize: query.pageSize,
+        order_path: query.__path || '/merchants/order/submit/orderList',
+        last_sync_ts: lastSyncTs
+    })}`);
     const productIndex = await buildUhaozuProductIndex(uid);
 
     const pulled = await listAllOrderPages(query.pageSize, query, auth);
     const orderList = Array.isArray(pulled.order_list) ? pulled.order_list : [];
+    const range = summarizeOrderRange(orderList, { start: 'startTime', end: 'endTime' });
+    console.log(`[OrderSync][uhaozu] user_id=${uid} pulled=${orderList.length} total_count=${Number(pulled.total_count || 0)} pages=${Number(pulled.pages || 0)} order_range=${JSON.stringify(range)}`);
 
     await initOrderDb();
     let upserted = 0;
@@ -508,6 +549,7 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
         upserted += 1;
     }
     await setLastSyncTimestamp(uid, CHANNEL_UHAOZU, nowSec, 'order sync watermark');
+    console.log(`[OrderSync][uhaozu] user_id=${uid} upserted=${upserted} linked=${linked} unlinked=${unlinked} set_last_sync_ts=${nowSec}`);
 
     return {
         user_id: uid,
@@ -591,6 +633,15 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
             fromDate: String(options.fromDate || formatDateBySec(startSec)),
             toDate: String(options.toDate || formatDateBySec(endSec))
         };
+    console.log(`[OrderSync][zuhaowang] user_id=${uid} begin window=${JSON.stringify({
+        pageNum: requestPayload.pageNum,
+        pageSize: requestPayload.pageSize,
+        queryType: requestPayload.queryType,
+        sortType: requestPayload.sortType,
+        fromDate: requestPayload.fromDate,
+        toDate: requestPayload.toDate,
+        last_sync_ts: lastSyncTs
+    })}`);
 
     const pulled = await listZuhaowangOrdersByPayloads(auth, {
         ...options,
@@ -598,6 +649,8 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
         auto_paginate: options.auto_paginate !== false
     });
     const orderList = Array.isArray(pulled.order_list) ? pulled.order_list : [];
+    const range = summarizeOrderRange(orderList, { start: 'startTime', end: 'endTime' });
+    console.log(`[OrderSync][zuhaowang] user_id=${uid} pulled=${orderList.length} total_count=${Number(pulled.total_count || 0)} order_range=${JSON.stringify(range)}`);
     const accountIndex = await buildZuhaowangAccountIndex(uid);
 
     await initOrderDb();
@@ -622,6 +675,7 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
         upserted += 1;
     }
     await setLastSyncTimestamp(uid, CHANNEL_ZHW, nowSec, 'order sync watermark');
+    console.log(`[OrderSync][zuhaowang] user_id=${uid} upserted=${upserted} linked=${linked} unlinked=${unlinked} set_last_sync_ts=${nowSec}`);
 
     return {
         user_id: uid,
@@ -650,25 +704,44 @@ async function syncOrdersByUser(userId, options = {}) {
         platforms: {},
         ok: true
     };
+    console.log(`[OrderSync] user_id=${uid} begin`);
 
     try {
         result.platforms.uuzuhao = await syncUuzuhaoOrdersToDb(uid, options.uuzuhao || {});
+        console.log(`[OrderSync] user_id=${uid} platform=uuzuhao done ${JSON.stringify({
+            pulled: result.platforms.uuzuhao.pulled,
+            upserted: result.platforms.uuzuhao.upserted,
+            total_count: result.platforms.uuzuhao.total_count
+        })}`);
     } catch (e) {
         result.platforms.uuzuhao = { error: String(e.message || e) };
+        console.error(`[OrderSync] user_id=${uid} platform=uuzuhao error=${result.platforms.uuzuhao.error}`);
         result.ok = false;
     }
 
     try {
         result.platforms.uhaozu = await syncUhaozuOrdersToDb(uid, options.uhaozu || {});
+        console.log(`[OrderSync] user_id=${uid} platform=uhaozu done ${JSON.stringify({
+            pulled: result.platforms.uhaozu.pulled,
+            upserted: result.platforms.uhaozu.upserted,
+            total_count: result.platforms.uhaozu.total_count
+        })}`);
     } catch (e) {
         result.platforms.uhaozu = { error: String(e.message || e) };
+        console.error(`[OrderSync] user_id=${uid} platform=uhaozu error=${result.platforms.uhaozu.error}`);
         result.ok = false;
     }
 
     try {
         result.platforms.zuhaowang = await syncZuhaowangOrdersToDb(uid, options.zuhaowang || {});
+        console.log(`[OrderSync] user_id=${uid} platform=zuhaowang done ${JSON.stringify({
+            pulled: result.platforms.zuhaowang.pulled,
+            upserted: result.platforms.zuhaowang.upserted,
+            total_count: result.platforms.zuhaowang.total_count
+        })}`);
     } catch (e) {
         result.platforms.zuhaowang = { error: String(e.message || e) };
+        console.error(`[OrderSync] user_id=${uid} platform=zuhaowang error=${result.platforms.zuhaowang.error}`);
         result.ok = false;
     }
 
@@ -704,6 +777,7 @@ async function syncOrdersByUser(userId, options = {}) {
     }
 
     result.finished_at = new Date().toISOString();
+    console.log(`[OrderSync] user_id=${uid} end ok=${result.ok} gate=${JSON.stringify(result.order_3_off_gate || {})}`);
     return result;
 }
 
@@ -723,6 +797,7 @@ async function syncOrdersForAllUsers(options = {}) {
     };
 
     for (const user of targets) {
+        console.log(`[OrderSync] all_users begin user_id=${user.id} account=${user.account}`);
         const one = await syncOrdersByUser(user.id, {
             ...options,
             user
@@ -735,9 +810,16 @@ async function syncOrdersForAllUsers(options = {}) {
         summary.processed_users += 1;
         if (one.ok) summary.ok_users += 1;
         else summary.failed_users += 1;
+        console.log(`[OrderSync] all_users end user_id=${user.id} ok=${one.ok}`);
     }
 
     summary.finished_at = new Date().toISOString();
+    console.log(`[OrderSync] all_users summary=${JSON.stringify({
+        total_users: summary.total_users,
+        processed_users: summary.processed_users,
+        ok_users: summary.ok_users,
+        failed_users: summary.failed_users
+    })}`);
     return summary;
 }
 
