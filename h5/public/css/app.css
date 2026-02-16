@@ -908,10 +908,24 @@
       gap: 12px;
     }
 
+    .orders-tabs-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
     .orders-tabs {
       display: flex;
       gap: 8px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      flex: 1;
+    }
+
+    .orders-tabs::-webkit-scrollbar {
+      display: none;
     }
 
     .orders-tab {
@@ -932,9 +946,11 @@
     }
 
     .orders-quick {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 6px;
+      display: flex;
+      align-items: center;
+      flex-wrap: nowrap;
+      gap: 5px;
+      overflow-x: auto;
       padding-bottom: 2px;
     }
 
@@ -945,16 +961,15 @@
     .orders-quick-item {
       border: 1px solid #d8e1ec;
       border-radius: 999px;
-      padding: 6px 8px;
+      padding: 5px 8px;
       background: #fff;
       color: #41566f;
-      font-size: 11px;
+      font-size: 10px;
       line-height: 1.2;
       white-space: nowrap;
-      text-overflow: ellipsis;
-      overflow: hidden;
       cursor: pointer;
-      width: 100%;
+      width: auto;
+      flex: 0 0 auto;
       text-align: center;
     }
 

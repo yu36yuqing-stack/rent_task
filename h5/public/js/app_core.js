@@ -85,6 +85,7 @@
         page: 1,
         pageSize: 20,
         total: 0,
+        syncing: false,
         stats: { progress: 0, done: 0 },
         list: []
       },
@@ -184,6 +185,7 @@
       orderTotal: document.getElementById('orderTotal'),
       listContainer: document.getElementById('listContainer'),
       orderStatusTabs: document.getElementById('orderStatusTabs'),
+      orderSyncNowBtn: document.getElementById('orderSyncNowBtn'),
       orderQuickFilters: document.getElementById('orderQuickFilters'),
       orderGameHint: document.getElementById('orderGameHint'),
       orderListContainer: document.getElementById('orderListContainer'),
@@ -396,7 +398,7 @@
       const data = await request(`/api/orders?page=${o.page}&page_size=${o.pageSize}&status_filter=${o.status_filter}&quick_filter=${o.quick_filter}&game_name=${encodeURIComponent(o.game_name || 'WZRY')}`);
       state.orders.total = Number(data.total || 0);
       state.orders.list = Array.isArray(data.list) ? data.list : [];
-      state.orders.stats = data.stats || { progress: 0, done: 0 };
+      state.orders.stats = data.stats || { progress: 0, done: 0, today_total: 0 };
       state.orders.page = Number(data.page || o.page || 1);
       state.orders.pageSize = Number(data.page_size || o.pageSize || 20);
     }
@@ -538,6 +540,7 @@
         configured_account_count: 0
       };
       state.userRules = { order_off_threshold: 3 };
+      state.orders.syncing = false;
       render();
     });
 
@@ -594,6 +597,25 @@
       await loadOrders();
       renderOrdersView();
     });
+
+    if (els.orderSyncNowBtn) {
+      els.orderSyncNowBtn.addEventListener('click', async () => {
+        if (state.orders.syncing) return;
+        state.orders.syncing = true;
+        renderOrdersView();
+        try {
+          await request('/api/orders/sync', { method: 'POST', body: '{}' });
+          await loadOrders();
+          renderOrdersView();
+          showToast('订单已同步');
+        } catch (e) {
+          showToast(e.message || '订单同步失败');
+        } finally {
+          state.orders.syncing = false;
+          renderOrdersView();
+        }
+      });
+    }
 
     els.overlayClose.addEventListener('click', hideReason);
     els.reasonOverlay.addEventListener('click', (e) => {

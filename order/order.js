@@ -125,29 +125,32 @@ function addDays(d, n) {
 
 function resolveDateRangeByQuickFilter(filter = 'today', now = new Date()) {
     const day0 = startOfDay(now);
-    const day6 = new Date(day0);
-    day6.setHours(6, 0, 0, 0);
+    const businessDate = now.getHours() < 6 ? addDays(day0, -1) : day0;
+    const businessDayStart = new Date(businessDate);
+    businessDayStart.setHours(6, 0, 0, 0);
+    const businessDayEnd = addDays(businessDayStart, 1);
     const f = String(filter || 'today').trim().toLowerCase();
     if (f === 'yesterday') {
-        return { start: addDays(day6, -1), end: day6 };
+        return { start: addDays(businessDayStart, -1), end: businessDayStart };
     }
     if (f === 'week') {
-        const weekday = day0.getDay() || 7;
-        const weekStart = addDays(day0, 1 - weekday);
+        const weekday = businessDate.getDay() || 7;
+        const weekStart = addDays(businessDate, 1 - weekday);
         weekStart.setHours(6, 0, 0, 0);
-        return { start: weekStart, end: addDays(day0, 1) };
+        return { start: weekStart, end: businessDayEnd };
     }
     if (f === 'last7') {
-        return { start: addDays(day0, -6), end: addDays(day0, 1) };
+        return { start: addDays(businessDayStart, -6), end: businessDayEnd };
     }
     if (f === 'month') {
-        const start = new Date(day0.getFullYear(), day0.getMonth(), 1);
-        return { start, end: addDays(day0, 1) };
+        const start = new Date(businessDate.getFullYear(), businessDate.getMonth(), 1);
+        start.setHours(6, 0, 0, 0);
+        return { start, end: businessDayEnd };
     }
     if (f === 'last30') {
-        return { start: addDays(day0, -29), end: addDays(day0, 1) };
+        return { start: addDays(businessDayStart, -29), end: businessDayEnd };
     }
-    return { start: day6, end: addDays(day0, 1) };
+    return { start: businessDayStart, end: businessDayEnd };
 }
 
 function normalizeOrderListOptions(options = {}) {
@@ -170,6 +173,9 @@ async function listOrdersForUser(userId, options = {}) {
     const range = resolveDateRangeByQuickFilter(cfg.quickFilter, new Date());
     const rangeStart = toDateTimeText(range.start);
     const rangeEnd = toDateTimeText(range.end);
+    const todayRange = resolveDateRangeByQuickFilter('today', new Date());
+    const todayStart = toDateTimeText(todayRange.start);
+    const todayEnd = toDateTimeText(todayRange.end);
 
     const where = [
         'user_id = ?',
@@ -205,6 +211,15 @@ async function listOrdersForUser(userId, options = {}) {
               AND end_time >= ?
               AND end_time < ?
         `, [uid, cfg.gameName, rangeStart, rangeEnd]);
+        const todayRow = await dbGet(db, `
+            SELECT COUNT(*) AS today_total
+            FROM "order"
+            WHERE user_id = ?
+              AND is_deleted = 0
+              AND COALESCE(game_name, '') = ?
+              AND end_time >= ?
+              AND end_time < ?
+        `, [uid, cfg.gameName, todayStart, todayEnd]);
         const offset = (cfg.page - 1) * cfg.pageSize;
         const list = await dbAll(db, `
             SELECT
@@ -229,7 +244,8 @@ async function listOrdersForUser(userId, options = {}) {
             },
             stats: {
                 progress: Number((countsRow && countsRow.progress_cnt) || 0),
-                done: Number((countsRow && countsRow.done_cnt) || 0)
+                done: Number((countsRow && countsRow.done_cnt) || 0),
+                today_total: Number((todayRow && todayRow.today_total) || 0)
             },
             list
         };

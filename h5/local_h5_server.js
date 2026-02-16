@@ -36,7 +36,7 @@ const {
 const { createAccessToken, createOpaqueRefreshToken } = require('../user/auth_token');
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
 const { queryAccountOnlineStatus, setForbiddenPlay } = require('../uuzuhao/uuzuhao_api');
-const { listOrdersForUser } = require('../order/order');
+const { listOrdersForUser, syncOrdersByUser } = require('../order/order');
 const {
     getOrderStatsDashboardByUser,
     refreshOrderStatsDailyByUser,
@@ -324,6 +324,17 @@ async function handleOrders(req, res, urlObj) {
     return json(res, 200, { ok: true, ...data });
 }
 
+async function handleOrderSyncNow(req, res) {
+    const user = await requireAuth(req);
+    const out = await syncOrdersByUser(user.id, {
+        user,
+        uuzuhao: { maxPages: 20 },
+        uhaozu: { maxPages: 20 },
+        zuhaowang: { maxPages: 20 }
+    });
+    return json(res, 200, { ok: true, ...out });
+}
+
 async function handleStatsDashboard(req, res, urlObj) {
     const user = await requireAuth(req);
     const period = String(urlObj.searchParams.get('period') || 'today').trim().toLowerCase();
@@ -564,6 +575,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/refresh') return await handleRefresh(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/products') return await handleProducts(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/orders') return await handleOrders(req, res, urlObj);
+            if (req.method === 'POST' && urlObj.pathname === '/api/orders/sync') return await handleOrderSyncNow(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/dashboard') return await handleStatsDashboard(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/calendar') return await handleStatsCalendar(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/stats/refresh') return await handleStatsRefresh(req, res);

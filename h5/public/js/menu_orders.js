@@ -7,7 +7,7 @@
     function renderOrdersView() {
       const o = state.orders || {};
       const tabs = [
-        { k: 'all', t: '全部', n: Number(o.total || 0) },
+        { k: 'all', t: `全部(${Number((o.stats && o.stats.today_total) || 0)})`, n: Number(o.total || 0) },
         { k: 'progress', t: `进行中(${Number((o.stats && o.stats.progress) || 0)})`, n: Number((o.stats && o.stats.progress) || 0) },
         { k: 'done', t: '已完成', n: Number((o.stats && o.stats.done) || 0) }
       ];
@@ -25,6 +25,10 @@
       els.orderQuickFilters.innerHTML = quick.map((x) => `
         <button class="orders-quick-item ${o.quick_filter === x.k ? 'active' : ''}" data-order-quick="${x.k}">${x.t}</button>
       `).join('');
+      if (els.orderSyncNowBtn) {
+        els.orderSyncNowBtn.disabled = Boolean(o.syncing);
+        els.orderSyncNowBtn.textContent = o.syncing ? '同步中...' : '同步订单';
+      }
       els.orderGameHint.textContent = `游戏：${o.game_name || 'WZRY'}（默认）`;
 
       if (!Array.isArray(o.list) || o.list.length === 0) {
