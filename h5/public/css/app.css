@@ -1083,7 +1083,7 @@
 
     .stats-kpi-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 5px;
     }
 
@@ -1377,7 +1377,7 @@
       .filter-tab .num,
       .filter-tab .txt { font-size: 11px; }
       .meta-grid { grid-template-columns: 1fr 1fr; }
-      .stats-kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .stats-kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
       .stats-kpi-key { font-size: 9px; }
       .stats-kpi-value { font-size: 13px; }
       .stats-acc-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }

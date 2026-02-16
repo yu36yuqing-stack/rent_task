@@ -255,8 +255,18 @@ async function queryDailyRowsFromOrder(userId, statDate, gameName, configuredAcc
                 SUM(CASE WHEN COALESCE(order_status, '') IN ('退款中', '已退款') THEN 1 ELSE 0 END) AS order_cnt_refund,
                 SUM(CASE WHEN COALESCE(order_status, '') IN ('已撤单', '投诉/撤单') THEN 1 ELSE 0 END) AS order_cnt_cancel,
                 SUM(CASE WHEN COALESCE(rec_amount, 0) <= 0 THEN 1 ELSE 0 END) AS order_cnt_zero_rec,
-                ROUND(SUM(COALESCE(rent_hour, 0)), 2) AS rent_hour_sum,
-                ROUND(SUM(COALESCE(order_amount, 0)), 2) AS amount_order_sum,
+                ROUND(SUM(CASE
+                    WHEN COALESCE(order_status, '') IN ('租赁中', '出租中')
+                      OR (COALESCE(order_status, '') NOT IN ('租赁中', '出租中') AND COALESCE(rec_amount, 0) > 0)
+                    THEN COALESCE(rent_hour, 0)
+                    ELSE 0 END
+                ), 2) AS rent_hour_sum,
+                ROUND(SUM(CASE
+                    WHEN COALESCE(order_status, '') IN ('租赁中', '出租中')
+                      OR (COALESCE(order_status, '') NOT IN ('租赁中', '出租中') AND COALESCE(rec_amount, 0) > 0)
+                    THEN COALESCE(order_amount, 0)
+                    ELSE 0 END
+                ), 2) AS amount_order_sum,
                 ROUND(SUM(COALESCE(rec_amount, 0)), 2) AS amount_rec_sum,
                 ROUND(SUM(CASE
                     WHEN COALESCE(order_status, '') IN ('退款中', '已退款') THEN COALESCE(order_amount, 0) - COALESCE(rec_amount, 0)
