@@ -54,6 +54,12 @@ function startOrderSyncWorkerIfNeeded(options = {}) {
     const taskDir = String(options.task_dir || path.join(__dirname, '..'));
     const runRecord = options.run_record && typeof options.run_record === 'object' ? options.run_record : null;
     const logger = options.logger && typeof options.logger.log === 'function' ? options.logger : console;
+    const now = new Date();
+    const totalSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+    const intervalSec = intervalMin * 60;
+    const offset = totalSec % intervalSec;
+    const toNext = intervalSec - offset;
+    logger.log(`[OrderSync] window_check now=${now.toISOString()} totalSec=${totalSec} intervalSec=${intervalSec} offset=${offset} windowSec=${windowSec} nextInSec=${toNext}`);
 
     if (!enabled) {
         logger.log('[OrderSync] 异步订单同步开关关闭，跳过触发');
