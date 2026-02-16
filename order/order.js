@@ -29,10 +29,37 @@ const {
 const CHANNEL_UHAOZU = 'uhaozu';
 const CHANNEL_ZHW = 'zuhaowang';
 const CHANNEL_ZHW_YUANBAO = 'zuhaowang-yuanbao';
-const ORDER_3_OFF_REASON = '3单下架';
 const ORDER_3_OFF_SOURCE = 'order_3_off';
 const ORDER_3_OFF_THRESHOLD = 3;
+const ORDER_OFF_THRESHOLD_RULE_NAME = 'X单下架阈值';
 const ORDER_3_OFF_BLOCK_RECOVER_RULE_NAME = '3单下架-不恢复时段';
+
+function normalizeOrderOffThreshold(v, fallback = ORDER_3_OFF_THRESHOLD) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(1, Math.min(10, Math.floor(n)));
+}
+
+function buildOrderOffReasonByThreshold(threshold) {
+    return `${normalizeOrderOffThreshold(threshold)}单下架`;
+}
+
+function isOrderOffReason(reasonText) {
+    const text = String(reasonText || '').trim();
+    return /^\d+单下架$/.test(text);
+}
+
+async function getOrderOffThresholdByUser(userId) {
+    const uid = Number(userId || 0);
+    if (!uid) return ORDER_3_OFF_THRESHOLD;
+    const rule = await getUserRuleByName(uid, ORDER_OFF_THRESHOLD_RULE_NAME);
+    if (!rule || !rule.rule_detail || typeof rule.rule_detail !== 'object') {
+        return ORDER_3_OFF_THRESHOLD;
+    }
+    const detail = rule.rule_detail;
+    const raw = detail.threshold ?? detail.order_off_threshold ?? detail.value;
+    return normalizeOrderOffThreshold(raw, ORDER_3_OFF_THRESHOLD);
+}
 
 function summarizeOrderRange(orderList = [], fields = {}) {
     const startKey = String(fields.start || '');
@@ -475,6 +502,8 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     if (!uid) throw new Error('user_id 不合法');
 
     const order3OffEnabled = getOrder3OffEnabled(user);
+    const orderOffThreshold = await getOrderOffThresholdByUser(uid);
+    const orderOffReason = buildOrderOffReasonByThreshold(orderOffThreshold);
     const rows = await listAllUserGameAccountsByUser(uid);
     const accountToRemark = new Map();
     for (const row of rows) {
@@ -494,7 +523,7 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     if (order3OffEnabled) {
         for (const acc of allAccounts) {
             const c = Number(todayPaidCounts[acc] || 0);
-            if (c >= ORDER_3_OFF_THRESHOLD) targetSet.add(acc);
+            if (c >= orderOffThreshold) targetSet.add(acc);
         }
     }
 
@@ -502,7 +531,7 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     const current = await listUserBlacklistByUserWithMeta(uid);
     const currentSet = new Set(
         current
-            .filter((x) => String(x.reason || '').trim() === ORDER_3_OFF_REASON)
+            .filter((x) => isOrderOffReason(x.reason))
             .map((x) => String(x.game_account || '').trim())
             .filter(Boolean)
     );
@@ -522,7 +551,7 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
         toDelete.push(acc);
     }
 
-    console.log(`[Order3Off] user_id=${uid} enabled=${order3OffEnabled} total_accounts=${allAccounts.length} threshold=${ORDER_3_OFF_THRESHOLD}`);
+    console.log(`[Order3Off] user_id=${uid} enabled=${order3OffEnabled} total_accounts=${allAccounts.length} threshold=${orderOffThreshold}`);
     console.log(`[Order3Off] count_details=${JSON.stringify(countDetails)}`);
     console.log(`[Order3Off] current=${JSON.stringify(Array.from(currentSet))} target=${JSON.stringify(Array.from(targetSet))}`);
     console.log(`[Order3Off] to_add=${JSON.stringify(toAdd)} to_delete=${JSON.stringify(toDelete)} blocked_delete=${JSON.stringify(toDeleteBlocked)}`);
@@ -533,7 +562,7 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
         await upsertUserBlacklistEntry(uid, {
             game_account: acc,
             remark: accountToRemark.get(acc) || '',
-            reason: ORDER_3_OFF_REASON
+            reason: orderOffReason
         }, {
             source: ORDER_3_OFF_SOURCE,
             operator: 'order_worker',
@@ -543,7 +572,6 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     }
     for (const acc of toDelete) {
         const ok = await hardDeleteUserBlacklistEntry(uid, acc, {
-            reason_expected: ORDER_3_OFF_REASON,
             source: ORDER_3_OFF_SOURCE,
             operator: 'order_worker',
             desc: `auto remove by ${ORDER_3_OFF_SOURCE}`
@@ -554,7 +582,8 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     return {
         enabled: order3OffEnabled,
         count_basis: 'rec_amount_gt_0_or_renting',
-        threshold: ORDER_3_OFF_THRESHOLD,
+        threshold: orderOffThreshold,
+        reason: orderOffReason,
         total_accounts: allAccounts.length,
         count_details: countDetails,
         hit_accounts: targetSet.size,

@@ -371,6 +371,40 @@
       color: #49627d;
     }
 
+    .drawer-user-rule-row {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .drawer-user-rule-text {
+      margin: 0;
+      font-size: 12px;
+      color: #36506a;
+      font-weight: 600;
+    }
+
+    .drawer-rule-btn {
+      border: 1px solid #cddaea;
+      background: rgba(255, 255, 255, 0.72);
+      color: #4f6883;
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1;
+      cursor: pointer;
+      flex: 0 0 auto;
+      transition: all .14s ease;
+    }
+
+    .drawer-rule-btn:active {
+      transform: scale(0.98);
+    }
+
     .drawer-item {
       border: 1px solid #dde6f0;
       border-radius: 10px;

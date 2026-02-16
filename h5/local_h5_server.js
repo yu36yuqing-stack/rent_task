@@ -28,6 +28,11 @@ const {
     verifyRefreshSession,
     revokeRefreshSession
 } = require('../database/user_session_db');
+const {
+    initUserRuleDb,
+    getUserRuleByName,
+    upsertUserRuleByName
+} = require('../database/user_rule_db');
 const { createAccessToken, createOpaqueRefreshToken } = require('../user/auth_token');
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
 const { queryAccountOnlineStatus, setForbiddenPlay } = require('../uuzuhao/uuzuhao_api');
@@ -43,6 +48,13 @@ const PORT = Number(process.env.H5_PORT || 8080);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const H5_REFRESH_TTL_REMEMBER_SEC = Number(process.env.H5_REFRESH_TTL_REMEMBER_SEC || (7 * 24 * 3600));
 const H5_REFRESH_TTL_SESSION_SEC = Number(process.env.H5_REFRESH_TTL_SESSION_SEC || (12 * 3600));
+const ORDER_OFF_THRESHOLD_RULE_NAME = 'X单下架阈值';
+
+function normalizeOrderOffThreshold(v, fallback = 3) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(1, Math.min(10, Math.floor(n)));
+}
 
 function json(res, code, payload) {
     res.writeHead(code, {
@@ -347,6 +359,30 @@ async function handleStatsRefresh(req, res) {
     return json(res, 200, { ok: true, ...out });
 }
 
+async function handleGetOrderOffThreshold(req, res) {
+    const user = await requireAuth(req);
+    const rule = await getUserRuleByName(user.id, ORDER_OFF_THRESHOLD_RULE_NAME);
+    const detail = rule && rule.rule_detail && typeof rule.rule_detail === 'object' ? rule.rule_detail : {};
+    const threshold = normalizeOrderOffThreshold(detail.threshold ?? detail.order_off_threshold ?? detail.value, 3);
+    return json(res, 200, { ok: true, threshold, rule_name: ORDER_OFF_THRESHOLD_RULE_NAME });
+}
+
+async function handleSetOrderOffThreshold(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const threshold = normalizeOrderOffThreshold(body.threshold, NaN);
+    if (!Number.isFinite(threshold)) {
+        return json(res, 400, { ok: false, message: 'threshold 必须是 1~10 的整数' });
+    }
+    await upsertUserRuleByName(user.id, {
+        rule_name: ORDER_OFF_THRESHOLD_RULE_NAME,
+        rule_detail: { threshold }
+    }, {
+        desc: 'set by h5'
+    });
+    return json(res, 200, { ok: true, threshold, rule_name: ORDER_OFF_THRESHOLD_RULE_NAME });
+}
+
 async function handleBlacklistAdd(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
@@ -519,6 +555,7 @@ async function bootstrap() {
     await initUserPlatformRestrictDb();
     await initOrderDb();
     await initUserSessionDb();
+    await initUserRuleDb();
 
     const server = http.createServer(async (req, res) => {
         const urlObj = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -530,6 +567,8 @@ async function bootstrap() {
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/dashboard') return await handleStatsDashboard(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/calendar') return await handleStatsCalendar(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/stats/refresh') return await handleStatsRefresh(req, res);
+            if (req.method === 'GET' && urlObj.pathname === '/api/user-rules/order-off-threshold') return await handleGetOrderOffThreshold(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/user-rules/order-off-threshold') return await handleSetOrderOffThreshold(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/online') return await handleProductOnlineQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/play') return await handleProductForbiddenPlay(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/purchase-config') return await handleProductPurchaseConfig(req, res);

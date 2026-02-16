@@ -104,6 +104,9 @@
         missing_purchase_accounts: [],
         configured_account_count: 0
       },
+      userRules: {
+        order_off_threshold: 3
+      },
       onlineStatusMap: {},
       onlineLoadingMap: {},
       forbiddenLoadingMap: {},
@@ -173,6 +176,8 @@
       btnLogin: document.getElementById('btnLogin'),
       btnLogout: document.getElementById('btnLogout'),
       drawerUserName: document.getElementById('drawerUserName'),
+      drawerOrderOffThreshold: document.getElementById('drawerOrderOffThreshold'),
+      btnSetOrderOffThreshold: document.getElementById('btnSetOrderOffThreshold'),
       pullRefresh: document.getElementById('pullRefresh'),
       pullRefreshInner: document.getElementById('pullRefreshInner'),
       filters: document.getElementById('filters'),
@@ -325,6 +330,7 @@
         );
         state.page = 1;
         await loadList();
+        await loadOrderOffThresholdRule();
         render();
       } catch (e) {
         els.loginErr.textContent = e.message;
@@ -369,6 +375,12 @@
         configured_account_count: Number(data.configured_account_count || 0)
       };
     }
+
+    async function loadOrderOffThresholdRule() {
+      const data = await request('/api/user-rules/order-off-threshold');
+      const v = Number(data.threshold || 3);
+      state.userRules.order_off_threshold = Number.isFinite(v) ? Math.max(1, Math.min(10, Math.floor(v))) : 3;
+    }
     function renderDrawer() {
       const opened = Boolean(state.drawerOpen);
       els.drawerMask.classList.toggle('hidden', !opened);
@@ -410,6 +422,9 @@
       }
       if (loggedIn) {
         els.drawerUserName.textContent = `当前用户：${state.user.name || state.user.account}`;
+        if (els.drawerOrderOffThreshold) {
+          els.drawerOrderOffThreshold.textContent = `X单下架阈值：${Number(state.userRules.order_off_threshold || 3)}`;
+        }
         if (showProducts) renderList();
         if (showOrders) renderOrdersView();
         if (showStats) renderStatsView();
@@ -421,6 +436,9 @@
         if (showProducts) updatePullRefreshUi();
       } else {
         els.drawerUserName.textContent = '当前用户：-';
+        if (els.drawerOrderOffThreshold) {
+          els.drawerOrderOffThreshold.textContent = 'X单下架阈值：-';
+        }
         closeActionSheets();
         closePurchaseSheet();
         els.statsMissingOverlay.classList.add('hidden');
@@ -471,8 +489,34 @@
         missing_purchase_accounts: [],
         configured_account_count: 0
       };
+      state.userRules = { order_off_threshold: 3 };
       render();
     });
+
+    if (els.btnSetOrderOffThreshold) {
+      els.btnSetOrderOffThreshold.addEventListener('click', async () => {
+        try {
+          const current = Number(state.userRules.order_off_threshold || 3);
+          const raw = window.prompt('设置X单下架阈值（1~10）', String(current));
+          if (raw == null) return;
+          const n = Number(String(raw).trim());
+          if (!Number.isFinite(n) || n < 1 || n > 10) {
+            alert('请输入 1~10 的整数');
+            return;
+          }
+          const threshold = Math.floor(n);
+          await request('/api/user-rules/order-off-threshold', {
+            method: 'POST',
+            body: JSON.stringify({ threshold })
+          });
+          state.userRules.order_off_threshold = threshold;
+          render();
+          showToast(`已设置为${threshold}单下架`);
+        } catch (e) {
+          alert(e.message || '阈值设置失败');
+        }
+      });
+    }
 
     els.prevPage.addEventListener('click', async () => {
       if (state.page <= 1) return;
@@ -680,6 +724,7 @@
           await loadList();
           await loadOrders();
           await loadStatsBoard();
+          await loadOrderOffThresholdRule();
         } catch {
           clearAuthState();
         }
