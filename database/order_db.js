@@ -531,7 +531,11 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
               AND is_deleted = 0
               AND game_account IN (${placeholders})
               AND (
-                  COALESCE(order_status, '') IN ('租赁中', '出租中')
+                  (
+                      COALESCE(order_status, '') IN ('租赁中', '出租中')
+                      AND end_time >= ?
+                      AND end_time < datetime(?, '+1 day')
+                  )
                   OR (
                       COALESCE(order_status, '') NOT IN ('租赁中', '出租中')
                       AND end_time >= ?
@@ -540,7 +544,7 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
                   )
               )
             GROUP BY game_account
-        `, [uid, ...uniq, dayStart6, dayStart6]);
+        `, [uid, ...uniq, dayStart6, dayStart6, dayStart6, dayStart6]);
         const out = {};
         for (const row of rows) {
             const acc = String(row.game_account || '').trim();
