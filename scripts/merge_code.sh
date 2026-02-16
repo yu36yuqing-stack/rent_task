@@ -48,7 +48,7 @@ EOF
 echo "[OK] 宿主机已提交并推送"
 
 echo "[Step 3/5] 重启宿主机 H5 服务并做健康检查..."
-REMOTE_H5_CMD="cd '${REMOTE_DIR}' && pkill -f '/Users/mac/.openclaw/workspace/rent_task/h5/local_h5_server.js' || true; nohup /usr/local/bin/node h5/local_h5_server.js > log/h5_local_server.log 2>&1 & sleep 2; curl -fsS http://127.0.0.1:8080/api/ping"
+REMOTE_H5_CMD="cd '${REMOTE_DIR}' && pkill -f 'h5/local_h5_server.js' || true; lsof -tiTCP:8080 -sTCP:LISTEN | xargs -I{} kill -9 {} || true; nohup /usr/local/bin/node '${REMOTE_DIR}h5/local_h5_server.js' > log/h5_local_server.log 2>&1 & sleep 2; curl -fsS http://127.0.0.1:8080/api/ping"
 /usr/bin/expect <<EOF
 set timeout -1
 spawn ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new ${REMOTE_USER}@${REMOTE_HOST} "${REMOTE_H5_CMD}"

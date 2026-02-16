@@ -180,6 +180,26 @@
     </div>
   </div>
 
+  <div id="orderOffThresholdSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon">阈</span>
+          <div class="sheet-title">设置下架阈值</div>
+        </div>
+        <div id="orderOffThresholdSheetResult" class="sheet-result"></div>
+      </div>
+      <div class="field" style="margin-top:0;">
+        <label for="orderOffThresholdInput">X单下架阈值（1~10）</label>
+        <input id="orderOffThresholdInput" type="number" step="1" min="1" max="10" inputmode="numeric" placeholder="请输入 1~10">
+      </div>
+      <div class="sheet-actions">
+        <button id="orderOffThresholdSaveBtn" class="sheet-btn">保存</button>
+        <button id="orderOffThresholdCancelBtn" class="sheet-btn">关闭弹窗</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
 
   <div id="statsMissingOverlay" class="stats-missing-overlay hidden">

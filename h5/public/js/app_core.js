@@ -228,8 +228,55 @@
       purchasePriceInput: document.getElementById('purchasePriceInput'),
       purchaseDateInput: document.getElementById('purchaseDateInput'),
       purchaseSaveBtn: document.getElementById('purchaseSaveBtn'),
-      purchaseCancelBtn: document.getElementById('purchaseCancelBtn')
+      purchaseCancelBtn: document.getElementById('purchaseCancelBtn'),
+      orderOffThresholdSheet: document.getElementById('orderOffThresholdSheet'),
+      orderOffThresholdSheetResult: document.getElementById('orderOffThresholdSheetResult'),
+      orderOffThresholdInput: document.getElementById('orderOffThresholdInput'),
+      orderOffThresholdSaveBtn: document.getElementById('orderOffThresholdSaveBtn'),
+      orderOffThresholdCancelBtn: document.getElementById('orderOffThresholdCancelBtn')
     };
+
+    function closeOrderOffThresholdSheet() {
+      if (!els.orderOffThresholdSheet) return;
+      els.orderOffThresholdSheet.classList.add('hidden');
+      if (els.orderOffThresholdSheetResult) {
+        els.orderOffThresholdSheetResult.textContent = '';
+        els.orderOffThresholdSheetResult.classList.remove('ok', 'err');
+      }
+    }
+
+    function openOrderOffThresholdSheet() {
+      if (!els.orderOffThresholdSheet) return;
+      if (els.orderOffThresholdInput) {
+        els.orderOffThresholdInput.value = String(Number(state.userRules.order_off_threshold || 3));
+      }
+      if (els.orderOffThresholdSheetResult) {
+        els.orderOffThresholdSheetResult.textContent = '';
+        els.orderOffThresholdSheetResult.classList.remove('ok', 'err');
+      }
+      els.orderOffThresholdSheet.classList.remove('hidden');
+    }
+
+    async function submitOrderOffThreshold() {
+      const raw = String((els.orderOffThresholdInput && els.orderOffThresholdInput.value) || '').trim();
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 1 || n > 10) {
+        if (els.orderOffThresholdSheetResult) {
+          els.orderOffThresholdSheetResult.textContent = '请输入 1~10 的整数';
+          els.orderOffThresholdSheetResult.classList.add('err');
+        }
+        return;
+      }
+      const threshold = Math.floor(n);
+      await request('/api/user-rules/order-off-threshold', {
+        method: 'POST',
+        body: JSON.stringify({ threshold })
+      });
+      state.userRules.order_off_threshold = threshold;
+      render();
+      closeOrderOffThresholdSheet();
+      showToast(`已设置为${threshold}单下架`);
+    }
 
     function setAuth(accessToken, user, refreshToken = '', rememberLogin = state.rememberLogin) {
       state.token = String(accessToken || '').trim();
@@ -441,6 +488,7 @@
         }
         closeActionSheets();
         closePurchaseSheet();
+        closeOrderOffThresholdSheet();
         els.statsMissingOverlay.classList.add('hidden');
         resetPullRefreshUi();
       }
@@ -494,27 +542,26 @@
     });
 
     if (els.btnSetOrderOffThreshold) {
-      els.btnSetOrderOffThreshold.addEventListener('click', async () => {
+      els.btnSetOrderOffThreshold.addEventListener('click', () => openOrderOffThresholdSheet());
+    }
+    if (els.orderOffThresholdSaveBtn) {
+      els.orderOffThresholdSaveBtn.addEventListener('click', async () => {
         try {
-          const current = Number(state.userRules.order_off_threshold || 3);
-          const raw = window.prompt('设置X单下架阈值（1~10）', String(current));
-          if (raw == null) return;
-          const n = Number(String(raw).trim());
-          if (!Number.isFinite(n) || n < 1 || n > 10) {
-            alert('请输入 1~10 的整数');
-            return;
-          }
-          const threshold = Math.floor(n);
-          await request('/api/user-rules/order-off-threshold', {
-            method: 'POST',
-            body: JSON.stringify({ threshold })
-          });
-          state.userRules.order_off_threshold = threshold;
-          render();
-          showToast(`已设置为${threshold}单下架`);
+          await submitOrderOffThreshold();
         } catch (e) {
-          alert(e.message || '阈值设置失败');
+          if (els.orderOffThresholdSheetResult) {
+            els.orderOffThresholdSheetResult.textContent = e.message || '阈值设置失败';
+            els.orderOffThresholdSheetResult.classList.add('err');
+          }
         }
+      });
+    }
+    if (els.orderOffThresholdCancelBtn) {
+      els.orderOffThresholdCancelBtn.addEventListener('click', () => closeOrderOffThresholdSheet());
+    }
+    if (els.orderOffThresholdSheet) {
+      els.orderOffThresholdSheet.addEventListener('click', (e) => {
+        if (e.target === els.orderOffThresholdSheet) closeOrderOffThresholdSheet();
       });
     }
 
