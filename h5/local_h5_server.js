@@ -27,6 +27,7 @@ const {
 const { createAccessToken, createOpaqueRefreshToken } = require('../user/auth_token');
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
 const { queryAccountOnlineStatus, setForbiddenPlay } = require('../uuzuhao/uuzuhao_api');
+const { listOrdersForUser } = require('../order/order');
 
 const HOST = process.env.H5_HOST || '0.0.0.0';
 const PORT = Number(process.env.H5_PORT || 8080);
@@ -283,6 +284,23 @@ async function handleProducts(req, res, urlObj) {
     });
 }
 
+async function handleOrders(req, res, urlObj) {
+    const user = await requireAuth(req);
+    const page = normalizePage(urlObj.searchParams.get('page'), 1);
+    const pageSize = Math.min(100, normalizePage(urlObj.searchParams.get('page_size'), 20));
+    const quickFilter = String(urlObj.searchParams.get('quick_filter') || 'today').trim().toLowerCase();
+    const statusFilter = String(urlObj.searchParams.get('status_filter') || 'all').trim().toLowerCase();
+    const gameName = String(urlObj.searchParams.get('game_name') || 'WZRY').trim() || 'WZRY';
+    const data = await listOrdersForUser(user.id, {
+        page,
+        page_size: pageSize,
+        quick_filter: quickFilter,
+        status_filter: statusFilter,
+        game_name: gameName
+    });
+    return json(res, 200, { ok: true, ...data });
+}
+
 async function handleBlacklistAdd(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
@@ -408,6 +426,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/login') return await handleLogin(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/refresh') return await handleRefresh(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/products') return await handleProducts(req, res, urlObj);
+            if (req.method === 'GET' && urlObj.pathname === '/api/orders') return await handleOrders(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/online') return await handleProductOnlineQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/play') return await handleProductForbiddenPlay(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/add') return await handleBlacklistAdd(req, res);

@@ -849,6 +849,203 @@
       padding: 10px;
     }
 
+    .orders-view {
+      display: grid;
+      gap: 12px;
+    }
+
+    .orders-tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .orders-tab {
+      border: 1px solid #d8e1ec;
+      border-radius: 12px;
+      padding: 8px 10px;
+      background: #f8fbff;
+      color: #2a3d55;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .orders-tab.active {
+      border-color: #83b7ec;
+      background: linear-gradient(135deg, #f0f7ff, #e5f1ff);
+      box-shadow: 0 4px 10px rgba(20, 101, 181, 0.12);
+    }
+
+    .orders-quick {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+
+    .orders-quick::-webkit-scrollbar {
+      display: none;
+    }
+
+    .orders-quick-item {
+      border: 1px solid #d8e1ec;
+      border-radius: 999px;
+      padding: 7px 10px;
+      background: #fff;
+      color: #41566f;
+      font-size: 12px;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .orders-quick-item.active {
+      border-color: #83b7ec;
+      background: #edf5ff;
+      color: #19558f;
+      font-weight: 700;
+    }
+
+    .orders-game-hint {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .order-card {
+      border: 1px solid #dce6f0;
+      border-radius: 16px;
+      background: #fff;
+      padding: 14px 14px 12px;
+      box-shadow: 0 8px 18px rgba(24, 40, 63, 0.08);
+      margin-bottom: 12px;
+    }
+
+    .order-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .order-card-role {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1a2f46;
+      margin: 0;
+    }
+
+    .order-card-line {
+      margin: 5px 0;
+      color: #566b82;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .order-id-row {
+      margin-top: -1px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 6px;
+    }
+
+    .order-id-label {
+      font-size: 12px;
+      color: #75869a;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: calc(100vw - 140px);
+      letter-spacing: .2px;
+    }
+
+    .order-copy-btn {
+      border: 0;
+      background: transparent;
+      color: #7388a0;
+      border-radius: 6px;
+      padding: 1px 4px;
+      font-size: 12px;
+      line-height: 1;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+
+    .order-bottom {
+      margin-top: 8px;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .order-bottom-left {
+      color: #5b6f85;
+      font-size: 13px;
+    }
+
+    .order-income {
+      color: #c85a1b;
+      font-weight: 800;
+      font-size: 19px;
+      letter-spacing: .2px;
+      white-space: nowrap;
+    }
+
+    .order-income-label {
+      color: #5f7389;
+      font-size: 12px;
+      margin-right: 4px;
+      font-weight: 600;
+    }
+
+    .order-chip {
+      border: 1px solid #dbe5ef;
+      background: #f7fbff;
+      color: #30465e;
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .order-chip.done {
+      background: #f8fbff;
+      border-color: #d6e1ed;
+      color: #40566f;
+    }
+
+    .order-chip.progress {
+      background: #eef9f3;
+      border-color: #bfe5d1;
+      color: #1f6a47;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 22px;
+      transform: translateX(-50%);
+      z-index: 1400;
+      background: rgba(16, 31, 49, 0.92);
+      color: #fff;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 12px;
+      line-height: 1;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .16s ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+    }
+
     .page-info {
       font-size: 12px;
       color: var(--muted);
@@ -917,6 +1114,18 @@
       </div>
     </section>
 
+    <section id="orderView" class="hidden orders-view">
+      <div id="orderStatusTabs" class="orders-tabs"></div>
+      <div id="orderQuickFilters" class="orders-quick"></div>
+      <p id="orderGameHint" class="orders-game-hint"></p>
+      <div id="orderListContainer"></div>
+      <div class="pager">
+        <button id="orderPrevPage" class="btn btn-ghost">上一页</button>
+        <span id="orderPageInfo" class="page-info"></span>
+        <button id="orderNextPage" class="btn btn-ghost">下一页</button>
+      </div>
+    </section>
+
     <div id="drawerMask" class="drawer-mask hidden"></div>
     <aside id="sideDrawer" class="side-drawer hidden" aria-hidden="true">
       <div class="drawer-user">
@@ -926,9 +1135,9 @@
         </div>
       </div>
       <div class="drawer-list">
-        <button class="drawer-item" data-menu="products">商品列表（当前）</button>
-        <button class="drawer-item" data-menu="orders">订单列表（开发中）</button>
-        <button class="drawer-item" data-menu="auth">授权管理（开发中）</button>
+        <button class="drawer-item" data-menu="products" data-label="商品列表">商品列表</button>
+        <button class="drawer-item" data-menu="orders" data-label="订单列表">订单列表</button>
+        <button class="drawer-item" data-menu="auth" data-label="授权管理（开发中）">授权管理（开发中）</button>
       </div>
     </aside>
   </div>
@@ -959,6 +1168,8 @@
       </div>
     </div>
   </div>
+
+  <div id="toast" class="toast"></div>
 
   <script>
     const AUTH_BUNDLE_KEY = 'h5_auth_bundle';
@@ -1009,6 +1220,21 @@
       sessionStorage.removeItem(LEGACY_USER_KEY);
     }
 
+    function showToast(msg) {
+      const node = document.getElementById('toast');
+      if (!node) return;
+      if (toastTimer) {
+        clearTimeout(toastTimer);
+        toastTimer = null;
+      }
+      node.textContent = String(msg || '');
+      node.classList.add('show');
+      toastTimer = setTimeout(() => {
+        node.classList.remove('show');
+        toastTimer = null;
+      }, 1200);
+    }
+
     const initialAuth = loadInitialAuth();
     const SUPPORT_TOUCH_PULL = ('ontouchstart' in window) || Number(navigator.maxTouchPoints || 0) > 0;
 
@@ -1026,6 +1252,16 @@
       drawerOpen: false,
       pullRefresh: { dragging: false, ready: false, loading: false, startY: 0, distance: 0 },
       stats: { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_renting: 0, total_paid: 0 },
+      orders: {
+        status_filter: 'all',
+        quick_filter: 'today',
+        game_name: 'WZRY',
+        page: 1,
+        pageSize: 20,
+        total: 0,
+        stats: { progress: 0, done: 0 },
+        list: []
+      },
       onlineStatusMap: {},
       onlineLoadingMap: {},
       forbiddenLoadingMap: {},
@@ -1034,6 +1270,7 @@
     };
     const API_BASE = window.location.pathname.startsWith('/h5local') ? '/h5local' : '';
     let refreshPromise = null;
+    let toastTimer = null;
 
     function menuTitleByKey(key) {
       const k = String(key || '').trim();
@@ -1045,6 +1282,7 @@
     const els = {
       loginView: document.getElementById('loginView'),
       listView: document.getElementById('listView'),
+      orderView: document.getElementById('orderView'),
       heroLoginView: document.getElementById('heroLoginView'),
       heroAppView: document.getElementById('heroAppView'),
       heroMenuTitle: document.getElementById('heroMenuTitle'),
@@ -1060,6 +1298,13 @@
       filters: document.getElementById('filters'),
       orderTotal: document.getElementById('orderTotal'),
       listContainer: document.getElementById('listContainer'),
+      orderStatusTabs: document.getElementById('orderStatusTabs'),
+      orderQuickFilters: document.getElementById('orderQuickFilters'),
+      orderGameHint: document.getElementById('orderGameHint'),
+      orderListContainer: document.getElementById('orderListContainer'),
+      orderPrevPage: document.getElementById('orderPrevPage'),
+      orderNextPage: document.getElementById('orderNextPage'),
+      orderPageInfo: document.getElementById('orderPageInfo'),
       prevPage: document.getElementById('prevPage'),
       nextPage: document.getElementById('nextPage'),
       pageInfo: document.getElementById('pageInfo'),
@@ -1189,6 +1434,16 @@
       state.stats = data.stats || { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_renting: 0, total_paid: 0 };
     }
 
+    async function loadOrders() {
+      const o = state.orders || {};
+      const data = await request(`/api/orders?page=${o.page}&page_size=${o.pageSize}&status_filter=${o.status_filter}&quick_filter=${o.quick_filter}&game_name=${encodeURIComponent(o.game_name || 'WZRY')}`);
+      state.orders.total = Number(data.total || 0);
+      state.orders.list = Array.isArray(data.list) ? data.list : [];
+      state.orders.stats = data.stats || { progress: 0, done: 0 };
+      state.orders.page = Number(data.page || o.page || 1);
+      state.orders.pageSize = Number(data.page_size || o.pageSize || 20);
+    }
+
     function platformBadges(v) {
       const s = v || {};
       return [
@@ -1214,9 +1469,9 @@
           document.execCommand('copy');
           document.body.removeChild(t);
         }
-        alert('账号已复制');
+        showToast('已复制');
       } catch (_) {
-        alert('复制失败，请手动复制');
+        showToast('复制失败');
       }
     }
 
@@ -1525,6 +1780,92 @@
       els.nextPage.disabled = state.page >= totalPages;
     }
 
+    function formatOrderTimeRange(item) {
+      const s = String(item.start_time || '').slice(5, 16);
+      const e = String(item.end_time || '').slice(5, 16);
+      return `${s} ~ ${e}`;
+    }
+
+    function renderOrdersView() {
+      const o = state.orders || {};
+      const tabs = [
+        { k: 'all', t: '全部', n: Number(o.total || 0) },
+        { k: 'progress', t: `进行中(${Number((o.stats && o.stats.progress) || 0)})`, n: Number((o.stats && o.stats.progress) || 0) },
+        { k: 'done', t: '已完成', n: Number((o.stats && o.stats.done) || 0) }
+      ];
+      const quick = [
+        { k: 'today', t: '当日' },
+        { k: 'yesterday', t: '昨日' },
+        { k: 'week', t: '本周' },
+        { k: 'last7', t: '近7天' },
+        { k: 'month', t: '本月' },
+        { k: 'last30', t: '近30天' }
+      ];
+      els.orderStatusTabs.innerHTML = tabs.map((x) => `
+        <button class="orders-tab ${o.status_filter === x.k ? 'active' : ''}" data-order-status="${x.k}">${x.t}</button>
+      `).join('');
+      els.orderQuickFilters.innerHTML = quick.map((x) => `
+        <button class="orders-quick-item ${o.quick_filter === x.k ? 'active' : ''}" data-order-quick="${x.k}">${x.t}</button>
+      `).join('');
+      els.orderGameHint.textContent = `游戏：${o.game_name || 'WZRY'}（默认）`;
+
+      if (!Array.isArray(o.list) || o.list.length === 0) {
+        els.orderListContainer.innerHTML = '<div class="panel"><div style="color:#6d7a8a;font-size:13px;">暂无订单数据</div></div>';
+      } else {
+        els.orderListContainer.innerHTML = o.list.map((item) => `
+          <div class="order-card">
+            <div class="order-card-top">
+              <p class="order-card-role">${item.role_name || item.game_account || '-'}</p>
+              <span class="order-chip ${(String(item.order_status || '') === '租赁中' || String(item.order_status || '') === '出租中') ? 'progress' : 'done'}">${item.order_status || '-'}</span>
+            </div>
+            <div class="order-id-row">
+              <span class="order-id-label">No.${item.order_no || '-'}</span>
+              <button class="order-copy-btn" data-order-copy="${item.order_no || ''}">复制</button>
+            </div>
+            <div class="order-card-line">${formatOrderTimeRange(item)}</div>
+            <div class="order-card-line">渠道：${item.channel || '-'} · 账号：${item.game_account || '-'}</div>
+            <div class="order-bottom">
+              <div class="order-bottom-left">
+                时长：${Number(item.rent_hour || 0)}小时 · 订单金额：¥${Number(item.order_amount || 0).toFixed(2)}
+              </div>
+              <div class="order-income">
+                <span class="order-income-label">实际收入</span>¥${Number(item.rec_amount || 0).toFixed(2)}
+              </div>
+            </div>
+          </div>
+        `).join('');
+        Array.from(els.orderListContainer.querySelectorAll('[data-order-copy]')).forEach((n) => {
+          n.addEventListener('click', () => copyAccount(n.getAttribute('data-order-copy') || ''));
+        });
+      }
+
+      Array.from(els.orderStatusTabs.querySelectorAll('[data-order-status]')).forEach((n) => {
+        n.addEventListener('click', async () => {
+          const k = String(n.getAttribute('data-order-status') || 'all').trim();
+          if (k === o.status_filter) return;
+          state.orders.status_filter = k;
+          state.orders.page = 1;
+          await loadOrders();
+          renderOrdersView();
+        });
+      });
+      Array.from(els.orderQuickFilters.querySelectorAll('[data-order-quick]')).forEach((n) => {
+        n.addEventListener('click', async () => {
+          const k = String(n.getAttribute('data-order-quick') || 'today').trim();
+          if (k === o.quick_filter) return;
+          state.orders.quick_filter = k;
+          state.orders.page = 1;
+          await loadOrders();
+          renderOrdersView();
+        });
+      });
+
+      const totalPages = Math.max(1, Math.ceil(Number(o.total || 0) / Number(o.pageSize || 20)));
+      els.orderPageInfo.textContent = `第 ${o.page} / ${totalPages} 页 · 每页 ${o.pageSize} 条`;
+      els.orderPrevPage.disabled = o.page <= 1;
+      els.orderNextPage.disabled = o.page >= totalPages;
+    }
+
     function renderDrawer() {
       const opened = Boolean(state.drawerOpen);
       els.drawerMask.classList.toggle('hidden', !opened);
@@ -1532,7 +1873,10 @@
       els.sideDrawer.setAttribute('aria-hidden', opened ? 'false' : 'true');
       Array.from(document.querySelectorAll('.drawer-item')).forEach((n) => {
         const k = String(n.getAttribute('data-menu') || '').trim();
-        n.classList.toggle('active', k === state.currentMenu);
+        const active = k === state.currentMenu;
+        const baseLabel = String(n.getAttribute('data-label') || n.textContent || '').trim();
+        n.classList.toggle('active', active);
+        n.textContent = active ? `${baseLabel}（当前）` : baseLabel;
       });
     }
 
@@ -1549,7 +1893,10 @@
     function render() {
       const loggedIn = Boolean(state.token && state.user);
       els.loginView.classList.toggle('hidden', loggedIn);
-      els.listView.classList.toggle('hidden', !loggedIn);
+      const showProducts = loggedIn && state.currentMenu === 'products';
+      const showOrders = loggedIn && state.currentMenu === 'orders';
+      els.listView.classList.toggle('hidden', !showProducts);
+      els.orderView.classList.toggle('hidden', !showOrders);
       els.heroLoginView.classList.toggle('hidden', loggedIn);
       els.heroAppView.classList.toggle('hidden', !loggedIn);
       els.heroMenuTitle.textContent = menuTitleByKey(state.currentMenu);
@@ -1558,10 +1905,11 @@
       }
       if (loggedIn) {
         els.drawerUserName.textContent = `当前用户：${state.user.name || state.user.account}`;
-        renderList();
+        if (showProducts) renderList();
+        if (showOrders) renderOrdersView();
         renderDrawer();
         renderForbiddenSheet();
-        updatePullRefreshUi();
+        if (showProducts) updatePullRefreshUi();
       } else {
         els.drawerUserName.textContent = '当前用户：-';
         closeForbiddenSheet();
@@ -1601,6 +1949,21 @@
       renderList();
     });
 
+    els.orderPrevPage.addEventListener('click', async () => {
+      if (state.orders.page <= 1) return;
+      state.orders.page -= 1;
+      await loadOrders();
+      renderOrdersView();
+    });
+
+    els.orderNextPage.addEventListener('click', async () => {
+      const totalPages = Math.max(1, Math.ceil(Number(state.orders.total || 0) / Number(state.orders.pageSize || 20)));
+      if (state.orders.page >= totalPages) return;
+      state.orders.page += 1;
+      await loadOrders();
+      renderOrdersView();
+    });
+
     els.overlayClose.addEventListener('click', hideReason);
     els.reasonOverlay.addEventListener('click', (e) => {
       if (e.target === els.reasonOverlay) hideReason();
@@ -1619,8 +1982,22 @@
         const key = String(n.getAttribute('data-menu') || '').trim();
         state.currentMenu = key || 'products';
         closeDrawer();
+        if (key === 'products') {
+          render();
+          return;
+        }
+        if (key === 'orders') {
+          (async () => {
+            try {
+              await loadOrders();
+              render();
+            } catch (e) {
+              alert(e.message || '订单列表加载失败');
+            }
+          })();
+          return;
+        }
         render();
-        if (key === 'products') return;
         alert('该功能正在开发中');
       });
     });
@@ -1683,6 +2060,7 @@
       if (state.token && state.user) {
         try {
           await loadList();
+          await loadOrders();
         } catch {
           clearAuthState();
         }

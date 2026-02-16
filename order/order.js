@@ -15,6 +15,7 @@ const { listAllOrderPages } = require('../uhaozu/uhaozu_api');
 const { getOrderListByEncryptedPayload } = require('../zuhaowang/zuhaowang_api');
 const { listAllUserGameAccountsByUser } = require('../product/product');
 const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('../database/user_db');
+const { openDatabase } = require('../database/sqlite_client');
 const {
     CHANNEL_UUZUHAO,
     UUZUHAO_ORDER_FIELD_MAPPING,
@@ -51,6 +52,163 @@ function summarizeOrderRange(orderList = [], fields = {}) {
         min_start: minStart === Number.MAX_SAFE_INTEGER ? '' : new Date(minStart > 1e12 ? minStart : minStart * 1000).toISOString(),
         max_end: maxEnd > 0 ? new Date(maxEnd > 1e12 ? maxEnd : maxEnd * 1000).toISOString() : ''
     };
+}
+
+function dbAll(db, sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.all(sql, params, (err, rows) => {
+            if (err) return reject(err);
+            resolve(rows || []);
+        });
+    });
+}
+
+function dbGet(db, sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.get(sql, params, (err, row) => {
+            if (err) return reject(err);
+            resolve(row || null);
+        });
+    });
+}
+
+function pad2(n) {
+    return String(n).padStart(2, '0');
+}
+
+function toDateText(d) {
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function toDateTimeText(d) {
+    return `${toDateText(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+function startOfDay(d) {
+    const out = new Date(d);
+    out.setHours(0, 0, 0, 0);
+    return out;
+}
+
+function addDays(d, n) {
+    const out = new Date(d);
+    out.setDate(out.getDate() + n);
+    return out;
+}
+
+function resolveDateRangeByQuickFilter(filter = 'today', now = new Date()) {
+    const day0 = startOfDay(now);
+    const day6 = new Date(day0);
+    day6.setHours(6, 0, 0, 0);
+    const f = String(filter || 'today').trim().toLowerCase();
+    if (f === 'yesterday') {
+        return { start: addDays(day0, -1), end: day0 };
+    }
+    if (f === 'week') {
+        const weekday = day0.getDay() || 7;
+        const weekStart = addDays(day0, 1 - weekday);
+        weekStart.setHours(6, 0, 0, 0);
+        return { start: weekStart, end: addDays(day0, 1) };
+    }
+    if (f === 'last7') {
+        return { start: addDays(day0, -6), end: addDays(day0, 1) };
+    }
+    if (f === 'month') {
+        const start = new Date(day0.getFullYear(), day0.getMonth(), 1);
+        return { start, end: addDays(day0, 1) };
+    }
+    if (f === 'last30') {
+        return { start: addDays(day0, -29), end: addDays(day0, 1) };
+    }
+    return { start: day6, end: addDays(day0, 1) };
+}
+
+function normalizeOrderListOptions(options = {}) {
+    const page = Math.max(1, Number(options.page || 1));
+    const pageSize = Math.min(100, Math.max(1, Number(options.page_size || options.pageSize || 20)));
+    const quickFilter = String(options.quick_filter || options.quickFilter || 'today').trim().toLowerCase();
+    const statusFilterRaw = String(options.status_filter || options.statusFilter || 'all').trim().toLowerCase();
+    const statusFilter = (statusFilterRaw === 'progress' || statusFilterRaw === 'done' || statusFilterRaw === 'all')
+        ? statusFilterRaw
+        : 'all';
+    const gameName = String(options.game_name || options.gameName || 'WZRY').trim() || 'WZRY';
+    return { page, pageSize, quickFilter, statusFilter, gameName };
+}
+
+async function listOrdersForUser(userId, options = {}) {
+    await initOrderDb();
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+    const cfg = normalizeOrderListOptions(options);
+    const range = resolveDateRangeByQuickFilter(cfg.quickFilter, new Date());
+    const rangeStart = toDateTimeText(range.start);
+    const rangeEnd = toDateTimeText(range.end);
+
+    const where = [
+        'user_id = ?',
+        'is_deleted = 0',
+        "COALESCE(game_name, '') = ?",
+        'end_time >= ?',
+        'end_time < ?'
+    ];
+    const params = [uid, cfg.gameName, rangeStart, rangeEnd];
+
+    if (cfg.statusFilter === 'progress') {
+        where.push("COALESCE(order_status, '') IN ('租赁中', '出租中')");
+    } else if (cfg.statusFilter === 'done') {
+        where.push("COALESCE(order_status, '') NOT IN ('租赁中', '出租中')");
+    }
+
+    const whereSql = where.join(' AND ');
+    const db = openDatabase();
+    try {
+        const totalRow = await dbGet(db, `
+            SELECT COUNT(*) AS total
+            FROM "order"
+            WHERE ${whereSql}
+        `, params);
+        const countsRow = await dbGet(db, `
+            SELECT
+              SUM(CASE WHEN COALESCE(order_status, '') IN ('租赁中', '出租中') THEN 1 ELSE 0 END) AS progress_cnt,
+              SUM(CASE WHEN COALESCE(order_status, '') NOT IN ('租赁中', '出租中') THEN 1 ELSE 0 END) AS done_cnt
+            FROM "order"
+            WHERE user_id = ?
+              AND is_deleted = 0
+              AND COALESCE(game_name, '') = ?
+              AND end_time >= ?
+              AND end_time < ?
+        `, [uid, cfg.gameName, rangeStart, rangeEnd]);
+        const offset = (cfg.page - 1) * cfg.pageSize;
+        const list = await dbAll(db, `
+            SELECT
+              channel, order_no, game_id, game_name, game_account, role_name,
+              order_status, order_amount, rent_hour, ren_way, rec_amount,
+              start_time, end_time, create_date, modify_date
+            FROM "order"
+            WHERE ${whereSql}
+            ORDER BY end_time DESC, id DESC
+            LIMIT ? OFFSET ?
+        `, [...params, cfg.pageSize, offset]);
+        return {
+            page: cfg.page,
+            page_size: cfg.pageSize,
+            total: Number((totalRow && totalRow.total) || 0),
+            quick_filter: cfg.quickFilter,
+            status_filter: cfg.statusFilter,
+            game_name: cfg.gameName,
+            range: {
+                start: rangeStart,
+                end: rangeEnd
+            },
+            stats: {
+                progress: Number((countsRow && countsRow.progress_cnt) || 0),
+                done: Number((countsRow && countsRow.done_cnt) || 0)
+            },
+            list
+        };
+    } finally {
+        db.close();
+    }
 }
 
 function shouldTriggerOrderSyncNow(options = {}) {
@@ -832,6 +990,7 @@ module.exports = {
     syncZuhaowangOrdersToDb,
     syncOrdersByUser,
     syncOrdersForAllUsers,
+    listOrdersForUser,
     resolveUuzuhaoAuthByUser,
     resolveUhaozuAuthByUser,
     resolveZuhaowangAuthByUser,
