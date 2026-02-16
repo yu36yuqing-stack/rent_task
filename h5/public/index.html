@@ -518,9 +518,36 @@
       margin-top: 4px;
       display: flex;
       align-items: center;
-      justify-content: flex-start;
+      justify-content: space-between;
       gap: 8px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+    }
+
+    .account-left {
+      min-width: 0;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .account-actions {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: auto;
+    }
+
+    .purchase-brief {
+      border: 1px solid #d3e5f8;
+      background: #eef6ff;
+      color: #27517b;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 11px;
+      line-height: 1;
+      white-space: nowrap;
     }
 
     .copy-btn {
@@ -1225,6 +1252,15 @@
       .filter-tab .num,
       .filter-tab .txt { font-size: 11px; }
       .meta-grid { grid-template-columns: 1fr 1fr; }
+
+      .account-row {
+        flex-wrap: wrap;
+      }
+
+      .account-actions {
+        width: 100%;
+        justify-content: flex-end;
+      }
     }
   </style>
 </head>
@@ -1886,6 +1922,13 @@
       return `<span class="chip ${onlineClass}">${onlineText}</span>`;
     }
 
+    function buildPurchaseBriefHtml(item) {
+      const p = Number(item && item.purchase_price);
+      const d = String(item && item.purchase_date || '').slice(0, 10);
+      if (!Number.isFinite(p) || p <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return '';
+      return `<span class="purchase-brief">采购 ¥${p.toFixed(2)} · ${d}</span>`;
+    }
+
     function renderOnlinePart(account) {
       const acc = String(account || '').trim();
       if (!acc) return;
@@ -2209,8 +2252,13 @@
               </div>
             </div>
             <div class="account-row">
-              <div class="account">账号：${item.game_account}</div>
-              <button class="copy-btn" data-copy="${item.game_account}">复制</button>
+              <div class="account-left">
+                <div class="account">账号：${item.game_account}</div>
+              </div>
+              <div class="account-actions">
+                ${buildPurchaseBriefHtml(item)}
+                <button class="copy-btn" data-copy="${item.game_account}">复制</button>
+              </div>
             </div>
             <div class="meta-grid">
               <div class="meta"><div class="k">今日订单</div><div class="v">${item.today_paid_count}</div></div>

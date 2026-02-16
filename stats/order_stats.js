@@ -192,7 +192,8 @@ function normalizeDailyRowsFromOrders(orderRows = [], configMap = new Map()) {
         return {
             channel: String(r.channel || '').trim(),
             game_account: gameAccount,
-            role_name: String(r.role_name || cfg.role_name || '').trim(),
+            // 统计展示统一使用商品表中的最新角色名，避免订单历史脏角色名影响展示。
+            role_name: String(cfg.role_name || r.role_name || '').trim(),
             purchase_price: toMoney2(cfg.purchase_price),
             purchase_date: String(cfg.purchase_date || '').slice(0, 10),
             order_cnt_total: toNumber(r.order_cnt_total, 0),
@@ -226,7 +227,7 @@ async function queryDailyRowsFromOrder(userId, statDate, gameName, configuredAcc
     try {
         return await all(db, `
             SELECT
-                channel,
+                '' AS channel,
                 game_account,
                 MAX(COALESCE(role_name, '')) AS role_name,
                 COUNT(*) AS order_cnt_total,
@@ -253,7 +254,7 @@ async function queryDailyRowsFromOrder(userId, statDate, gameName, configuredAcc
               AND game_account IN (${placeholders})
               AND end_time >= ?
               AND end_time < ?
-            GROUP BY channel, game_account
+            GROUP BY game_account
         `, [uid, g, ...accs, startText, endText]);
     } finally {
         db.close();
@@ -412,6 +413,11 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const periodInfo = buildPeriodRange(options.period, now);
     const rows = await listOrderStatsRows(uid, periodInfo.startDate, periodInfo.endDate, gameName);
     const config = await loadAccountConfigByUser(uid, gameName);
+    const latestRoleMap = new Map(
+        [...(config.configured || []), ...(config.missing || [])]
+            .map((x) => [String(x.game_account || '').trim(), String(x.role_name || '').trim()])
+            .filter(([k]) => Boolean(k))
+    );
 
     const summary = reduceRows(rows);
     const byChannelMap = new Map();
@@ -437,7 +443,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
 
     const by_account = Array.from(byAccountMap.entries()).map(([game_account, arr]) => {
         const s = reduceRows(arr);
-        const roleName = String((arr[0] && arr[0].role_name) || '').trim();
+        const roleName = String(latestRoleMap.get(game_account) || (arr[0] && arr[0].role_name) || '').trim();
         return {
             game_account,
             role_name: roleName || game_account,
