@@ -7,9 +7,9 @@
     function renderOrdersView() {
       const o = state.orders || {};
       const tabs = [
-        { k: 'all', t: `全部(${Number((o.stats && o.stats.today_total) || 0)})`, n: Number(o.total || 0) },
-        { k: 'progress', t: `进行中(${Number((o.stats && o.stats.progress) || 0)})`, n: Number((o.stats && o.stats.progress) || 0) },
-        { k: 'done', t: '已完成', n: Number((o.stats && o.stats.done) || 0) }
+        { k: 'all', t: '全部' },
+        { k: 'progress', t: '进行中' },
+        { k: 'done', t: '已完成' }
       ];
       const quick = [
         { k: 'today', t: '当日' },
@@ -29,7 +29,7 @@
         els.orderSyncNowBtn.disabled = Boolean(o.syncing);
         els.orderSyncNowBtn.textContent = o.syncing ? '同步中...' : '同步订单';
       }
-      els.orderGameHint.textContent = `游戏：${o.game_name || 'WZRY'}（默认）`;
+      els.orderGameHint.textContent = `游戏：${o.game_name || 'WZRY'}（默认） · 汇总：${Number(o.total || 0)}`;
 
       if (!Array.isArray(o.list) || o.list.length === 0) {
         els.orderListContainer.innerHTML = '<div class="panel"><div style="color:#6d7a8a;font-size:13px;">暂无订单数据</div></div>';
