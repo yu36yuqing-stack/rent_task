@@ -1172,11 +1172,11 @@
     }
 
     .stats-cal-cell {
-      min-height: 46px;
+      min-height: 40px;
       border: 1px solid #edf2f7;
       border-radius: 8px;
       background: #fff;
-      padding: 4px;
+      padding: 3px 2px;
       display: grid;
       align-content: start;
       justify-items: center;
@@ -1197,9 +1197,9 @@
 
     .stats-cal-income {
       color: #db6b1f;
-      font-size: 9px;
+      font-size: 8px;
       line-height: 1.1;
-      margin: 2px 0 0;
+      margin: 1px 0 0;
       font-weight: 600;
     }
 
