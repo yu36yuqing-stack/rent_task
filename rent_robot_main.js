@@ -94,6 +94,32 @@ function releaseLock() {
     }
 }
 
+function applyActionResultToRows(rows = [], actions = []) {
+    if (!Array.isArray(rows) || rows.length === 0) return;
+    if (!Array.isArray(actions) || actions.length === 0) return;
+    const rowMap = new Map();
+    for (const row of rows) {
+        const acc = String((row && row.game_account) || '').trim();
+        if (!acc) continue;
+        rowMap.set(acc, row);
+    }
+    for (const act of actions) {
+        const type = String((act && act.type) || '').trim();
+        const acc = String((act && act.item && act.item.account) || '').trim();
+        if (!type || !acc) continue;
+        const row = rowMap.get(acc);
+        if (!row) continue;
+        const cs = row.channel_status && typeof row.channel_status === 'object' ? row.channel_status : {};
+        if (type === 'off_y') cs.uuzuhao = '下架';
+        else if (type === 'on_y') cs.uuzuhao = '上架';
+        else if (type === 'off_u') cs.uhaozu = '下架';
+        else if (type === 'on_u') cs.uhaozu = '上架';
+        else if (type === 'off_z') cs.zuhaowang = '下架';
+        else if (type === 'on_z') cs.zuhaowang = '上架';
+        row.channel_status = cs;
+    }
+}
+
 const HISTORY_FILE = path.join(TASK_DIR, 'rent_robot_history.jsonl');
 
 async function runPipeline(runRecord) {
@@ -149,6 +175,7 @@ async function runPipeline(runRecord) {
                 actionEnabled: ACTION_ENABLED,
                 readOnly: ACTION_READ_ONLY
             });
+            applyActionResultToRows(rows, actionResult.actions);
             if (actionResult.actions.length > 0) {
                 runRecord.actions.push(...actionResult.actions.map((a) => ({ ...a, user_id: user.id, user_account: user.account })));
             }

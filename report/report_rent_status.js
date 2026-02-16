@@ -134,8 +134,10 @@ async function buildRecentActionsForUser(userId, options = {}) {
         });
         const icon = g.direction === 'off' ? '🔴下架' : '🟢上架';
         const name = g.remark || g.account;
-        const pfText = Array.from(g.platforms).join('/');
-        const countText = g.count > 1 ? `（${g.count}次）` : '';
+        const pfList = Array.from(g.platforms);
+        const pfText = pfList.join('/');
+        const platformCount = pfList.length;
+        const countText = platformCount > 1 ? `（${platformCount}平台）` : '';
         const reason = g.latest_reason || '自动处理';
         let mode = '';
         if (g.skipped_count === g.count && g.count > 0) mode = ' (只读跳过)';
