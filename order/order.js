@@ -203,7 +203,12 @@ async function listOrdersForUser(userId, options = {}) {
         const countsRow = await dbGet(db, `
             SELECT
               SUM(CASE WHEN COALESCE(order_status, '') IN ('租赁中', '出租中') THEN 1 ELSE 0 END) AS progress_cnt,
-              SUM(CASE WHEN COALESCE(order_status, '') NOT IN ('租赁中', '出租中') THEN 1 ELSE 0 END) AS done_cnt
+              SUM(CASE WHEN COALESCE(order_status, '') NOT IN ('租赁中', '出租中') THEN 1 ELSE 0 END) AS done_cnt,
+              SUM(CASE
+                    WHEN COALESCE(order_status, '') NOT IN ('租赁中', '出租中')
+                     AND COALESCE(rec_amount, 0) <= 0
+                    THEN 1 ELSE 0 END
+              ) AS done_zero_cnt
             FROM "order"
             WHERE user_id = ?
               AND is_deleted = 0
@@ -245,6 +250,7 @@ async function listOrdersForUser(userId, options = {}) {
             stats: {
                 progress: Number((countsRow && countsRow.progress_cnt) || 0),
                 done: Number((countsRow && countsRow.done_cnt) || 0),
+                done_zero: Number((countsRow && countsRow.done_zero_cnt) || 0),
                 today_total: Number((todayRow && todayRow.today_total) || 0)
             },
             list

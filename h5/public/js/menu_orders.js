@@ -9,7 +9,7 @@
       const tabs = [
         { k: 'all', t: '全部' },
         { k: 'progress', t: '进行中' },
-        { k: 'done', t: '已完成' }
+        { k: 'done', t: `已完成(${Number((o.stats && o.stats.done) || 0)})（0收-${Number((o.stats && o.stats.done_zero) || 0)}）` }
       ];
       const quick = [
         { k: 'today', t: '当日' },

@@ -398,7 +398,7 @@
       const data = await request(`/api/orders?page=${o.page}&page_size=${o.pageSize}&status_filter=${o.status_filter}&quick_filter=${o.quick_filter}&game_name=${encodeURIComponent(o.game_name || 'WZRY')}`);
       state.orders.total = Number(data.total || 0);
       state.orders.list = Array.isArray(data.list) ? data.list : [];
-      state.orders.stats = data.stats || { progress: 0, done: 0, today_total: 0 };
+      state.orders.stats = data.stats || { progress: 0, done: 0, done_zero: 0, today_total: 0 };
       state.orders.page = Number(data.page || o.page || 1);
       state.orders.pageSize = Number(data.page_size || o.pageSize || 20);
     }
