@@ -1091,16 +1091,16 @@
       border: 1px solid #dce6f0;
       border-radius: 12px;
       background: #fff;
-      padding: 5px 7px;
+      padding: 4px 6px;
       box-shadow: 0 5px 14px rgba(24, 40, 63, 0.08);
-      min-height: 52px;
+      min-height: 46px;
       display: flex;
       flex-direction: column;
       justify-content: center;
     }
 
     .stats-kpi-key {
-      font-size: 10px;
+      font-size: 8px;
       color: #6f8094;
       margin: 0 0 2px;
       font-weight: 400;
@@ -1108,7 +1108,7 @@
     }
 
     .stats-kpi-value {
-      font-size: 13px;
+      font-size: 11px;
       font-weight: 500;
       color: #1f3550;
       margin: 0;
@@ -1172,11 +1172,11 @@
     }
 
     .stats-cal-cell {
-      min-height: 40px;
+      min-height: 34px;
       border: 1px solid #edf2f7;
       border-radius: 8px;
       background: #fff;
-      padding: 3px 2px;
+      padding: 2px 2px;
       display: grid;
       align-content: start;
       justify-items: center;
@@ -1277,7 +1277,7 @@
     }
 
     .stats-acc-chip-k {
-      font-size: 10px;
+      font-size: 8px;
       color: #6a7f95;
       margin: 0 0 1px;
       line-height: 1.2;
@@ -1285,7 +1285,7 @@
     }
 
     .stats-acc-chip-v {
-      font-size: 12px;
+      font-size: 10px;
       color: #26435f;
       margin: 0;
       line-height: 1.2;
