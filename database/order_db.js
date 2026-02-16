@@ -520,6 +520,7 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
     if (uniq.length === 0) return {};
 
     const day = String(dateText || todayDateText()).slice(0, 10);
+    const dayStart6 = `${day} 06:00:00`;
     const placeholders = uniq.map(() => '?').join(',');
     const db = openDatabase();
     try {
@@ -533,12 +534,13 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
                   COALESCE(order_status, '') IN ('租赁中', '出租中')
                   OR (
                       COALESCE(order_status, '') NOT IN ('租赁中', '出租中')
-                      AND substr(end_time, 1, 10) = ?
+                      AND end_time >= ?
+                      AND end_time < datetime(?, '+1 day')
                       AND COALESCE(rec_amount, 0) > 0
                   )
               )
             GROUP BY game_account
-        `, [uid, ...uniq, day]);
+        `, [uid, ...uniq, dayStart6, dayStart6]);
         const out = {};
         for (const row of rows) {
             const acc = String(row.game_account || '').trim();
