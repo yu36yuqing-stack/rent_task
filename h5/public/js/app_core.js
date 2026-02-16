@@ -578,17 +578,19 @@
           return;
         }
         if (key === 'orders') {
+          render();
           (async () => {
             try {
               await loadOrders();
               render();
             } catch (e) {
-              alert(e.message || '订单列表加载失败');
+              showToast(e.message || '订单列表加载失败');
             }
           })();
           return;
         }
         if (key === 'stats') {
+          render();
           (async () => {
             try {
               await loadStatsBoard();
@@ -597,7 +599,7 @@
               }
               render();
             } catch (e) {
-              alert(e.message || '统计看板加载失败');
+              showToast(e.message || '统计看板加载失败');
             }
           })();
           return;

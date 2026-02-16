@@ -898,9 +898,9 @@
     }
 
     .orders-quick {
-      display: flex;
-      gap: 8px;
-      overflow-x: auto;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
       padding-bottom: 2px;
     }
 
@@ -911,12 +911,17 @@
     .orders-quick-item {
       border: 1px solid #d8e1ec;
       border-radius: 999px;
-      padding: 7px 10px;
+      padding: 6px 8px;
       background: #fff;
       color: #41566f;
-      font-size: 12px;
+      font-size: 11px;
+      line-height: 1.2;
       white-space: nowrap;
+      text-overflow: ellipsis;
+      overflow: hidden;
       cursor: pointer;
+      width: 100%;
+      text-align: center;
     }
 
     .orders-quick-item.active {
