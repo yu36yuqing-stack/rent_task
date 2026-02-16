@@ -102,7 +102,7 @@ function resolveDateRangeByQuickFilter(filter = 'today', now = new Date()) {
     day6.setHours(6, 0, 0, 0);
     const f = String(filter || 'today').trim().toLowerCase();
     if (f === 'yesterday') {
-        return { start: addDays(day0, -1), end: day0 };
+        return { start: addDays(day6, -1), end: day6 };
     }
     if (f === 'week') {
         const weekday = day0.getDay() || 7;
@@ -576,8 +576,8 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
     const auth = await resolveUuzuhaoAuthByUser(uid);
     const nowSec = Math.floor(Date.now() / 1000);
     const lastSyncTs = await getLastSyncTimestamp(uid, CHANNEL_UUZUHAO);
-    const overlapSec = 3600;
-    // 默认策略：用上次拉取时间向前回退1小时，保证冗余覆盖；首次无游标时兜底最近30天。
+    const overlapSec = 3 * 3600;
+    // 默认策略：用上次拉取时间向前回退3小时，保证冗余覆盖；首次无游标时兜底最近30天。
     const startSec = lastSyncTs > 0
         ? Math.max(0, lastSyncTs - overlapSec)
         : (nowSec - 30 * 24 * 3600);
@@ -645,7 +645,7 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
 
 // 拉取 uhaozu 订单并入库：
 // - game_account / role_name 通过 goodsId 关联 user_game_account 获取
-// - 时间窗口同样按游标回退 1 小时，接口参数用 startDate/endDate（日期）
+// - 时间窗口按游标回退 2 天，接口参数用 startDate/endDate（日期）
 async function syncUhaozuOrdersToDb(userId, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
@@ -653,16 +653,18 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
     const auth = await resolveUhaozuAuthByUser(uid);
     const nowSec = Math.floor(Date.now() / 1000);
     const lastSyncTs = await getLastSyncTimestamp(uid, CHANNEL_UHAOZU);
-    const overlapSec = 3600;
+    const overlapSec = 2 * 24 * 3600;
     const startSec = lastSyncTs > 0
         ? Math.max(0, lastSyncTs - overlapSec)
         : (nowSec - 30 * 24 * 3600);
     const endSec = nowSec;
+    // uhaozu 订单接口仅支持按“日期”查询；为避免跨日状态变更漏拉，这里按 2 天回退窗口。
+    const startDateSec = startSec;
 
     const query = {
         pageNum: Number(options.pageNum || 1),
         pageSize: Number(options.pageSize || 30),
-        startDate: String(options.startDate || formatDateBySec(startSec)),
+        startDate: String(options.startDate || formatDateBySec(startDateSec)),
         endDate: String(options.endDate || formatDateBySec(endSec)),
         timeType: Number(options.timeType || 1),
         unionType: options.unionType ?? '',
@@ -673,6 +675,9 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
         __path: options.order_path || ''
     };
     console.log(`[OrderSync][uhaozu] user_id=${uid} begin window=${JSON.stringify({
+        startSec,
+        endSec,
+        startDateSec,
         startDate: query.startDate,
         endDate: query.endDate,
         timeType: query.timeType,
@@ -773,7 +778,7 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
     const auth = await resolveZuhaowangAuthByUser(uid);
     const nowSec = Math.floor(Date.now() / 1000);
     const lastSyncTs = await getLastSyncTimestamp(uid, CHANNEL_ZHW);
-    const overlapSec = 3600;
+    const overlapSec = 3 * 3600;
     const startSec = lastSyncTs > 0
         ? Math.max(0, lastSyncTs - overlapSec)
         : (nowSec - 30 * 24 * 3600);
