@@ -106,7 +106,7 @@
       els.statsKpiGrid.innerHTML = `
         <div class="stats-kpi-card">
           <p class="stats-kpi-key">有效订单数</p>
-          <p class="stats-kpi-value">${Number(summary.order_cnt_effective || 0)}</p>
+          <p class="stats-kpi-value stats-kpi-value-order-cnt">${Number(summary.order_cnt_effective || 0)}</p>
         </div>
         <div class="stats-kpi-card">
           <p class="stats-kpi-key">实收总额</p>
