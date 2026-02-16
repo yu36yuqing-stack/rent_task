@@ -1100,7 +1100,7 @@
     }
 
     .stats-kpi-key {
-      font-size: 7px;
+      font-size: 9px;
       color: #6f8094;
       margin: 0 0 2px;
       font-weight: 400;
@@ -1108,7 +1108,7 @@
     }
 
     .stats-kpi-value {
-      font-size: 10px;
+      font-size: 12px;
       font-weight: 500;
       color: #1f3550;
       margin: 0;
@@ -1378,8 +1378,8 @@
       .filter-tab .txt { font-size: 11px; }
       .meta-grid { grid-template-columns: 1fr 1fr; }
       .stats-kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-      .stats-kpi-key { font-size: 7px; }
-      .stats-kpi-value { font-size: 10px; }
+      .stats-kpi-key { font-size: 9px; }
+      .stats-kpi-value { font-size: 12px; }
       .stats-acc-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 
       .account-row {
