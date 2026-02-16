@@ -12,6 +12,7 @@ const {
 const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('./database/user_db.js');
 const { syncUserAccountsByAuth, listAllUserGameAccountsByUser, fillOnlineTagsByYouyou } = require('./product/product');
 const { startOrderSyncWorkerIfNeeded, reconcileOrder3OffBlacklistByUser } = require('./order/order');
+const { startOrderStatsWorkerIfNeeded } = require('./stats/order_stats');
 const { loadUserBlacklistSet, loadUserBlacklistReasonMap } = require('./user/user');
 const { executeUserActionsIfNeeded } = require('./action_engine/action_engine.js');
 
@@ -28,6 +29,11 @@ const ORDER_ASYNC_ENABLED = !['0', 'false', 'no', 'off'].includes(String(process
 const ORDER_SYNC_INTERVAL_MIN = Math.max(1, Number(process.env.ORDER_SYNC_INTERVAL_MIN || 30));
 const ORDER_SYNC_WINDOW_SEC = Math.max(0, Number(process.env.ORDER_SYNC_WINDOW_SEC || 90));
 const ORDER_SYNC_FORCE = ['1', 'true', 'yes', 'on'].includes(String(process.env.ORDER_SYNC_FORCE || 'false').toLowerCase());
+const ORDER_STATS_DAILY_ENABLED = !['0', 'false', 'no', 'off'].includes(String(process.env.ORDER_STATS_DAILY_ENABLE || 'true').toLowerCase());
+const ORDER_STATS_DAILY_TARGET_HOUR = Math.max(0, Math.min(23, Number(process.env.ORDER_STATS_DAILY_TARGET_HOUR || 2)));
+const ORDER_STATS_DAILY_TARGET_MINUTE = Math.max(0, Math.min(59, Number(process.env.ORDER_STATS_DAILY_TARGET_MINUTE || 0)));
+const ORDER_STATS_DAILY_WINDOW_SEC = Math.max(0, Number(process.env.ORDER_STATS_DAILY_WINDOW_SEC || 300));
+const ORDER_STATS_DAILY_FORCE = ['1', 'true', 'yes', 'on'].includes(String(process.env.ORDER_STATS_DAILY_FORCE || 'false').toLowerCase());
 
 // 主日志: 保留控制台输出，同时落盘到 log/rent_robot_main.log
 function setupMainLogger() {
@@ -57,6 +63,7 @@ setupMainLogger();
 console.log(`[Boot] rent_robot_main.js 启动 pid=${process.pid} args=${process.argv.slice(2).join(' ') || '(none)'}`);
 console.log(`[Config] ACTION_ENABLE=${ACTION_ENABLED} ACTION_READ_ONLY=${ACTION_READ_ONLY}`);
 console.log(`[Config] ORDER_ASYNC_ENABLE=${ORDER_ASYNC_ENABLED} ORDER_SYNC_INTERVAL_MIN=${ORDER_SYNC_INTERVAL_MIN} ORDER_SYNC_WINDOW_SEC=${ORDER_SYNC_WINDOW_SEC} ORDER_SYNC_FORCE=${ORDER_SYNC_FORCE}`);
+console.log(`[Config] ORDER_STATS_DAILY_ENABLE=${ORDER_STATS_DAILY_ENABLED} ORDER_STATS_DAILY_TARGET=${ORDER_STATS_DAILY_TARGET_HOUR}:${String(ORDER_STATS_DAILY_TARGET_MINUTE).padStart(2, '0')} ORDER_STATS_DAILY_WINDOW_SEC=${ORDER_STATS_DAILY_WINDOW_SEC} ORDER_STATS_DAILY_FORCE=${ORDER_STATS_DAILY_FORCE}`);
 
 process.on('unhandledRejection', (reason) => {
     console.error('[UnhandledRejection]', reason);
@@ -256,6 +263,16 @@ async function runPipeline(runRecord) {
             interval_min: ORDER_SYNC_INTERVAL_MIN,
             window_sec: ORDER_SYNC_WINDOW_SEC,
             force: ORDER_SYNC_FORCE,
+            task_dir: TASK_DIR,
+            run_record: runRecord,
+            logger: console
+        });
+        await startOrderStatsWorkerIfNeeded({
+            enabled: ORDER_STATS_DAILY_ENABLED,
+            target_hour: ORDER_STATS_DAILY_TARGET_HOUR,
+            target_minute: ORDER_STATS_DAILY_TARGET_MINUTE,
+            window_sec: ORDER_STATS_DAILY_WINDOW_SEC,
+            force: ORDER_STATS_DAILY_FORCE,
             task_dir: TASK_DIR,
             run_record: runRecord,
             logger: console

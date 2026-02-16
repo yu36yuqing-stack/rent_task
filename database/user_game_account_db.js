@@ -128,6 +128,8 @@ function rowToAccount(row = {}) {
         game_name: canonicalGameName(row.game_name || 'WZRY'),
         channel_status: channelStatus,
         channel_prd_info: channelPrdInfo,
+        purchase_price: Number(row.purchase_price || 0),
+        purchase_date: String(row.purchase_date || '').slice(0, 10),
         modify_date: String(row.modify_date || ''),
         is_deleted: Number(row.is_deleted || 0),
         desc: String(row.desc || '')
@@ -143,6 +145,8 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
         'game_name',
         'channel_status',
         'channel_prd_info',
+        'purchase_price',
+        'purchase_date',
         'modify_date',
         'is_deleted',
         'desc'
@@ -162,6 +166,8 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
             game_name TEXT NOT NULL DEFAULT 'WZRY',
             channel_status TEXT NOT NULL DEFAULT '{}',
             channel_prd_info TEXT NOT NULL DEFAULT '{}',
+            purchase_price REAL NOT NULL DEFAULT 0,
+            purchase_date TEXT NOT NULL DEFAULT '',
             modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             is_deleted INTEGER NOT NULL DEFAULT 0,
             desc TEXT NOT NULL DEFAULT ''
@@ -169,7 +175,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
     `);
     await run(db, `
         INSERT INTO user_game_account
-        (id, user_id, game_account, account_remark, game_name, channel_status, channel_prd_info, modify_date, is_deleted, desc)
+        (id, user_id, game_account, account_remark, game_name, channel_status, channel_prd_info, purchase_price, purchase_date, modify_date, is_deleted, desc)
         SELECT
             id,
             user_id,
@@ -178,6 +184,8 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
             COALESCE(game_name, 'WZRY'),
             COALESCE(channel_status, '{}'),
             COALESCE(channel_prd_info, '{}'),
+            COALESCE(purchase_price, 0),
+            COALESCE(purchase_date, ''),
             COALESCE(modify_date, CURRENT_TIMESTAMP),
             COALESCE(is_deleted, 0),
             COALESCE(desc, '')
@@ -198,6 +206,8 @@ async function initUserGameAccountDb() {
                 account_remark TEXT NOT NULL DEFAULT '',
                 channel_status TEXT NOT NULL DEFAULT '{}',
                 channel_prd_info TEXT NOT NULL DEFAULT '{}',
+                purchase_price REAL NOT NULL DEFAULT 0,
+                purchase_date TEXT NOT NULL DEFAULT '',
                 modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 is_deleted INTEGER NOT NULL DEFAULT 0,
                 desc TEXT NOT NULL DEFAULT ''
@@ -209,6 +219,12 @@ async function initUserGameAccountDb() {
         }
         if (!cols.has('channel_prd_info')) {
             await run(db, `ALTER TABLE user_game_account ADD COLUMN channel_prd_info TEXT NOT NULL DEFAULT '{}'`);
+        }
+        if (!cols.has('purchase_price')) {
+            await run(db, `ALTER TABLE user_game_account ADD COLUMN purchase_price REAL NOT NULL DEFAULT 0`);
+        }
+        if (!cols.has('purchase_date')) {
+            await run(db, `ALTER TABLE user_game_account ADD COLUMN purchase_date TEXT NOT NULL DEFAULT ''`);
         }
         await reorderUserGameAccountColumnsIfNeeded(db);
         await run(db, `
@@ -295,6 +311,10 @@ async function upsertUserGameAccount(input = {}) {
     const gameAccount = String(input.game_account || '').trim();
     const gameName = canonicalGameName(String(input.game_name || 'WZRY').trim() || 'WZRY');
     const accountRemark = String(input.account_remark || '').trim();
+    const purchasePriceRaw = Number(input.purchase_price);
+    const hasPurchasePrice = Number.isFinite(purchasePriceRaw) && purchasePriceRaw >= 0;
+    const purchaseDateRaw = String(input.purchase_date || '').trim();
+    const hasPurchaseDate = /^\d{4}-\d{2}-\d{2}$/.test(purchaseDateRaw);
     const nextStatus = normalizeStatusJson(input.channel_status || {});
     const nextPrdInfo = normalizePrdInfoJson(input.channel_prd_info || {});
     const desc = String(input.desc || '').trim();
@@ -313,9 +333,20 @@ async function upsertUserGameAccount(input = {}) {
         if (!row) {
             await run(db, `
                 INSERT INTO user_game_account
-                (user_id, game_account, account_remark, game_name, channel_status, channel_prd_info, modify_date, is_deleted, desc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
-            `, [userId, gameAccount, accountRemark, gameName, JSON.stringify(nextStatus), JSON.stringify(nextPrdInfo), nowText(), desc]);
+                (user_id, game_account, account_remark, game_name, channel_status, channel_prd_info, purchase_price, purchase_date, modify_date, is_deleted, desc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+            `, [
+                userId,
+                gameAccount,
+                accountRemark,
+                gameName,
+                JSON.stringify(nextStatus),
+                JSON.stringify(nextPrdInfo),
+                hasPurchasePrice ? purchasePriceRaw : 0,
+                hasPurchaseDate ? purchaseDateRaw : '',
+                nowText(),
+                desc
+            ]);
         } else {
             let currentStatus = {};
             let currentPrdInfo = {};
@@ -332,11 +363,23 @@ async function upsertUserGameAccount(input = {}) {
             const mergedStatus = { ...currentStatus, ...nextStatus };
             const mergedPrdInfo = { ...currentPrdInfo, ...nextPrdInfo };
             const mergedRemark = accountRemark || String(row.account_remark || '');
+            const mergedPurchasePrice = hasPurchasePrice ? purchasePriceRaw : Number(row.purchase_price || 0);
+            const mergedPurchaseDate = hasPurchaseDate ? purchaseDateRaw : String(row.purchase_date || '').slice(0, 10);
             await run(db, `
                 UPDATE user_game_account
-                SET account_remark = ?, channel_status = ?, channel_prd_info = ?, modify_date = ?, desc = ?
+                SET account_remark = ?, channel_status = ?, channel_prd_info = ?,
+                    purchase_price = ?, purchase_date = ?, modify_date = ?, desc = ?
                 WHERE id = ?
-            `, [mergedRemark, JSON.stringify(mergedStatus), JSON.stringify(mergedPrdInfo), nowText(), desc || String(row.desc || ''), row.id]);
+            `, [
+                mergedRemark,
+                JSON.stringify(mergedStatus),
+                JSON.stringify(mergedPrdInfo),
+                mergedPurchasePrice,
+                mergedPurchaseDate,
+                nowText(),
+                desc || String(row.desc || ''),
+                row.id
+            ]);
         }
 
         const updated = await get(db, `
@@ -498,6 +541,41 @@ async function listAccountRemarksByUserAndAccounts(userId, gameAccounts = []) {
     }
 }
 
+async function updateUserGameAccountPurchaseByUserAndAccount(userId, gameAccount, purchasePrice, purchaseDate, desc = '') {
+    await initUserGameAccountDb();
+    const uid = Number(userId || 0);
+    const acc = String(gameAccount || '').trim();
+    const price = Number(purchasePrice);
+    const day = String(purchaseDate || '').trim();
+    if (!uid) throw new Error('user_id 不合法');
+    if (!acc) throw new Error('game_account 不能为空');
+    if (!Number.isFinite(price) || price < 0) throw new Error('purchase_price 不合法');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('purchase_date 格式不合法');
+
+    const db = openDatabase();
+    try {
+        const row = await get(db, `
+            SELECT id
+            FROM user_game_account
+            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            ORDER BY id DESC
+            LIMIT 1
+        `, [uid, acc]);
+        if (!row) throw new Error(`找不到账号: ${acc}`);
+
+        await run(db, `
+            UPDATE user_game_account
+            SET purchase_price = ?, purchase_date = ?, modify_date = ?, desc = ?
+            WHERE id = ?
+        `, [Number(price.toFixed(2)), day, nowText(), String(desc || '').trim(), Number(row.id)]);
+
+        const updated = await get(db, `SELECT * FROM user_game_account WHERE id = ? LIMIT 1`, [Number(row.id)]);
+        return rowToAccount(updated);
+    } finally {
+        db.close();
+    }
+}
+
 module.exports = {
     PLATFORM_KEYS,
     initUserGameAccountDb,
@@ -506,5 +584,6 @@ module.exports = {
     softDeleteEmptyAccountsByUser,
     listUserGameAccounts,
     listOwnersByGameAccounts,
-    listAccountRemarksByUserAndAccounts
+    listAccountRemarksByUserAndAccounts,
+    updateUserGameAccountPurchaseByUserAndAccount
 };

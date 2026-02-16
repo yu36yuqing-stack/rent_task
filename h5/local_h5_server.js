@@ -4,7 +4,11 @@ const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
 const { initUserDb, verifyUserLogin, getActiveUserById } = require('../database/user_db');
-const { initUserGameAccountDb, listUserGameAccounts } = require('../database/user_game_account_db');
+const {
+    initUserGameAccountDb,
+    listUserGameAccounts,
+    updateUserGameAccountPurchaseByUserAndAccount
+} = require('../database/user_game_account_db');
 const {
     initUserBlacklistDb,
     listUserBlacklistByUserWithMeta,
@@ -28,6 +32,10 @@ const { createAccessToken, createOpaqueRefreshToken } = require('../user/auth_to
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
 const { queryAccountOnlineStatus, setForbiddenPlay } = require('../uuzuhao/uuzuhao_api');
 const { listOrdersForUser } = require('../order/order');
+const {
+    getOrderStatsDashboardByUser,
+    refreshOrderStatsDailyByUser
+} = require('../stats/order_stats');
 
 const HOST = process.env.H5_HOST || '0.0.0.0';
 const PORT = Number(process.env.H5_PORT || 8080);
@@ -236,6 +244,8 @@ async function handleProducts(req, res, urlObj) {
             game_name: x.game_name,
             game_account: acc,
             role_name: String(x.account_remark || '').trim() || acc,
+            purchase_price: Number(x.purchase_price || 0),
+            purchase_date: String(x.purchase_date || '').slice(0, 10),
             channel_status: x.channel_status || {},
             today_paid_count: Number(paidMap[acc] || 0),
             blacklisted: Boolean(bl),
@@ -301,6 +311,30 @@ async function handleOrders(req, res, urlObj) {
     return json(res, 200, { ok: true, ...data });
 }
 
+async function handleStatsDashboard(req, res, urlObj) {
+    const user = await requireAuth(req);
+    const period = String(urlObj.searchParams.get('period') || 'today').trim().toLowerCase();
+    const gameName = String(urlObj.searchParams.get('game_name') || 'WZRY').trim() || 'WZRY';
+    const data = await getOrderStatsDashboardByUser(user.id, {
+        period,
+        game_name: gameName
+    });
+    return json(res, 200, { ok: true, ...data });
+}
+
+async function handleStatsRefresh(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const days = Math.max(1, Math.min(60, Number(body.days || 3)));
+    const gameName = String(body.game_name || 'WZRY').trim() || 'WZRY';
+    const out = await refreshOrderStatsDailyByUser(user.id, {
+        days,
+        game_name: gameName,
+        desc: 'manual by h5 stats refresh'
+    });
+    return json(res, 200, { ok: true, ...out });
+}
+
 async function handleBlacklistAdd(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
@@ -338,13 +372,13 @@ async function handleBlacklistRemove(req, res) {
 async function resolveUuzuhaoAuthByUser(userId) {
     const rows = await listUserPlatformAuth(userId, { with_payload: true });
     const hit = rows.find((r) => String(r.platform || '') === 'uuzuhao' && String(r.auth_status || '') === 'valid');
-    if (!hit) throw new Error('缺少可用的 uuzuhao 授权');
+    if (!hit) throw httpError(422, '缺少可用的 uuzuhao 授权');
 
     const payload = hit && typeof hit.auth_payload === 'object' ? hit.auth_payload : {};
     const appKey = String(payload.app_key || '').trim();
     const appSecret = String(payload.app_secret || '').trim();
     if (!appKey || !appSecret) {
-        throw new Error('uuzuhao 授权缺少 app_key/app_secret');
+        throw httpError(422, 'uuzuhao 授权缺少 app_key/app_secret');
     }
     return payload;
 }
@@ -357,7 +391,19 @@ async function handleProductOnlineQuery(req, res) {
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
 
     const auth = await resolveUuzuhaoAuthByUser(user.id);
-    const result = await queryAccountOnlineStatus(gameAccount, gameName, { auth });
+    let result;
+    try {
+        result = await queryAccountOnlineStatus(gameAccount, gameName, { auth });
+    } catch (e) {
+        const msg = String(e && e.message ? e.message : e || '').trim();
+        if (/uuzuhao .*未配置|不支持的 game_name|accountId 不能为空/i.test(msg)) {
+            throw httpError(422, msg);
+        }
+        if (/code=\d+/i.test(msg) || /HTTP \d+/i.test(msg) || /API 返回非JSON/i.test(msg)) {
+            throw httpError(502, `在线查询失败: ${msg}`);
+        }
+        throw e;
+    }
     return json(res, 200, {
         ok: true,
         data: {
@@ -382,7 +428,19 @@ async function handleProductForbiddenPlay(req, res) {
 
     const enabled = (enabledRaw === true) || String(enabledRaw).trim().toLowerCase() === 'true';
     const auth = await resolveUuzuhaoAuthByUser(user.id);
-    const result = await setForbiddenPlay(gameAccount, enabled, { auth, game_name: gameName, type: 2 });
+    let result;
+    try {
+        result = await setForbiddenPlay(gameAccount, enabled, { auth, game_name: gameName, type: 2 });
+    } catch (e) {
+        const msg = String(e && e.message ? e.message : e || '').trim();
+        if (/uuzuhao .*未配置|不支持的 game_name|accountId 不能为空|enabled 仅支持/i.test(msg)) {
+            throw httpError(422, msg);
+        }
+        if (/code=\d+/i.test(msg) || /HTTP \d+/i.test(msg) || /API 返回非JSON/i.test(msg)) {
+            throw httpError(502, `禁玩处理失败: ${msg}`);
+        }
+        throw e;
+    }
 
     return json(res, 200, {
         ok: true,
@@ -390,6 +448,36 @@ async function handleProductForbiddenPlay(req, res) {
             game_account: gameAccount,
             game_name: result.game_name,
             enabled: Boolean(result.enabled)
+        }
+    });
+}
+
+async function handleProductPurchaseConfig(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const gameAccount = String(body.game_account || '').trim();
+    const purchasePrice = Number(body.purchase_price);
+    const purchaseDate = String(body.purchase_date || '').trim();
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    if (!Number.isFinite(purchasePrice) || purchasePrice < 0) {
+        return json(res, 400, { ok: false, message: 'purchase_price 不合法' });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(purchaseDate)) {
+        return json(res, 400, { ok: false, message: 'purchase_date 格式应为 YYYY-MM-DD' });
+    }
+    const out = await updateUserGameAccountPurchaseByUserAndAccount(
+        user.id,
+        gameAccount,
+        purchasePrice,
+        purchaseDate,
+        'manual purchase config by h5'
+    );
+    return json(res, 200, {
+        ok: true,
+        data: {
+            game_account: out.game_account,
+            purchase_price: Number(out.purchase_price || 0),
+            purchase_date: String(out.purchase_date || '').slice(0, 10)
         }
     });
 }
@@ -427,8 +515,11 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/refresh') return await handleRefresh(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/products') return await handleProducts(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/orders') return await handleOrders(req, res, urlObj);
+            if (req.method === 'GET' && urlObj.pathname === '/api/stats/dashboard') return await handleStatsDashboard(req, res, urlObj);
+            if (req.method === 'POST' && urlObj.pathname === '/api/stats/refresh') return await handleStatsRefresh(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/online') return await handleProductOnlineQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/play') return await handleProductForbiddenPlay(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/products/purchase-config') return await handleProductPurchaseConfig(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/add') return await handleBlacklistAdd(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/remove') return await handleBlacklistRemove(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/ping') return json(res, 200, { ok: true, ts: Date.now() });

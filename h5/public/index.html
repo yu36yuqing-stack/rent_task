@@ -222,7 +222,7 @@
       margin-top: 8px;
     }
 
-    .hidden { display: none; }
+    .hidden { display: none !important; }
 
     .topbar {
       display: flex;
@@ -1024,6 +1024,171 @@
       color: #1f6a47;
     }
 
+    .stats-view {
+      display: grid;
+      gap: 10px;
+    }
+
+    .stats-periods {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+
+    .stats-periods::-webkit-scrollbar { display: none; }
+
+    .stats-period-btn {
+      border: 1px solid #d7e2ee;
+      background: #f7fbff;
+      border-radius: 999px;
+      padding: 6px 11px;
+      font-size: 12px;
+      color: #36506a;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .stats-period-btn.active {
+      border-color: #83b7ec;
+      background: #edf5ff;
+      color: #19558f;
+      font-weight: 700;
+    }
+
+    .stats-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .stats-kpi-card {
+      border: 1px solid #dce6f0;
+      border-radius: 12px;
+      background: #fff;
+      padding: 10px;
+      box-shadow: 0 5px 14px rgba(24, 40, 63, 0.08);
+    }
+
+    .stats-kpi-key {
+      font-size: 11px;
+      color: #6f8094;
+      margin: 0 0 6px;
+    }
+
+    .stats-kpi-value {
+      font-size: 18px;
+      font-weight: 800;
+      color: #1f3550;
+      margin: 0;
+      line-height: 1.1;
+    }
+
+    .stats-kpi-value.money {
+      color: #b95a20;
+    }
+
+    .stats-head-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .stats-title {
+      margin: 0;
+      font-size: 14px;
+      color: #24405f;
+      font-weight: 700;
+    }
+
+    .stats-acc-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .stats-acc-item {
+      border: 1px solid #dde7f1;
+      background: #fff;
+      border-radius: 12px;
+      padding: 10px;
+    }
+
+    .stats-acc-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .stats-acc-name {
+      margin: 0;
+      font-size: 14px;
+      color: #1f3550;
+      font-weight: 700;
+    }
+
+    .stats-acc-money {
+      color: #b95a20;
+      font-size: 15px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .stats-acc-meta {
+      margin: 0;
+      color: #5f748c;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .stats-missing-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1300;
+      background: rgba(10, 20, 33, 0.34);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+    }
+
+    .stats-missing-overlay.hidden { display: none; }
+
+    .stats-missing-card {
+      width: min(560px, 92vw);
+      max-height: 72vh;
+      overflow: auto;
+      background: #fff;
+      border-radius: 14px;
+      border: 1px solid #dbe6f1;
+      box-shadow: 0 16px 36px rgba(16, 35, 54, 0.26);
+      padding: 14px;
+    }
+
+    .stats-missing-title {
+      margin: 0 0 8px;
+      font-size: 14px;
+      color: #1f3550;
+      font-weight: 800;
+    }
+
+    .stats-missing-desc {
+      margin: 0 0 8px;
+      color: #5f748c;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .stats-missing-list {
+      margin: 0 0 10px;
+      padding-left: 18px;
+      color: #2d4867;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
     .toast {
       position: fixed;
       left: 50%;
@@ -1126,6 +1291,19 @@
       </div>
     </section>
 
+    <section id="statsView" class="hidden stats-view">
+      <div id="statsPeriods" class="stats-periods"></div>
+      <div class="stats-head-row">
+        <p id="statsRangeText" class="stats-title">统计区间：-</p>
+        <button id="statsRefreshBtn" class="btn btn-ghost">手动刷新</button>
+      </div>
+      <div id="statsKpiGrid" class="stats-kpi-grid"></div>
+      <div class="stats-head-row">
+        <p id="statsAccountTitle" class="stats-title">账号收益</p>
+      </div>
+      <div id="statsAccountList" class="stats-acc-list"></div>
+    </section>
+
     <div id="drawerMask" class="drawer-mask hidden"></div>
     <aside id="sideDrawer" class="side-drawer hidden" aria-hidden="true">
       <div class="drawer-user">
@@ -1137,6 +1315,7 @@
       <div class="drawer-list">
         <button class="drawer-item" data-menu="products" data-label="商品列表">商品列表</button>
         <button class="drawer-item" data-menu="orders" data-label="订单列表">订单列表</button>
+        <button class="drawer-item" data-menu="stats" data-label="统计看板">统计看板</button>
         <button class="drawer-item" data-menu="auth" data-label="授权管理（开发中）">授权管理（开发中）</button>
       </div>
     </aside>
@@ -1169,7 +1348,42 @@
     </div>
   </div>
 
+  <div id="purchaseSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon">采</span>
+          <div id="purchaseSheetTitle" class="sheet-title">维护采购信息</div>
+        </div>
+        <div id="purchaseSheetResult" class="sheet-result"></div>
+      </div>
+      <div class="field" style="margin-top:0;">
+        <label for="purchasePriceInput">采购价格</label>
+        <input id="purchasePriceInput" type="number" step="0.01" min="0" inputmode="decimal" placeholder="例如 1888.88">
+      </div>
+      <div class="field">
+        <label for="purchaseDateInput">采购日期</label>
+        <input id="purchaseDateInput" type="date">
+      </div>
+      <div class="sheet-actions">
+        <button id="purchaseSaveBtn" class="sheet-btn">保存</button>
+        <button id="purchaseCancelBtn" class="sheet-btn">关闭弹窗</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
+
+  <div id="statsMissingOverlay" class="stats-missing-overlay hidden">
+    <div class="stats-missing-card">
+      <p class="stats-missing-title">以下账号未配置采购信息</p>
+      <p class="stats-missing-desc">统计报表仅展示已配置采购价格和采购日期的账号。请先补全配置。</p>
+      <ul id="statsMissingList" class="stats-missing-list"></ul>
+      <div style="display:flex;justify-content:flex-end;">
+        <button id="statsMissingClose" class="btn btn-ghost">我知道了</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const AUTH_BUNDLE_KEY = 'h5_auth_bundle';
@@ -1262,10 +1476,29 @@
         stats: { progress: 0, done: 0 },
         list: []
       },
+      statsBoard: {
+        period: 'today',
+        range: { start_date: '', end_date: '' },
+        summary: null,
+        profitability: null,
+        by_account: [],
+        missing_purchase_accounts: [],
+        configured_account_count: 0
+      },
       onlineStatusMap: {},
       onlineLoadingMap: {},
       forbiddenLoadingMap: {},
       forbiddenSheet: { open: false, account: '', role_name: '', result_text: '', result_type: '', loading: false },
+      purchaseSheet: {
+        open: false,
+        account: '',
+        role_name: '',
+        purchase_price: '',
+        purchase_date: '',
+        result_text: '',
+        result_type: '',
+        loading: false
+      },
       cardNodeMap: {}
     };
     const API_BASE = window.location.pathname.startsWith('/h5local') ? '/h5local' : '';
@@ -1275,6 +1508,7 @@
     function menuTitleByKey(key) {
       const k = String(key || '').trim();
       if (k === 'orders') return '订单列表';
+      if (k === 'stats') return '统计看板';
       if (k === 'auth') return '授权管理';
       return '商品列表';
     }
@@ -1283,6 +1517,7 @@
       loginView: document.getElementById('loginView'),
       listView: document.getElementById('listView'),
       orderView: document.getElementById('orderView'),
+      statsView: document.getElementById('statsView'),
       heroLoginView: document.getElementById('heroLoginView'),
       heroAppView: document.getElementById('heroAppView'),
       heroMenuTitle: document.getElementById('heroMenuTitle'),
@@ -1305,6 +1540,15 @@
       orderPrevPage: document.getElementById('orderPrevPage'),
       orderNextPage: document.getElementById('orderNextPage'),
       orderPageInfo: document.getElementById('orderPageInfo'),
+      statsPeriods: document.getElementById('statsPeriods'),
+      statsRangeText: document.getElementById('statsRangeText'),
+      statsRefreshBtn: document.getElementById('statsRefreshBtn'),
+      statsKpiGrid: document.getElementById('statsKpiGrid'),
+      statsAccountTitle: document.getElementById('statsAccountTitle'),
+      statsAccountList: document.getElementById('statsAccountList'),
+      statsMissingOverlay: document.getElementById('statsMissingOverlay'),
+      statsMissingList: document.getElementById('statsMissingList'),
+      statsMissingClose: document.getElementById('statsMissingClose'),
       prevPage: document.getElementById('prevPage'),
       nextPage: document.getElementById('nextPage'),
       pageInfo: document.getElementById('pageInfo'),
@@ -1319,7 +1563,14 @@
       forbiddenSheetResult: document.getElementById('forbiddenSheetResult'),
       sheetEnableForbidden: document.getElementById('sheetEnableForbidden'),
       sheetDisableForbidden: document.getElementById('sheetDisableForbidden'),
-      sheetCancelForbidden: document.getElementById('sheetCancelForbidden')
+      sheetCancelForbidden: document.getElementById('sheetCancelForbidden'),
+      purchaseSheet: document.getElementById('purchaseSheet'),
+      purchaseSheetTitle: document.getElementById('purchaseSheetTitle'),
+      purchaseSheetResult: document.getElementById('purchaseSheetResult'),
+      purchasePriceInput: document.getElementById('purchasePriceInput'),
+      purchaseDateInput: document.getElementById('purchaseDateInput'),
+      purchaseSaveBtn: document.getElementById('purchaseSaveBtn'),
+      purchaseCancelBtn: document.getElementById('purchaseCancelBtn')
     };
 
     function setAuth(accessToken, user, refreshToken = '', rememberLogin = state.rememberLogin) {
@@ -1444,6 +1695,112 @@
       state.orders.pageSize = Number(data.page_size || o.pageSize || 20);
     }
 
+    async function loadStatsBoard() {
+      const s = state.statsBoard || {};
+      const period = String(s.period || 'today').trim();
+      const data = await request(`/api/stats/dashboard?period=${encodeURIComponent(period)}&game_name=WZRY`);
+      state.statsBoard = {
+        period: String(data.period || period),
+        range: data.range || { start_date: '', end_date: '' },
+        summary: data.summary || null,
+        profitability: data.profitability || null,
+        by_account: Array.isArray(data.by_account) ? data.by_account : [],
+        missing_purchase_accounts: Array.isArray(data.missing_purchase_accounts) ? data.missing_purchase_accounts : [],
+        configured_account_count: Number(data.configured_account_count || 0)
+      };
+    }
+
+    function renderStatsMissingOverlay() {
+      const missing = Array.isArray(state.statsBoard && state.statsBoard.missing_purchase_accounts)
+        ? state.statsBoard.missing_purchase_accounts
+        : [];
+      if (missing.length === 0) {
+        els.statsMissingOverlay.classList.add('hidden');
+        els.statsMissingList.innerHTML = '';
+        return;
+      }
+      els.statsMissingList.innerHTML = missing.map((x) => {
+        const role = String(x.role_name || '').trim();
+        const acc = String(x.game_account || '').trim();
+        return `<li>${role || acc}（${acc}）</li>`;
+      }).join('');
+      els.statsMissingOverlay.classList.remove('hidden');
+    }
+
+    function renderStatsView() {
+      const s = state.statsBoard || {};
+      const periods = [
+        { k: 'today', t: '当日' },
+        { k: 'yesterday', t: '昨日' },
+        { k: 'week', t: '本周' },
+        { k: 'last7', t: '近7天' },
+        { k: 'month', t: '本月' },
+        { k: 'last30', t: '近30天' }
+      ];
+      const summary = s.summary || {};
+      const profitability = s.profitability || {};
+      const orderBase = Number(summary.order_cnt_total || 0);
+      const avgRec = orderBase > 0 ? Number(summary.amount_rec_sum || 0) / orderBase : 0;
+
+      els.statsPeriods.innerHTML = periods.map((x) => `
+        <button class="stats-period-btn ${s.period === x.k ? 'active' : ''}" data-stats-period="${x.k}">${x.t}</button>
+      `).join('');
+      els.statsRangeText.textContent = `统计区间：${(s.range && s.range.start_date) || '-'} ~ ${(s.range && s.range.end_date) || '-'}`;
+      els.statsKpiGrid.innerHTML = `
+        <div class="stats-kpi-card">
+          <p class="stats-kpi-key">有效订单数</p>
+          <p class="stats-kpi-value">${Number(summary.order_cnt_effective || 0)}</p>
+        </div>
+        <div class="stats-kpi-card">
+          <p class="stats-kpi-key">实收总额</p>
+          <p class="stats-kpi-value money">¥${Number(summary.amount_rec_sum || 0).toFixed(2)}</p>
+        </div>
+        <div class="stats-kpi-card">
+          <p class="stats-kpi-key">单均实收</p>
+          <p class="stats-kpi-value">¥${avgRec.toFixed(2)}</p>
+        </div>
+        <div class="stats-kpi-card">
+          <p class="stats-kpi-key">退款率 / 撤单率</p>
+          <p class="stats-kpi-value">${(Number(summary.refund_rate || 0) * 100).toFixed(1)}% / ${(Number(summary.cancel_rate || 0) * 100).toFixed(1)}%</p>
+        </div>
+        <div class="stats-kpi-card">
+          <p class="stats-kpi-key">采购本金</p>
+          <p class="stats-kpi-value">¥${Number(profitability.purchase_base || 0).toFixed(2)}</p>
+        </div>
+        <div class="stats-kpi-card">
+          <p class="stats-kpi-key">月度年化收益率</p>
+          <p class="stats-kpi-value">${(Number(profitability.annualized_return_rate || 0) * 100).toFixed(2)}%</p>
+        </div>
+      `;
+
+      els.statsAccountTitle.textContent = `账号收益（已配置 ${Number(s.configured_account_count || 0)} 个）`;
+      const list = Array.isArray(s.by_account) ? s.by_account : [];
+      if (list.length === 0) {
+        els.statsAccountList.innerHTML = '<div class="panel"><div style="color:#6d7a8a;font-size:13px;">暂无可展示的账号统计</div></div>';
+      } else {
+        els.statsAccountList.innerHTML = list.map((x) => `
+          <div class="stats-acc-item">
+            <div class="stats-acc-top">
+              <p class="stats-acc-name">${x.role_name || x.game_account || '-'}</p>
+              <span class="stats-acc-money">¥${Number(x.amount_rec_sum || 0).toFixed(2)}</span>
+            </div>
+            <p class="stats-acc-meta">账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)} · 退款：${Number(x.order_cnt_refund || 0)} · 撤单：${Number(x.order_cnt_cancel || 0)}</p>
+          </div>
+        `).join('');
+      }
+
+      Array.from(els.statsPeriods.querySelectorAll('[data-stats-period]')).forEach((n) => {
+        n.addEventListener('click', async () => {
+          const k = String(n.getAttribute('data-stats-period') || 'today').trim();
+          if (k === state.statsBoard.period) return;
+          state.statsBoard.period = k;
+          await loadStatsBoard();
+          renderStatsView();
+        });
+      });
+      renderStatsMissingOverlay();
+    }
+
     function platformBadges(v) {
       const s = v || {};
       return [
@@ -1506,7 +1863,10 @@
           body: JSON.stringify({ game_account: account, game_name: 'WZRY' })
         });
         const online = Boolean(res && res.data && res.data.online);
-        state.onlineStatusMap[account] = online ? '在线' : '离线';
+        const tag = online ? '在线' : '离线';
+        state.onlineStatusMap[account] = tag;
+        const hit = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
+        if (hit) hit.online_tag = tag;
       } catch (e) {
         alert(e.message || '在线查询失败');
       } finally {
@@ -1516,7 +1876,11 @@
     }
 
     function buildOnlineChipHtml(account) {
-      const onlineText = String(state.onlineStatusMap[account] || '').trim();
+      const acc = String(account || '').trim();
+      const mapText = String(state.onlineStatusMap[acc] || '').trim();
+      const hit = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === acc);
+      const rowText = String((hit && hit.online_tag) || '').trim();
+      const onlineText = mapText || rowText;
       if (!onlineText) return '';
       const onlineClass = onlineText === '在线' ? 'chip-online' : 'chip-offline';
       return `<span class="chip ${onlineClass}">${onlineText}</span>`;
@@ -1526,7 +1890,10 @@
       const acc = String(account || '').trim();
       if (!acc) return;
       const card = state.cardNodeMap[acc];
-      if (!card) return;
+      if (!card) {
+        renderList();
+        return;
+      }
 
       const chipSlot = card.querySelector('[data-slot="online-chip"]');
       if (chipSlot) {
@@ -1588,6 +1955,119 @@
     function closeForbiddenSheet() {
       state.forbiddenSheet = { open: false, account: '', role_name: '', result_text: '', result_type: '', loading: false };
       renderForbiddenSheet();
+    }
+
+    function renderPurchaseSheet() {
+      const opened = Boolean(state.purchaseSheet && state.purchaseSheet.open);
+      els.purchaseSheet.classList.toggle('hidden', !opened);
+      if (!opened) return;
+
+      const titleName = String(state.purchaseSheet.role_name || state.purchaseSheet.account || '').trim() || '当前账号';
+      const resultText = String(state.purchaseSheet.result_text || '').trim();
+      const resultType = String(state.purchaseSheet.result_type || '').trim();
+      const loading = Boolean(state.purchaseSheet.loading);
+
+      els.purchaseSheetTitle.textContent = `维护采购信息 · ${titleName}`;
+      els.purchaseSheetResult.className = `sheet-result ${resultType}`;
+      els.purchaseSheetResult.textContent = resultText;
+      els.purchasePriceInput.value = String(state.purchaseSheet.purchase_price || '');
+      els.purchaseDateInput.value = String(state.purchaseSheet.purchase_date || '');
+      els.purchasePriceInput.disabled = loading;
+      els.purchaseDateInput.disabled = loading;
+      els.purchaseSaveBtn.disabled = loading;
+      els.purchaseCancelBtn.disabled = loading;
+    }
+
+    function openPurchaseSheet(item) {
+      const account = String(item && item.game_account || '').trim();
+      if (!account) return;
+      const priceRaw = Number(item && item.purchase_price);
+      const price = Number.isFinite(priceRaw) && priceRaw > 0 ? priceRaw.toFixed(2) : '';
+      state.purchaseSheet = {
+        open: true,
+        account,
+        role_name: String(item && (item.role_name || item.game_account) || '').trim(),
+        purchase_price: price,
+        purchase_date: String(item && item.purchase_date || '').slice(0, 10),
+        result_text: '',
+        result_type: '',
+        loading: false
+      };
+      renderPurchaseSheet();
+    }
+
+    function closePurchaseSheet() {
+      state.purchaseSheet = {
+        open: false,
+        account: '',
+        role_name: '',
+        purchase_price: '',
+        purchase_date: '',
+        result_text: '',
+        result_type: '',
+        loading: false
+      };
+      renderPurchaseSheet();
+    }
+
+    async function submitPurchaseConfig() {
+      const account = String((state.purchaseSheet || {}).account || '').trim();
+      if (!account) return;
+      const priceRaw = String(els.purchasePriceInput.value || '').trim();
+      const dateVal = String(els.purchaseDateInput.value || '').trim();
+      const priceNum = Number(priceRaw);
+      if (!Number.isFinite(priceNum) || priceNum < 0) {
+        state.purchaseSheet.result_text = '采购价格不合法';
+        state.purchaseSheet.result_type = 'err';
+        renderPurchaseSheet();
+        return;
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
+        state.purchaseSheet.result_text = '请选择采购日期';
+        state.purchaseSheet.result_type = 'err';
+        renderPurchaseSheet();
+        return;
+      }
+
+      state.purchaseSheet.loading = true;
+      state.purchaseSheet.result_text = '保存中...';
+      state.purchaseSheet.result_type = '';
+      renderPurchaseSheet();
+      try {
+        const out = await request('/api/products/purchase-config', {
+          method: 'POST',
+          body: JSON.stringify({
+            game_account: account,
+            purchase_price: Number(priceNum.toFixed(2)),
+            purchase_date: dateVal
+          })
+        });
+        const savedPrice = Number(out && out.data && out.data.purchase_price || 0);
+        const savedDate = String(out && out.data && out.data.purchase_date || '').slice(0, 10);
+        state.list = (state.list || []).map((x) => {
+          if (String(x && x.game_account || '').trim() !== account) return x;
+          return {
+            ...x,
+            purchase_price: Number(savedPrice.toFixed(2)),
+            purchase_date: savedDate
+          };
+        });
+        state.purchaseSheet.result_text = '保存成功';
+        state.purchaseSheet.result_type = 'ok';
+        renderPurchaseSheet();
+        showToast('采购信息已保存');
+        setTimeout(() => {
+          closePurchaseSheet();
+          renderList();
+        }, 220);
+      } catch (e) {
+        state.purchaseSheet.result_text = String(e && e.message ? e.message : '保存失败');
+        state.purchaseSheet.result_type = 'err';
+        renderPurchaseSheet();
+      } finally {
+        state.purchaseSheet.loading = false;
+        renderPurchaseSheet();
+      }
     }
 
     async function submitForbidden(enabled) {
@@ -1747,6 +2227,9 @@
               <button class="btn btn-chip btn-chip-ok" data-op="online-query" ${querying ? 'disabled' : ''}>
                 ${querying ? '查询中...' : '在线查询'}
               </button>
+              <button class="btn btn-chip btn-chip-ok" data-op="purchase-config">
+                维护采购
+              </button>
               <button class="btn btn-chip btn-chip-ok" data-op="forbidden-play" ${forbiddenLoading ? 'disabled' : ''}>
                 ${forbiddenLoading ? '处理中...' : '处理禁玩'}
               </button>
@@ -1767,6 +2250,7 @@
             });
           }
           node.querySelector('[data-op=\"online-query\"]').addEventListener('click', () => queryOnline(item));
+          node.querySelector('[data-op=\"purchase-config\"]').addEventListener('click', () => openPurchaseSheet(item));
           node.querySelector('[data-op=\"forbidden-play\"]').addEventListener('click', () => openForbiddenSheet(item));
           node.querySelector('[data-op=\"blacklist-toggle\"]').addEventListener('click', () => toggleBlacklist(item));
           state.cardNodeMap[account] = node;
@@ -1895,8 +2379,10 @@
       els.loginView.classList.toggle('hidden', loggedIn);
       const showProducts = loggedIn && state.currentMenu === 'products';
       const showOrders = loggedIn && state.currentMenu === 'orders';
+      const showStats = loggedIn && state.currentMenu === 'stats';
       els.listView.classList.toggle('hidden', !showProducts);
       els.orderView.classList.toggle('hidden', !showOrders);
+      els.statsView.classList.toggle('hidden', !showStats);
       els.heroLoginView.classList.toggle('hidden', loggedIn);
       els.heroAppView.classList.toggle('hidden', !loggedIn);
       els.heroMenuTitle.textContent = menuTitleByKey(state.currentMenu);
@@ -1907,18 +2393,24 @@
         els.drawerUserName.textContent = `当前用户：${state.user.name || state.user.account}`;
         if (showProducts) renderList();
         if (showOrders) renderOrdersView();
+        if (showStats) renderStatsView();
         renderDrawer();
         renderForbiddenSheet();
+        renderPurchaseSheet();
+        if (!showStats) els.statsMissingOverlay.classList.add('hidden');
         if (showProducts) updatePullRefreshUi();
       } else {
         els.drawerUserName.textContent = '当前用户：-';
         closeForbiddenSheet();
+        closePurchaseSheet();
+        els.statsMissingOverlay.classList.add('hidden');
         resetPullRefreshUi();
       }
     }
 
     els.btnLogin.addEventListener('click', login);
     els.btnLogout.addEventListener('click', () => {
+      closeDrawer();
       clearAuthState();
       state.list = [];
       state.total = 0;
@@ -1929,8 +2421,27 @@
       state.onlineLoadingMap = {};
       state.forbiddenLoadingMap = {};
       state.forbiddenSheet = { open: false, account: '', role_name: '', result_text: '', result_type: '', loading: false };
+      state.purchaseSheet = {
+        open: false,
+        account: '',
+        role_name: '',
+        purchase_price: '',
+        purchase_date: '',
+        result_text: '',
+        result_type: '',
+        loading: false
+      };
       state.cardNodeMap = {};
       state.pullRefresh = { dragging: false, ready: false, loading: false, startY: 0, distance: 0 };
+      state.statsBoard = {
+        period: 'today',
+        range: { start_date: '', end_date: '' },
+        summary: null,
+        profitability: null,
+        by_account: [],
+        missing_purchase_accounts: [],
+        configured_account_count: 0
+      };
       render();
     });
 
@@ -1974,6 +2485,32 @@
     els.forbiddenSheet.addEventListener('click', (e) => {
       if (e.target === els.forbiddenSheet) closeForbiddenSheet();
     });
+    els.purchaseSaveBtn.addEventListener('click', submitPurchaseConfig);
+    els.purchaseCancelBtn.addEventListener('click', closePurchaseSheet);
+    els.purchaseSheet.addEventListener('click', (e) => {
+      if (e.target === els.purchaseSheet) closePurchaseSheet();
+    });
+    els.statsMissingClose.addEventListener('click', () => {
+      els.statsMissingOverlay.classList.add('hidden');
+    });
+    els.statsMissingOverlay.addEventListener('click', (e) => {
+      if (e.target === els.statsMissingOverlay) {
+        els.statsMissingOverlay.classList.add('hidden');
+      }
+    });
+    els.statsRefreshBtn.addEventListener('click', async () => {
+      try {
+        await request('/api/stats/refresh', {
+          method: 'POST',
+          body: JSON.stringify({ days: 3, game_name: 'WZRY' })
+        });
+        await loadStatsBoard();
+        renderStatsView();
+        showToast('统计已刷新');
+      } catch (e) {
+        alert(e.message || '统计刷新失败');
+      }
+    });
 
     els.menuTrigger.addEventListener('click', openDrawer);
     els.drawerMask.addEventListener('click', closeDrawer);
@@ -1997,6 +2534,17 @@
           })();
           return;
         }
+        if (key === 'stats') {
+          (async () => {
+            try {
+              await loadStatsBoard();
+              render();
+            } catch (e) {
+              alert(e.message || '统计看板加载失败');
+            }
+          })();
+          return;
+        }
         render();
         alert('该功能正在开发中');
       });
@@ -2005,7 +2553,12 @@
     window.addEventListener('touchstart', (e) => {
       if (!SUPPORT_TOUCH_PULL) return;
       if (!(state.token && state.user)) return;
-      if (state.pullRefresh.loading || state.drawerOpen || (state.forbiddenSheet && state.forbiddenSheet.open)) return;
+      if (
+        state.pullRefresh.loading ||
+        state.drawerOpen ||
+        (state.forbiddenSheet && state.forbiddenSheet.open) ||
+        (state.purchaseSheet && state.purchaseSheet.open)
+      ) return;
       if (window.scrollY > 0) return;
       const t = e.touches && e.touches[0];
       if (!t) return;
