@@ -23,3 +23,27 @@
 - loading 展示时长规则：
   - 最少展示约 `150ms` 后再还原。
   - 若请求耗时超过 `200ms`，以请求真实返回时间为准，不额外延长。
+
+## Rule 3 - H5 BFF 分层规范
+
+后续 H5 接口开发，统一遵循「BFF 只做展示编排，业务逻辑下沉 Service」原则：
+
+- BFF 层职责（如 `h5/local_h5_server.js` 或后续 `h5_bff`）：
+  - 路由分发、参数解析、鉴权、协议转换、统一响应格式。
+  - 不承载核心业务规则、不直接耦合复杂状态机。
+- Service 层职责（如 `stats/order_stats.js`）：
+  - 承载业务规则、编排流程、并发控制策略、重试与幂等策略。
+  - 向上返回稳定的领域结果（业务结果对象），不直接返回 HTTP 语义。
+- 错误分层：
+  - Service 抛业务错误码（如 `LOCK_BUSY`、`SYNC_PARTIAL_FAIL`）。
+  - BFF 统一把业务错误映射为 HTTP 状态码和前端可读提示。
+- 并发与锁：
+  - 锁获取、等待、超时、轮询等并发控制逻辑默认下沉到 Service 或 lock 组件。
+  - BFF 只透传必要策略参数（如 `timeout_ms`、`request_id`）。
+- 可观测性：
+  - 关键链路统一携带 `trace_id`，贯穿 H5 -> BFF -> Service -> DB。
+  - 日志至少包含：`user_id`、`period/days`、`lock_wait_ms`、`sync_ok`、`error_code`。
+- 读写分离：
+  - `refresh`（写路径）与 `dashboard/calendar`（读路径）分离实现，读路径优先查快照表。
+- 配置收口：
+  - 锁和同步相关参数（如 `LOCK_KEY/LEASE/WAIT/POLL/maxPages`）集中在配置区，避免散落。
