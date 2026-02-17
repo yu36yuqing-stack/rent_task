@@ -152,8 +152,8 @@
         </div>
       </div>
       <div class="sheet-actions">
-        <button id="moreOpsOnlineBtn" class="sheet-btn">在线查询</button>
         <button id="moreOpsForbiddenBtn" class="sheet-btn warn">处理禁玩</button>
+        <button id="moreOpsPurchaseBtn" class="sheet-btn">维护采购</button>
         <button id="moreOpsCloseBtn" class="sheet-btn">关闭弹窗</button>
       </div>
     </div>
@@ -213,6 +213,12 @@
       <div style="display:flex;justify-content:flex-end;">
         <button id="statsMissingClose" class="btn btn-ghost">我知道了</button>
       </div>
+    </div>
+  </div>
+  <div id="globalLoading" class="global-loading hidden" aria-live="polite" aria-busy="true">
+    <div class="global-loading-card">
+      <span class="global-loading-spinner"></span>
+      <span>加载中...</span>
     </div>
   </div>
   <script defer src="/js/app_core.js"></script>

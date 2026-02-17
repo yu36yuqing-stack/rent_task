@@ -1,4 +1,11 @@
 const { openDatabase } = require('./sqlite_client');
+const ORDER_COUNT_TRACE_ENABLED = !['0', 'false', 'no', 'off']
+    .includes(String(process.env.ORDER_COUNT_TRACE || 'true').toLowerCase());
+
+function traceOrderCount(msg) {
+    if (!ORDER_COUNT_TRACE_ENABLED) return;
+    console.log(msg);
+}
 
 function nowText() {
     const d = new Date();
@@ -61,6 +68,7 @@ function toDateTimeText(value) {
 function normalizeOrderStatusForStore(value) {
     const raw = String(value ?? '').trim();
     if (!raw) return '';
+    if (raw === '出租中') return '租赁中';
     if (raw === '租赁中' || raw === '已完成' || raw === '部分完成' || raw === '已撤单' || raw === '退款中' || raw === '已退款' || raw === '结算中' || raw === '投诉/撤单') return raw;
     const n = Number(raw);
     if (!Number.isFinite(n)) return raw;
@@ -289,7 +297,8 @@ async function initOrderDb() {
         await run(db, `
             UPDATE "order"
             SET order_status = CASE
-                WHEN order_status IN ('租赁中', '已完成', '部分完成', '已撤单', '退款中', '已退款', '结算中', '投诉/撤单') THEN order_status
+                WHEN order_status IN ('租赁中', '出租中', '已完成', '部分完成', '已撤单', '退款中', '已退款', '结算中', '投诉/撤单')
+                    THEN CASE WHEN order_status = '出租中' THEN '租赁中' ELSE order_status END
                 WHEN order_status IN ('50', 50) THEN '已完成'
                 WHEN order_status IN ('52', 52) THEN '部分完成'
                 WHEN order_status IN ('60', 60) THEN '已撤单'
@@ -474,6 +483,18 @@ function todayDateText() {
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+// 业务日：每天 06:00 切日。
+// 例如 2026-02-16 00:00~05:59 仍归属 2026-02-15。
+function businessDateText(cutoffHour = 6) {
+    const now = new Date();
+    const d = new Date(now.getTime());
+    if (d.getHours() < Number(cutoffHour || 6)) {
+        d.setDate(d.getDate() - 1);
+    }
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 async function listTodayOrderCountByAccounts(userId, gameAccounts = [], dateText = '') {
     await initOrderDb();
     const uid = Number(userId || 0);
@@ -519,8 +540,11 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
         .filter(Boolean)));
     if (uniq.length === 0) return {};
 
-    const day = String(dateText || todayDateText()).slice(0, 10);
+    const day = String(dateText || businessDateText(6)).slice(0, 10);
     const dayStart6 = `${day} 06:00:00`;
+    traceOrderCount(
+        `[OrderCount] uid=${uid} now="${new Date().toString()}" tz="${Intl.DateTimeFormat().resolvedOptions().timeZone || ''}" day=${day} window=[${dayStart6}, +1day) accounts=${uniq.length}`
+    );
     const placeholders = uniq.map(() => '?').join(',');
     const db = openDatabase();
     try {
@@ -534,7 +558,6 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
                   (
                       COALESCE(order_status, '') IN ('租赁中', '出租中')
                       AND end_time >= ?
-                      AND end_time < datetime(?, '+1 day')
                   )
                   OR (
                       COALESCE(order_status, '') NOT IN ('租赁中', '出租中')
@@ -544,13 +567,22 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
                   )
               )
             GROUP BY game_account
-        `, [uid, ...uniq, dayStart6, dayStart6, dayStart6, dayStart6]);
+        `, [uid, ...uniq, dayStart6, dayStart6, dayStart6]);
         const out = {};
         for (const row of rows) {
             const acc = String(row.game_account || '').trim();
             if (!acc) continue;
             out[acc] = Number(row.cnt || 0);
         }
+        const hitAccounts = Object.keys(out);
+        const totalCnt = hitAccounts.reduce((sum, acc) => sum + Number(out[acc] || 0), 0);
+        const sample = hitAccounts
+            .slice(0, 5)
+            .map((acc) => `${acc}:${Number(out[acc] || 0)}`)
+            .join(',');
+        traceOrderCount(
+            `[OrderCount] uid=${uid} result hit_accounts=${hitAccounts.length}/${uniq.length} total_cnt=${totalCnt} sample="${sample}"`
+        );
         return out;
     } finally {
         db.close();

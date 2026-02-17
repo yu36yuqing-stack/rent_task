@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const util = require('util');
 const { syncOrdersForAllUsers } = require('./order');
-const { tryAcquireOrderJobLock, releaseOrderJobLock } = require('../database/order_job_lock_db');
+const { tryAcquireLock, releaseLock } = require('../database/lock_db');
 
 const TASK_DIR = path.join(__dirname, '..');
 const LOG_DIR = path.join(TASK_DIR, 'log');
@@ -33,7 +33,7 @@ setupLogger();
 
 (async () => {
     const leaseSec = Math.max(300, Number(process.env.ORDER_WORKER_LOCK_LEASE_SEC || 1800));
-    const lock = await tryAcquireOrderJobLock(LOCK_KEY, leaseSec, `pid=${process.pid}`);
+    const lock = await tryAcquireLock(LOCK_KEY, leaseSec, `pid=${process.pid}`);
     if (!lock.acquired) {
         console.log(`[OrderWorker] 已有任务在执行，跳过。lease_until=${lock.lease_until}`);
         process.exit(0);
@@ -48,6 +48,6 @@ setupLogger();
         console.error(`[OrderWorker] 执行失败: ${e.message}`);
         process.exitCode = 1;
     } finally {
-        await releaseOrderJobLock(LOCK_KEY, `release by pid=${process.pid}`);
+        await releaseLock(LOCK_KEY, `release by pid=${process.pid}`);
     }
 })();

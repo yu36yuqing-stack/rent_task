@@ -791,7 +791,8 @@ POST /api/youpin/rent-connector/order/v1/list
 
 
 ## 禁玩和取消禁玩能力
-curl --location 'http://t1-rent-connecter.youpin898.com:18080/product/v1/forbidden/play' \
+### 发送命令
+curl --location 'https://acctrade-api.youpin898.com/api/youpin/rent-connector/product/v1/forbidden/play' \
 --header 'Content-Type: application/json' \
 --data '{
     "gameId": 1,
@@ -800,6 +801,7 @@ curl --location 'http://t1-rent-connecter.youpin898.com:18080/product/v1/forbidd
     "enabled": "false"
 }'
 
+### 关键参数含义
 "enabled": "true" 开启禁玩
 "enabled": "false" 取消禁玩
 

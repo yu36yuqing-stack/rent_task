@@ -8,7 +8,8 @@
       const o = state.orders || {};
       const tabs = [
         { k: 'all', t: '全部' },
-        { k: 'progress', t: '进行中' },
+        { k: 'progress', t: '租赁中' },
+        { k: 'refund', t: '已退款' },
         { k: 'done', t: '已完成' }
       ];
       const quick = [

@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const util = require('util');
-const { tryAcquireOrderJobLock, releaseOrderJobLock } = require('../database/order_job_lock_db');
+const { tryAcquireLock, releaseLock } = require('../database/lock_db');
 const { setLastRunDate } = require('../database/order_stats_job_state_db');
 const { refreshOrderStatsDailyForAllUsers, STATS_JOB_KEY_ALL_USERS } = require('./order_stats');
 
@@ -39,7 +39,7 @@ function todayText() {
 setupLogger();
 
 (async () => {
-    const lock = await tryAcquireOrderJobLock(LOCK_KEY, 3600, `pid=${process.pid}`);
+    const lock = await tryAcquireLock(LOCK_KEY, 3600, `pid=${process.pid}`);
     if (!lock.acquired) {
         console.log(`[OrderStatsWorker] 已有任务在执行，跳过。lease_until=${lock.lease_until}`);
         process.exit(0);
@@ -59,6 +59,6 @@ setupLogger();
         console.error(`[OrderStatsWorker] 执行失败: ${e.message}`);
         process.exitCode = 1;
     } finally {
-        await releaseOrderJobLock(LOCK_KEY, `release by pid=${process.pid}`);
+        await releaseLock(LOCK_KEY, `release by pid=${process.pid}`);
     }
 })();

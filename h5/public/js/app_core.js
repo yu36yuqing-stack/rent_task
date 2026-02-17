@@ -129,6 +129,9 @@
     const API_BASE = window.location.pathname.startsWith('/h5local') ? '/h5local' : '';
     let refreshPromise = null;
     let toastTimer = null;
+    const GLOBAL_LOADING_MIN_MS = 250;
+    let requestInFlightCount = 0;
+    let requestLoadingShownAt = 0;
 
     function menuTitleByKey(key) {
       const k = String(key || '').trim();
@@ -221,8 +224,8 @@
       sheetCancelForbidden: document.getElementById('sheetCancelForbidden'),
       moreOpsSheet: document.getElementById('moreOpsSheet'),
       moreOpsSheetTitle: document.getElementById('moreOpsSheetTitle'),
-      moreOpsOnlineBtn: document.getElementById('moreOpsOnlineBtn'),
       moreOpsForbiddenBtn: document.getElementById('moreOpsForbiddenBtn'),
+      moreOpsPurchaseBtn: document.getElementById('moreOpsPurchaseBtn'),
       moreOpsCloseBtn: document.getElementById('moreOpsCloseBtn'),
       purchaseSheet: document.getElementById('purchaseSheet'),
       purchaseSheetTitle: document.getElementById('purchaseSheetTitle'),
@@ -235,8 +238,32 @@
       orderOffThresholdSheetResult: document.getElementById('orderOffThresholdSheetResult'),
       orderOffThresholdInput: document.getElementById('orderOffThresholdInput'),
       orderOffThresholdSaveBtn: document.getElementById('orderOffThresholdSaveBtn'),
-      orderOffThresholdCancelBtn: document.getElementById('orderOffThresholdCancelBtn')
+      orderOffThresholdCancelBtn: document.getElementById('orderOffThresholdCancelBtn'),
+      globalLoading: document.getElementById('globalLoading')
     };
+
+    function setGlobalLoadingVisible(visible) {
+      if (!els.globalLoading) return;
+      els.globalLoading.classList.toggle('hidden', !visible);
+    }
+
+    function beginGlobalRequestLoading() {
+      requestInFlightCount += 1;
+      if (requestInFlightCount !== 1) return;
+      requestLoadingShownAt = Date.now();
+      setGlobalLoadingVisible(true);
+    }
+
+    async function endGlobalRequestLoading() {
+      if (requestInFlightCount <= 0) return;
+      requestInFlightCount -= 1;
+      if (requestInFlightCount > 0) return;
+      const elapsed = Date.now() - requestLoadingShownAt;
+      if (elapsed < GLOBAL_LOADING_MIN_MS) {
+        await new Promise((resolve) => setTimeout(resolve, GLOBAL_LOADING_MIN_MS - elapsed));
+      }
+      if (requestInFlightCount === 0) setGlobalLoadingVisible(false);
+    }
 
     function closeOrderOffThresholdSheet() {
       if (!els.orderOffThresholdSheet) return;
@@ -336,25 +363,33 @@
     }
 
     async function request(path, options = {}, triedRefresh = false) {
-      const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
-      if (state.token) headers.Authorization = `Bearer ${state.token}`;
-      const fullPath = `${API_BASE}${path}`;
-      const res = await fetch(fullPath, Object.assign({}, options, { headers }));
-      if (res.status === 401 && !triedRefresh && path !== '/api/login' && path !== '/api/refresh') {
-        try {
-          await tryRefreshAccessToken();
-        } catch (refreshErr) {
-          clearAuthState();
-          render();
-          throw refreshErr;
+      beginGlobalRequestLoading();
+      try {
+        const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
+        if (state.token) headers.Authorization = `Bearer ${state.token}`;
+        const fullPath = `${API_BASE}${path}`;
+        const fetchOptions = Object.assign({}, options, { headers });
+        let res = await fetch(fullPath, fetchOptions);
+        if (res.status === 401 && !triedRefresh && path !== '/api/login' && path !== '/api/refresh') {
+          try {
+            await tryRefreshAccessToken();
+          } catch (refreshErr) {
+            clearAuthState();
+            render();
+            throw refreshErr;
+          }
+          const retryHeaders = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
+          if (state.token) retryHeaders.Authorization = `Bearer ${state.token}`;
+          res = await fetch(fullPath, Object.assign({}, options, { headers: retryHeaders }));
         }
-        return request(path, options, true);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) {
+          throw new Error(data.message || `请求失败(${res.status})`);
+        }
+        return data;
+      } finally {
+        await endGlobalRequestLoading();
       }
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) {
-        throw new Error(data.message || `请求失败(${res.status})`);
-      }
-      return data;
     }
 
     async function login() {
@@ -627,14 +662,6 @@
     els.forbiddenSheet.addEventListener('click', (e) => {
       if (e.target === els.forbiddenSheet) closeForbiddenSheet();
     });
-    els.moreOpsOnlineBtn.addEventListener('click', async () => {
-      const account = String((state.moreOpsSheet || {}).account || '').trim();
-      if (!account) return;
-      const item = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
-      if (!item) return;
-      await queryOnline(item);
-      renderMoreOpsSheet();
-    });
     els.moreOpsForbiddenBtn.addEventListener('click', () => {
       const account = String((state.moreOpsSheet || {}).account || '').trim();
       if (!account) return;
@@ -642,6 +669,14 @@
       if (!item) return;
       closeMoreOpsSheet();
       openForbiddenSheet(item);
+    });
+    els.moreOpsPurchaseBtn.addEventListener('click', () => {
+      const account = String((state.moreOpsSheet || {}).account || '').trim();
+      if (!account) return;
+      const item = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
+      if (!item) return;
+      closeMoreOpsSheet();
+      openPurchaseSheet(item);
     });
     els.moreOpsCloseBtn.addEventListener('click', () => closeMoreOpsSheet());
     els.moreOpsSheet.addEventListener('click', (e) => {

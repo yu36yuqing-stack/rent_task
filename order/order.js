@@ -158,7 +158,7 @@ function normalizeOrderListOptions(options = {}) {
     const pageSize = Math.min(100, Math.max(1, Number(options.page_size || options.pageSize || 20)));
     const quickFilter = String(options.quick_filter || options.quickFilter || 'today').trim().toLowerCase();
     const statusFilterRaw = String(options.status_filter || options.statusFilter || 'all').trim().toLowerCase();
-    const statusFilter = (statusFilterRaw === 'progress' || statusFilterRaw === 'done' || statusFilterRaw === 'all')
+    const statusFilter = (statusFilterRaw === 'progress' || statusFilterRaw === 'refund' || statusFilterRaw === 'done' || statusFilterRaw === 'all')
         ? statusFilterRaw
         : 'all';
     const gameName = String(options.game_name || options.gameName || 'WZRY').trim() || 'WZRY';
@@ -188,6 +188,8 @@ async function listOrdersForUser(userId, options = {}) {
 
     if (cfg.statusFilter === 'progress') {
         where.push("COALESCE(order_status, '') IN ('租赁中', '出租中')");
+    } else if (cfg.statusFilter === 'refund') {
+        where.push("COALESCE(order_status, '') IN ('已退款')");
     } else if (cfg.statusFilter === 'done') {
         where.push("COALESCE(order_status, '') NOT IN ('租赁中', '出租中')");
     }

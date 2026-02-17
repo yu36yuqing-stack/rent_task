@@ -37,6 +37,7 @@ const { createAccessToken, createOpaqueRefreshToken } = require('../user/auth_to
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
 const { queryAccountOnlineStatus, setForbiddenPlay } = require('../uuzuhao/uuzuhao_api');
 const { listOrdersForUser, syncOrdersByUser } = require('../order/order');
+const { tryAcquireLock, releaseLock } = require('../database/lock_db');
 const {
     getOrderStatsDashboardByUser,
     refreshOrderStatsDailyByUser,
@@ -49,6 +50,10 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const H5_REFRESH_TTL_REMEMBER_SEC = Number(process.env.H5_REFRESH_TTL_REMEMBER_SEC || (7 * 24 * 3600));
 const H5_REFRESH_TTL_SESSION_SEC = Number(process.env.H5_REFRESH_TTL_SESSION_SEC || (12 * 3600));
 const ORDER_OFF_THRESHOLD_RULE_NAME = 'X单下架阈值';
+const ORDER_SYNC_LOCK_KEY = String(process.env.ORDER_SYNC_LOCK_KEY || 'order_sync_all_users');
+const ORDER_SYNC_LOCK_LEASE_SEC = Math.max(60, Number(process.env.ORDER_SYNC_LOCK_LEASE_SEC || 1800));
+const STATS_REFRESH_LOCK_WAIT_MS = Math.max(0, Number(process.env.STATS_REFRESH_LOCK_WAIT_MS || 120000));
+const STATS_REFRESH_LOCK_POLL_MS = Math.max(200, Number(process.env.STATS_REFRESH_LOCK_POLL_MS || 800));
 
 function normalizeOrderOffThreshold(v, fallback = 3) {
     const n = Number(v);
@@ -112,6 +117,46 @@ function normalizePage(v, fallback) {
     const n = Number(v);
     if (!Number.isFinite(n)) return fallback;
     return Math.max(1, Math.floor(n));
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms || 0))));
+}
+
+async function acquireOrderSyncLockWithWait(options = {}) {
+    const key = String(options.key || ORDER_SYNC_LOCK_KEY).trim() || ORDER_SYNC_LOCK_KEY;
+    const owner = String(options.owner || '').trim() || `pid=${process.pid}`;
+    const leaseSec = Math.max(60, Number(options.lease_sec || ORDER_SYNC_LOCK_LEASE_SEC));
+    const waitMs = Math.max(0, Number(options.wait_ms || 0));
+    const pollMs = Math.max(200, Number(options.poll_ms || STATS_REFRESH_LOCK_POLL_MS));
+    const beginAt = Date.now();
+    const deadline = beginAt + waitMs;
+    let lastLeaseUntil = 0;
+
+    while (true) {
+        const lock = await tryAcquireLock(key, leaseSec, owner);
+        if (lock && lock.acquired) {
+            return {
+                acquired: true,
+                lock_key: key,
+                lease_until: Number(lock.lease_until || 0),
+                waited_ms: Date.now() - beginAt
+            };
+        }
+        lastLeaseUntil = Number((lock && lock.lease_until) || 0);
+        if (Date.now() >= deadline) {
+            return {
+                acquired: false,
+                lock_key: key,
+                lease_until: lastLeaseUntil,
+                waited_ms: Date.now() - beginAt
+            };
+        }
+        const nowSec = Math.floor(Date.now() / 1000);
+        const msByLease = lastLeaseUntil > nowSec ? (lastLeaseUntil - nowSec) * 1000 : pollMs;
+        const remainMs = Math.max(0, deadline - Date.now());
+        await sleep(Math.min(remainMs, Math.max(pollMs, Math.min(3000, msByLease))));
+    }
 }
 
 function isRentingByChannelStatus(channelStatus) {
@@ -326,13 +371,34 @@ async function handleOrders(req, res, urlObj) {
 
 async function handleOrderSyncNow(req, res) {
     const user = await requireAuth(req);
-    const out = await syncOrdersByUser(user.id, {
-        user,
-        uuzuhao: { maxPages: 20 },
-        uhaozu: { maxPages: 20 },
-        zuhaowang: { maxPages: 20 }
-    });
-    return json(res, 200, { ok: true, ...out });
+    const owner = `h5/orders/sync user_id=${user.id} pid=${process.pid}`;
+    const lock = await tryAcquireLock(ORDER_SYNC_LOCK_KEY, ORDER_SYNC_LOCK_LEASE_SEC, owner);
+    if (!lock.acquired) {
+        return json(res, 200, {
+            ok: true,
+            skipped: true,
+            reason: 'order_sync_locked',
+            lock_key: ORDER_SYNC_LOCK_KEY,
+            lease_until: Number(lock.lease_until || 0)
+        });
+    }
+
+    try {
+        const out = await syncOrdersByUser(user.id, {
+            user,
+            uuzuhao: { maxPages: 20 },
+            uhaozu: { maxPages: 20 },
+            zuhaowang: { maxPages: 20 }
+        });
+        return json(res, 200, {
+            ok: true,
+            skipped: false,
+            lock_key: ORDER_SYNC_LOCK_KEY,
+            ...out
+        });
+    } finally {
+        await releaseLock(ORDER_SYNC_LOCK_KEY, `release by ${owner}`);
+    }
 }
 
 async function handleStatsDashboard(req, res, urlObj) {
@@ -362,12 +428,65 @@ async function handleStatsRefresh(req, res) {
     const body = await readJsonBody(req);
     const days = Math.max(1, Math.min(60, Number(body.days || 60)));
     const gameName = String(body.game_name || 'WZRY').trim() || 'WZRY';
-    const out = await refreshOrderStatsDailyByUser(user.id, {
-        days,
-        game_name: gameName,
-        desc: 'manual by h5 stats refresh'
+    const needSyncOrders = body.sync_orders === undefined ? true : Boolean(body.sync_orders);
+    const lockOwner = `h5/stats/refresh user_id=${user.id} pid=${process.pid}`;
+    const lock = await acquireOrderSyncLockWithWait({
+        key: ORDER_SYNC_LOCK_KEY,
+        owner: lockOwner,
+        lease_sec: ORDER_SYNC_LOCK_LEASE_SEC,
+        wait_ms: STATS_REFRESH_LOCK_WAIT_MS,
+        poll_ms: STATS_REFRESH_LOCK_POLL_MS
     });
-    return json(res, 200, { ok: true, ...out });
+    if (!lock.acquired) {
+        throw httpError(409, `订单同步任务占用中，请稍后重试（lock=${ORDER_SYNC_LOCK_KEY}）`);
+    }
+
+    let orderSync = {
+        attempted: false,
+        ok: true,
+        skipped: !needSyncOrders
+    };
+    try {
+        if (needSyncOrders) {
+            orderSync.attempted = true;
+            try {
+                const syncOut = await syncOrdersByUser(user.id, {
+                    user,
+                    uuzuhao: { maxPages: 20 },
+                    uhaozu: { maxPages: 20 },
+                    zuhaowang: { maxPages: 20 }
+                });
+                orderSync = {
+                    attempted: true,
+                    skipped: false,
+                    ok: Boolean(syncOut && syncOut.ok),
+                    result: syncOut
+                };
+            } catch (e) {
+                orderSync = {
+                    attempted: true,
+                    skipped: false,
+                    ok: false,
+                    error: String(e && e.message ? e.message : e || '订单同步失败')
+                };
+            }
+        }
+
+        const out = await refreshOrderStatsDailyByUser(user.id, {
+            days,
+            game_name: gameName,
+            desc: 'manual by h5 stats refresh'
+        });
+        return json(res, 200, {
+            ok: true,
+            ...out,
+            order_sync: orderSync,
+            lock_waited_ms: Number(lock.waited_ms || 0),
+            lock_key: ORDER_SYNC_LOCK_KEY
+        });
+    } finally {
+        await releaseLock(ORDER_SYNC_LOCK_KEY, `release by ${lockOwner}`);
+    }
 }
 
 async function handleGetOrderOffThreshold(req, res) {

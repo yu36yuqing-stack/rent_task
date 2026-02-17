@@ -88,7 +88,12 @@
       const p = Number(item && item.purchase_price);
       const d = String(item && item.purchase_date || '').slice(0, 10);
       if (!Number.isFinite(p) || p <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return '';
-      return `<span class="purchase-brief">采购 ¥${p.toFixed(2)} · ${d}</span>`;
+      return `
+        <div class="purchase-brief">
+          <span class="purchase-brief-line">采购价 ¥${p.toFixed(2)}</span>
+          <span class="purchase-brief-line">采购日期 ${d}</span>
+        </div>
+      `;
     }
 
     function renderOnlinePart(account) {
@@ -109,7 +114,7 @@
       if (btn) {
         const querying = Boolean(state.onlineLoadingMap[acc]);
         btn.disabled = querying;
-        btn.textContent = querying ? '查询中...' : '在线查询';
+        btn.textContent = '在线查询';
       }
     }
 
@@ -152,10 +157,9 @@
       const querying = Boolean(state.onlineLoadingMap[account]);
       const handling = Boolean(state.forbiddenLoadingMap[account]);
       els.moreOpsSheetTitle.textContent = `更多操作 · ${name || '当前账号'}`;
-      els.moreOpsOnlineBtn.disabled = querying || handling;
       els.moreOpsForbiddenBtn.disabled = querying || handling;
+      els.moreOpsPurchaseBtn.disabled = querying || handling;
       els.moreOpsCloseBtn.disabled = querying || handling;
-      els.moreOpsOnlineBtn.textContent = querying ? '查询中...' : '在线查询';
       els.moreOpsForbiddenBtn.textContent = handling ? '处理中...' : '处理禁玩';
     }
 
@@ -395,21 +399,28 @@
       const allActive = state.filter === 'all';
       const restrictedActive = state.filter === 'restricted';
       const rentingActive = state.filter === 'renting';
+      const summaryMap = {
+        all: Number(state.stats.total_all || 0),
+        restricted: Number(state.stats.total_restricted || 0),
+        renting: Number(state.stats.total_renting || 0)
+      };
+      const summaryTotal = Number(summaryMap[state.filter] || 0);
       els.filters.innerHTML = `
         <div class="filter-tab ${allActive ? 'active' : ''}" data-filter="all">
-          <div class="txt">总账号</div>
-          <div class="num">${state.stats.total_all || 0}</div>
+          <div class="txt">全部</div>
         </div>
         <div class="filter-tab ${restrictedActive ? 'active' : ''}" data-filter="restricted">
           <div class="txt">限制中</div>
-          <div class="num">${state.stats.total_restricted || 0}</div>
         </div>
         <div class="filter-tab ${rentingActive ? 'active' : ''}" data-filter="renting">
           <div class="txt">租赁中</div>
-          <div class="num">${state.stats.total_renting || 0}</div>
         </div>
       `;
-      els.orderTotal.textContent = `今日有效订单总数：${state.stats.total_paid || 0}`;
+      els.orderTotal.innerHTML = `
+        <span class="order-total-main">今日有效订单数：${Number(state.stats.total_paid || 0)}</span>
+        <span class="order-total-divider" aria-hidden="true"></span>
+        <span class="order-total-summary">汇总${summaryTotal}</span>
+      `;
       Array.from(els.filters.querySelectorAll('.filter-tab')).forEach((n) => {
         n.addEventListener('click', async () => {
           const nextFilter = n.getAttribute('data-filter') || 'all';
@@ -434,7 +445,10 @@
         state.list.forEach((item, idx) => {
           const node = document.createElement('div');
           node.className = 'list-item';
-          const plat = platformBadges(item.channel_status).map((x) => `<span class="plat">${x}</span>`).join('');
+          const plat = platformBadges(item.channel_status).map((x) => {
+            const isRenting = /租赁中/.test(String(x || ''));
+            return `<span class="plat ${isRenting ? 'plat-renting' : ''}">${x}</span>`;
+          }).join('');
           const account = String(item.game_account || '').trim();
           const querying = Boolean(state.onlineLoadingMap[account]);
           const forbiddenLoading = Boolean(state.forbiddenLoadingMap[account]);
@@ -453,29 +467,23 @@
                 </span>
               </div>
             </div>
-            <div class="account-row">
-              <div class="account-left">
-                <div class="account">账号：${item.game_account}</div>
-              </div>
-              <div class="account-actions">
-                ${buildPurchaseBriefHtml(item)}
-                <button class="copy-btn" data-copy="${item.game_account}">复制</button>
-              </div>
-            </div>
-            <div class="meta-grid">
-              <div class="meta"><div class="k">今日订单</div><div class="v">${item.today_paid_count}</div></div>
-              <div class="meta">
-                <div class="k">模式</div>
-                <div class="v mode-val">
-                  ${(item.mode_restricted ? '限制中' : '可出租')}
-                  ${(item.mode_restricted ? `<button class="info-dot" data-reason="${(item.mode_reason || '').replace(/"/g, '&quot;')}">?</button>` : '')}
+            <div class="info-squares">
+              <div class="info-square base-square">
+                <div class="account-main">
+                  <div class="account">账号：${item.game_account}</div>
+                  <button class="copy-btn" data-copy="${item.game_account}">复制</button>
                 </div>
+                ${buildPurchaseBriefHtml(item)}
+                <p class="square-line">今日订单：${item.today_paid_count}</p>
+              </div>
+              <div class="info-square channel-square">
+                <p class="square-title">渠道状态</p>
+                <div class="platforms">${plat}</div>
               </div>
             </div>
-            <div class="platforms">${plat}</div>
             <div class="ops">
-              <button class="btn btn-chip btn-chip-ok" data-op="purchase-config">
-                维护采购
+              <button class="btn btn-chip btn-chip-ok" data-op="online-query" ${querying ? 'disabled' : ''}>
+                在线查询
               </button>
               <button class="btn btn-chip ${item.blacklisted ? 'btn-chip-danger' : 'btn-chip-ok'}" data-op="blacklist-toggle">
                 ${item.blacklisted ? '移出黑名单' : '加入黑名单'}
@@ -489,14 +497,7 @@
             const v = e.currentTarget.getAttribute('data-copy') || '';
             copyAccount(v);
           });
-          const info = node.querySelector('.info-dot');
-          if (info) {
-            info.addEventListener('click', (e) => {
-              const r = e.currentTarget.getAttribute('data-reason') || '';
-              showReason(r);
-            });
-          }
-          node.querySelector('[data-op=\"purchase-config\"]').addEventListener('click', () => openPurchaseSheet(item));
+          node.querySelector('[data-op=\"online-query\"]').addEventListener('click', () => queryOnline(item));
           node.querySelector('[data-op=\"blacklist-toggle\"]').addEventListener('click', () => toggleBlacklist(item));
           node.querySelector('[data-op=\"more-ops\"]').addEventListener('click', () => openMoreOpsSheet(item));
           state.cardNodeMap[account] = node;

@@ -1,4 +1,5 @@
 const { openDatabase } = require('./sqlite_client');
+const LOCK_TABLE = 'lock_db';
 
 function nowText() {
     const d = new Date();
@@ -24,11 +25,11 @@ function get(db, sql, params = []) {
     });
 }
 
-async function initOrderJobLockDb() {
+async function initLockDb() {
     const db = openDatabase();
     try {
         await run(db, `
-            CREATE TABLE IF NOT EXISTS order_job_lock (
+            CREATE TABLE IF NOT EXISTS ${LOCK_TABLE} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 lock_key TEXT NOT NULL,
                 lease_until INTEGER NOT NULL DEFAULT 0,
@@ -38,16 +39,16 @@ async function initOrderJobLockDb() {
             )
         `);
         await run(db, `
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_order_job_lock_alive
-            ON order_job_lock(lock_key, is_deleted)
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_lock_db_alive
+            ON ${LOCK_TABLE}(lock_key, is_deleted)
         `);
     } finally {
         db.close();
     }
 }
 
-async function tryAcquireOrderJobLock(lockKey, leaseSec = 1800, owner = '') {
-    await initOrderJobLockDb();
+async function tryAcquireLock(lockKey, leaseSec = 1800, owner = '') {
+    await initLockDb();
     const key = String(lockKey || '').trim();
     const lease = Math.max(60, Number(leaseSec || 1800));
     const nowSec = Math.floor(Date.now() / 1000);
@@ -59,14 +60,14 @@ async function tryAcquireOrderJobLock(lockKey, leaseSec = 1800, owner = '') {
         await run(db, 'BEGIN IMMEDIATE TRANSACTION');
         const row = await get(db, `
             SELECT id, lease_until
-            FROM order_job_lock
+            FROM ${LOCK_TABLE}
             WHERE lock_key = ? AND is_deleted = 0
             LIMIT 1
         `, [key]);
 
         if (!row) {
             await run(db, `
-                INSERT INTO order_job_lock (lock_key, lease_until, modify_date, is_deleted, desc)
+                INSERT INTO ${LOCK_TABLE} (lock_key, lease_until, modify_date, is_deleted, desc)
                 VALUES (?, ?, ?, 0, ?)
             `, [key, untilSec, nowText(), owner]);
             await run(db, 'COMMIT');
@@ -80,7 +81,7 @@ async function tryAcquireOrderJobLock(lockKey, leaseSec = 1800, owner = '') {
         }
 
         await run(db, `
-            UPDATE order_job_lock
+            UPDATE ${LOCK_TABLE}
             SET lease_until = ?, modify_date = ?, desc = ?
             WHERE id = ?
         `, [untilSec, nowText(), owner, Number(row.id)]);
@@ -94,15 +95,15 @@ async function tryAcquireOrderJobLock(lockKey, leaseSec = 1800, owner = '') {
     }
 }
 
-async function releaseOrderJobLock(lockKey, owner = '') {
-    await initOrderJobLockDb();
+async function releaseLock(lockKey, owner = '') {
+    await initLockDb();
     const key = String(lockKey || '').trim();
     if (!key) return false;
 
     const db = openDatabase();
     try {
         const r = await run(db, `
-            UPDATE order_job_lock
+            UPDATE ${LOCK_TABLE}
             SET lease_until = 0, modify_date = ?, desc = ?
             WHERE lock_key = ? AND is_deleted = 0
         `, [nowText(), owner, key]);
@@ -113,7 +114,7 @@ async function releaseOrderJobLock(lockKey, owner = '') {
 }
 
 module.exports = {
-    initOrderJobLockDb,
-    tryAcquireOrderJobLock,
-    releaseOrderJobLock
+    initLockDb,
+    tryAcquireLock,
+    releaseLock
 };
