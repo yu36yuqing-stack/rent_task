@@ -554,20 +554,14 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
             WHERE user_id = ?
               AND is_deleted = 0
               AND game_account IN (${placeholders})
+              AND start_time >= ?
+              AND start_time < datetime(?, '+1 day')
               AND (
-                  (
-                      COALESCE(order_status, '') IN ('租赁中', '出租中')
-                      AND end_time >= ?
-                  )
-                  OR (
-                      COALESCE(order_status, '') NOT IN ('租赁中', '出租中')
-                      AND end_time >= ?
-                      AND end_time < datetime(?, '+1 day')
-                      AND COALESCE(rec_amount, 0) > 0
-                  )
+                  COALESCE(order_status, '') IN ('租赁中', '出租中')
+                  OR COALESCE(rec_amount, 0) > 0
               )
             GROUP BY game_account
-        `, [uid, ...uniq, dayStart6, dayStart6, dayStart6]);
+        `, [uid, ...uniq, dayStart6, dayStart6]);
         const out = {};
         for (const row of rows) {
             const acc = String(row.game_account || '').trim();
@@ -589,12 +583,66 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
     }
 }
 
+async function listRolling24hPaidOrderCountByAccounts(userId, gameAccounts = []) {
+    await initOrderDb();
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+
+    const uniq = Array.from(new Set((Array.isArray(gameAccounts) ? gameAccounts : [])
+        .map((x) => String(x || '').trim())
+        .filter(Boolean)));
+    if (uniq.length === 0) return {};
+
+    const endTime = toDateTimeText(Date.now());
+    const startTime = toDateTimeText(Date.now() - 24 * 3600 * 1000);
+    traceOrderCount(
+        `[OrderCount24h] uid=${uid} now="${new Date().toString()}" tz="${Intl.DateTimeFormat().resolvedOptions().timeZone || ''}" window=[${startTime}, ${endTime}) accounts=${uniq.length}`
+    );
+    const placeholders = uniq.map(() => '?').join(',');
+    const db = openDatabase();
+    try {
+        const rows = await all(db, `
+            SELECT game_account, COUNT(*) AS cnt
+            FROM "order"
+            WHERE user_id = ?
+              AND is_deleted = 0
+              AND game_account IN (${placeholders})
+              AND start_time >= ?
+              AND start_time < ?
+              AND (
+                  COALESCE(order_status, '') IN ('租赁中', '出租中')
+                  OR COALESCE(rec_amount, 0) > 0
+              )
+            GROUP BY game_account
+        `, [uid, ...uniq, startTime, endTime]);
+        const out = {};
+        for (const row of rows) {
+            const acc = String(row.game_account || '').trim();
+            if (!acc) continue;
+            out[acc] = Number(row.cnt || 0);
+        }
+        const hitAccounts = Object.keys(out);
+        const totalCnt = hitAccounts.reduce((sum, acc) => sum + Number(out[acc] || 0), 0);
+        const sample = hitAccounts
+            .slice(0, 5)
+            .map((acc) => `${acc}:${Number(out[acc] || 0)}`)
+            .join(',');
+        traceOrderCount(
+            `[OrderCount24h] uid=${uid} result hit_accounts=${hitAccounts.length}/${uniq.length} total_cnt=${totalCnt} sample="${sample}"`
+        );
+        return out;
+    } finally {
+        db.close();
+    }
+}
+
 module.exports = {
     initOrderDb,
     upsertOrder,
     listOrders,
     listTodayOrderCountByAccounts,
     listTodayPaidOrderCountByAccounts,
+    listRolling24hPaidOrderCountByAccounts,
     // 兼容旧调用名
     initUserOrderDb: initOrderDb,
     upsertUserOrder: upsertOrder,

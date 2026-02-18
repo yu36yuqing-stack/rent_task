@@ -2,7 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const { fork } = require('child_process');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
-const { initOrderDb, upsertOrder, listTodayPaidOrderCountByAccounts } = require('../database/order_db');
+const {
+    initOrderDb,
+    upsertOrder,
+    listTodayPaidOrderCountByAccounts,
+    listRolling24hPaidOrderCountByAccounts
+} = require('../database/order_db');
 const { getLastSyncTimestamp, setLastSyncTimestamp } = require('../database/order_sync_db');
 const { getUserRuleByName } = require('../database/user_rule_db');
 const {
@@ -33,6 +38,8 @@ const ORDER_3_OFF_SOURCE = 'order_3_off';
 const ORDER_3_OFF_THRESHOLD = 3;
 const ORDER_OFF_THRESHOLD_RULE_NAME = 'X单下架阈值';
 const ORDER_3_OFF_BLOCK_RECOVER_RULE_NAME = '3单下架-不恢复时段';
+const ORDER_OFF_MODE_NATURAL_DAY = 'natural_day';
+const ORDER_OFF_MODE_ROLLING_24H = 'rolling_24h';
 
 function normalizeOrderOffThreshold(v, fallback = ORDER_3_OFF_THRESHOLD) {
     const n = Number(v);
@@ -49,16 +56,35 @@ function isOrderOffReason(reasonText) {
     return /^\d+单下架$/.test(text);
 }
 
-async function getOrderOffThresholdByUser(userId) {
+function normalizeOrderOffMode(mode, fallback = ORDER_OFF_MODE_NATURAL_DAY) {
+    const text = String(mode || '').trim().toLowerCase();
+    if (text === ORDER_OFF_MODE_ROLLING_24H) return ORDER_OFF_MODE_ROLLING_24H;
+    if (text === ORDER_OFF_MODE_NATURAL_DAY) return ORDER_OFF_MODE_NATURAL_DAY;
+    return fallback;
+}
+
+async function getOrderOffConfigByUser(userId) {
     const uid = Number(userId || 0);
-    if (!uid) return ORDER_3_OFF_THRESHOLD;
+    if (!uid) {
+        return {
+            threshold: ORDER_3_OFF_THRESHOLD,
+            mode: ORDER_OFF_MODE_NATURAL_DAY
+        };
+    }
     const rule = await getUserRuleByName(uid, ORDER_OFF_THRESHOLD_RULE_NAME);
     if (!rule || !rule.rule_detail || typeof rule.rule_detail !== 'object') {
-        return ORDER_3_OFF_THRESHOLD;
+        return {
+            threshold: ORDER_3_OFF_THRESHOLD,
+            mode: ORDER_OFF_MODE_NATURAL_DAY
+        };
     }
     const detail = rule.rule_detail;
-    const raw = detail.threshold ?? detail.order_off_threshold ?? detail.value;
-    return normalizeOrderOffThreshold(raw, ORDER_3_OFF_THRESHOLD);
+    const rawThreshold = detail.threshold ?? detail.order_off_threshold ?? detail.value;
+    const rawMode = detail.mode ?? detail.order_off_mode;
+    return {
+        threshold: normalizeOrderOffThreshold(rawThreshold, ORDER_3_OFF_THRESHOLD),
+        mode: normalizeOrderOffMode(rawMode, ORDER_OFF_MODE_NATURAL_DAY)
+    };
 }
 
 function summarizeOrderRange(orderList = [], fields = {}) {
@@ -132,6 +158,9 @@ function resolveDateRangeByQuickFilter(filter = 'today', now = new Date()) {
     const f = String(filter || 'today').trim().toLowerCase();
     if (f === 'yesterday') {
         return { start: addDays(businessDayStart, -1), end: businessDayStart };
+    }
+    if (f === 'last24h') {
+        return { start: new Date(now.getTime() - 24 * 3600 * 1000), end: now };
     }
     if (f === 'week') {
         const weekday = businessDate.getDay() || 7;
@@ -526,7 +555,9 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     if (!uid) throw new Error('user_id 不合法');
 
     const order3OffEnabled = getOrder3OffEnabled(user);
-    const orderOffThreshold = await getOrderOffThresholdByUser(uid);
+    const orderOffCfg = await getOrderOffConfigByUser(uid);
+    const orderOffThreshold = normalizeOrderOffThreshold(orderOffCfg.threshold, ORDER_3_OFF_THRESHOLD);
+    const orderOffMode = normalizeOrderOffMode(orderOffCfg.mode, ORDER_OFF_MODE_NATURAL_DAY);
     const orderOffReason = buildOrderOffReasonByThreshold(orderOffThreshold);
     const rows = await listAllUserGameAccountsByUser(uid);
     const accountToRemark = new Map();
@@ -538,7 +569,11 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
         else if (!accountToRemark.get(acc) && remark) accountToRemark.set(acc, remark);
     }
     const allAccounts = Array.from(accountToRemark.keys());
-    const todayPaidCounts = allAccounts.length > 0 ? await listTodayPaidOrderCountByAccounts(uid, allAccounts) : {};
+    const todayPaidCounts = allAccounts.length > 0
+        ? (orderOffMode === ORDER_OFF_MODE_ROLLING_24H
+            ? await listRolling24hPaidOrderCountByAccounts(uid, allAccounts)
+            : await listTodayPaidOrderCountByAccounts(uid, allAccounts))
+        : {};
     const countDetails = allAccounts
         .map((acc) => ({ game_account: acc, count: Number(todayPaidCounts[acc] || 0) }))
         .sort((a, b) => b.count - a.count || a.game_account.localeCompare(b.game_account));
@@ -575,7 +610,7 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
         toDelete.push(acc);
     }
 
-    console.log(`[Order3Off] user_id=${uid} enabled=${order3OffEnabled} total_accounts=${allAccounts.length} threshold=${orderOffThreshold}`);
+    console.log(`[Order3Off] user_id=${uid} enabled=${order3OffEnabled} total_accounts=${allAccounts.length} threshold=${orderOffThreshold} mode=${orderOffMode}`);
     console.log(`[Order3Off] count_details=${JSON.stringify(countDetails)}`);
     console.log(`[Order3Off] current=${JSON.stringify(Array.from(currentSet))} target=${JSON.stringify(Array.from(targetSet))}`);
     console.log(`[Order3Off] to_add=${JSON.stringify(toAdd)} to_delete=${JSON.stringify(toDelete)} blocked_delete=${JSON.stringify(toDeleteBlocked)}`);
@@ -605,6 +640,7 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
 
     return {
         enabled: order3OffEnabled,
+        mode: orderOffMode,
         count_basis: 'rec_amount_gt_0_or_renting',
         threshold: orderOffThreshold,
         reason: orderOffReason,

@@ -15,6 +15,7 @@
       const quick = [
         { k: 'today', t: '当日' },
         { k: 'yesterday', t: '昨日' },
+        { k: 'last24h', t: '近24小时' },
         { k: 'week', t: '本周' },
         { k: 'last7', t: '近7天' },
         { k: 'month', t: '本月' },

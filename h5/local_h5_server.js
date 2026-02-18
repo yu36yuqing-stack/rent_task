@@ -20,7 +20,11 @@ const {
     initUserPlatformRestrictDb,
     listPlatformRestrictByUserAndAccounts
 } = require('../database/user_platform_restrict_db');
-const { initOrderDb, listTodayPaidOrderCountByAccounts } = require('../database/order_db');
+const {
+    initOrderDb,
+    listTodayPaidOrderCountByAccounts,
+    listRolling24hPaidOrderCountByAccounts
+} = require('../database/order_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const {
     initUserSessionDb,
@@ -38,6 +42,7 @@ const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
 const { queryAccountOnlineStatus, setForbiddenPlay } = require('../uuzuhao/uuzuhao_api');
 const { listOrdersForUser, syncOrdersByUser } = require('../order/order');
 const { tryAcquireLock, releaseLock } = require('../database/lock_db');
+const { createAuthBff } = require('./h5_bff/auth_bff');
 const {
     getOrderStatsDashboardByUser,
     refreshOrderStatsDailyByUser,
@@ -50,15 +55,37 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const H5_REFRESH_TTL_REMEMBER_SEC = Number(process.env.H5_REFRESH_TTL_REMEMBER_SEC || (7 * 24 * 3600));
 const H5_REFRESH_TTL_SESSION_SEC = Number(process.env.H5_REFRESH_TTL_SESSION_SEC || (12 * 3600));
 const ORDER_OFF_THRESHOLD_RULE_NAME = 'X单下架阈值';
+const ORDER_OFF_MODE_NATURAL_DAY = 'natural_day';
+const ORDER_OFF_MODE_ROLLING_24H = 'rolling_24h';
 const ORDER_SYNC_LOCK_KEY = String(process.env.ORDER_SYNC_LOCK_KEY || 'order_sync_all_users');
 const ORDER_SYNC_LOCK_LEASE_SEC = Math.max(60, Number(process.env.ORDER_SYNC_LOCK_LEASE_SEC || 1800));
 const STATS_REFRESH_LOCK_WAIT_MS = Math.max(0, Number(process.env.STATS_REFRESH_LOCK_WAIT_MS || 120000));
 const STATS_REFRESH_LOCK_POLL_MS = Math.max(200, Number(process.env.STATS_REFRESH_LOCK_POLL_MS || 800));
+const authBff = createAuthBff({ requireAuth, readJsonBody, json });
 
 function normalizeOrderOffThreshold(v, fallback = 3) {
     const n = Number(v);
     if (!Number.isFinite(n)) return fallback;
     return Math.max(1, Math.min(10, Math.floor(n)));
+}
+
+function normalizeOrderOffMode(v, fallback = ORDER_OFF_MODE_NATURAL_DAY) {
+    const text = String(v || '').trim().toLowerCase();
+    if (text === ORDER_OFF_MODE_ROLLING_24H) return ORDER_OFF_MODE_ROLLING_24H;
+    if (text === ORDER_OFF_MODE_NATURAL_DAY) return ORDER_OFF_MODE_NATURAL_DAY;
+    return fallback;
+}
+
+function orderOffModeLabel(mode) {
+    return mode === ORDER_OFF_MODE_ROLLING_24H ? '滑动窗口' : '自然日';
+}
+
+async function getOrderOffRuleByUser(userId) {
+    const rule = await getUserRuleByName(userId, ORDER_OFF_THRESHOLD_RULE_NAME);
+    const detail = rule && rule.rule_detail && typeof rule.rule_detail === 'object' ? rule.rule_detail : {};
+    const threshold = normalizeOrderOffThreshold(detail.threshold ?? detail.order_off_threshold ?? detail.value, 3);
+    const mode = normalizeOrderOffMode(detail.mode ?? detail.order_off_mode, ORDER_OFF_MODE_NATURAL_DAY);
+    return { threshold, mode };
 }
 
 function json(res, code, payload) {
@@ -270,9 +297,14 @@ async function handleProducts(req, res, urlObj) {
         };
     }
 
+    const orderOffRule = await getOrderOffRuleByUser(user.id);
     const allRows = await listAllAccountsByUser(user.id);
     const allAccs = allRows.list.map((x) => String(x.game_account || '').trim()).filter(Boolean);
-    const paidMap = allAccs.length > 0 ? await listTodayPaidOrderCountByAccounts(user.id, allAccs) : {};
+    const paidMap = allAccs.length > 0
+        ? (orderOffRule.mode === ORDER_OFF_MODE_ROLLING_24H
+            ? await listRolling24hPaidOrderCountByAccounts(user.id, allAccs)
+            : await listTodayPaidOrderCountByAccounts(user.id, allAccs))
+        : {};
     const restrictRows = allAccs.length > 0 ? await listPlatformRestrictByUserAndAccounts(user.id, allAccs) : [];
     const restrictMap = {};
     for (const row of restrictRows) {
@@ -348,6 +380,8 @@ async function handleProducts(req, res, urlObj) {
             total_renting: totalRenting,
             total_paid: totalPaid
         },
+        order_count_mode: orderOffRule.mode,
+        order_count_label: orderOffRule.mode === ORDER_OFF_MODE_ROLLING_24H ? '近24h订单' : '今日订单',
         list
     });
 }
@@ -491,26 +525,42 @@ async function handleStatsRefresh(req, res) {
 
 async function handleGetOrderOffThreshold(req, res) {
     const user = await requireAuth(req);
-    const rule = await getUserRuleByName(user.id, ORDER_OFF_THRESHOLD_RULE_NAME);
-    const detail = rule && rule.rule_detail && typeof rule.rule_detail === 'object' ? rule.rule_detail : {};
-    const threshold = normalizeOrderOffThreshold(detail.threshold ?? detail.order_off_threshold ?? detail.value, 3);
-    return json(res, 200, { ok: true, threshold, rule_name: ORDER_OFF_THRESHOLD_RULE_NAME });
+    const rule = await getOrderOffRuleByUser(user.id);
+    return json(res, 200, {
+        ok: true,
+        threshold: rule.threshold,
+        mode: rule.mode,
+        mode_label: orderOffModeLabel(rule.mode),
+        rule_name: ORDER_OFF_THRESHOLD_RULE_NAME
+    });
 }
 
 async function handleSetOrderOffThreshold(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
+    const current = await getOrderOffRuleByUser(user.id);
     const threshold = normalizeOrderOffThreshold(body.threshold, NaN);
     if (!Number.isFinite(threshold)) {
         return json(res, 400, { ok: false, message: 'threshold 必须是 1~10 的整数' });
     }
+    const modeInput = body.mode === undefined || body.mode === null ? '' : String(body.mode || '').trim().toLowerCase();
+    if (modeInput && modeInput !== ORDER_OFF_MODE_NATURAL_DAY && modeInput !== ORDER_OFF_MODE_ROLLING_24H) {
+        return json(res, 400, { ok: false, message: 'mode 仅支持 natural_day / rolling_24h' });
+    }
+    const mode = normalizeOrderOffMode(modeInput, current.mode || ORDER_OFF_MODE_NATURAL_DAY);
     await upsertUserRuleByName(user.id, {
         rule_name: ORDER_OFF_THRESHOLD_RULE_NAME,
-        rule_detail: { threshold }
+        rule_detail: { threshold, mode }
     }, {
         desc: 'set by h5'
     });
-    return json(res, 200, { ok: true, threshold, rule_name: ORDER_OFF_THRESHOLD_RULE_NAME });
+    return json(res, 200, {
+        ok: true,
+        threshold,
+        mode,
+        mode_label: orderOffModeLabel(mode),
+        rule_name: ORDER_OFF_THRESHOLD_RULE_NAME
+    });
 }
 
 async function handleBlacklistAdd(req, res) {
@@ -686,6 +736,7 @@ async function bootstrap() {
     await initOrderDb();
     await initUserSessionDb();
     await initUserRuleDb();
+    await authBff.init();
 
     const server = http.createServer(async (req, res) => {
         const urlObj = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -705,6 +756,8 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/products/purchase-config') return await handleProductPurchaseConfig(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/add') return await handleBlacklistAdd(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/remove') return await handleBlacklistRemove(req, res);
+            if (req.method === 'GET' && urlObj.pathname === '/api/auth/platforms') return await authBff.handleGetPlatformAuthList(req, res, urlObj);
+            if (req.method === 'POST' && urlObj.pathname === '/api/auth/platforms/upsert') return await authBff.handleUpsertPlatformAuth(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/ping') return json(res, 200, { ok: true, ts: Date.now() });
 
             if (req.method === 'GET' && tryServeStatic(urlObj, res)) return;

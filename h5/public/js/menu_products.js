@@ -104,6 +104,11 @@
       `;
     }
 
+    function orderCountLabelByMode() {
+      const mode = String((state.userRules && state.userRules.order_off_mode) || 'natural_day').trim();
+      return mode === 'rolling_24h' ? '近24h订单' : '今日订单';
+    }
+
     function renderOnlinePart(account) {
       const acc = String(account || '').trim();
       if (!acc) return;
@@ -365,14 +370,8 @@
     }
 
     function updatePullRefreshUi() {
-      const pr = state.pullRefresh || {};
-      const loggedIn = Boolean(state.token && state.user);
-      const shouldShow = Boolean(loggedIn && SUPPORT_TOUCH_PULL && pr.loading);
-      els.pullRefresh.classList.toggle('hidden', !shouldShow);
-      if (!loggedIn) return;
-      if (!SUPPORT_TOUCH_PULL) return;
-
-      els.pullRefreshInner.style.opacity = pr.loading ? '1' : '0';
+      // 下拉刷新仅保留全局 request loading，不再展示页面私有 loading 条。
+      if (els.pullRefresh) els.pullRefresh.classList.add('hidden');
     }
 
     function resetPullRefreshUi() {
@@ -482,7 +481,7 @@
                   <button class="copy-btn" data-copy="${item.game_account}">复制</button>
                 </div>
                 ${buildPurchaseBriefHtml(item)}
-                <p class="square-line">今日订单：${item.today_paid_count}</p>
+                <p class="square-line">${orderCountLabelByMode()}：${item.today_paid_count}</p>
               </div>
               <div class="info-square channel-square">
                 <p class="square-title">渠道状态</p>

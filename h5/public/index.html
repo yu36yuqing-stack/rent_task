@@ -95,6 +95,13 @@
       <div id="statsAccountList" class="stats-acc-list"></div>
     </section>
 
+    <section id="authView" class="hidden auth-view">
+      <div class="auth-head-row">
+        <p class="auth-title">渠道授权列表</p>
+      </div>
+      <div id="authChannelList" class="auth-channel-list"></div>
+    </section>
+
     <div id="drawerMask" class="drawer-mask hidden"></div>
     <aside id="sideDrawer" class="side-drawer hidden" aria-hidden="true">
       <div class="drawer-user">
@@ -102,16 +109,26 @@
           <p id="drawerUserName" class="drawer-user-name">当前用户：-</p>
           <button id="btnLogout" class="drawer-logout-btn">退出</button>
         </div>
-        <div class="drawer-user-rule-row">
-          <p id="drawerOrderOffThreshold" class="drawer-user-rule-text">X单下架阈值：3</p>
-          <button id="btnSetOrderOffThreshold" class="drawer-rule-btn">设置</button>
+        <div class="drawer-user-divider"></div>
+        <div class="drawer-user-rule-head">
+          <p class="drawer-user-rule-title">X单下架参数</p>
+          <button id="btnSetOrderOffThreshold" class="drawer-rule-btn">参数设置</button>
+        </div>
+        <p id="drawerOrderOffThreshold" class="drawer-user-rule-text drawer-user-rule-item">• 阈值：3单</p>
+        <p id="drawerOrderOffMode" class="drawer-user-rule-text drawer-user-rule-item">
+          • 统计周期：自然日
+          <button id="drawerOrderOffModeHelpBtn" class="drawer-help-btn" aria-label="查看下架模式时间范围说明" type="button">?</button>
+        </p>
+        <div id="drawerOrderOffModeHelp" class="drawer-help-popover hidden" role="note">
+          <p class="drawer-help-title">模式时间范围</p>
+          <p id="drawerOrderOffModeHelpText" class="drawer-help-text">自然日：每天 06:00 ~ 次日 06:00</p>
         </div>
       </div>
       <div class="drawer-list">
         <button class="drawer-item" data-menu="products" data-label="商品列表">商品列表</button>
         <button class="drawer-item" data-menu="orders" data-label="订单列表">订单列表</button>
         <button class="drawer-item" data-menu="stats" data-label="统计看板">统计看板</button>
-        <button class="drawer-item" data-menu="auth" data-label="授权管理（开发中）">授权管理（开发中）</button>
+        <button class="drawer-item" data-menu="auth" data-label="授权管理">授权管理</button>
       </div>
     </aside>
   </div>
@@ -188,13 +205,26 @@
       <div class="sheet-head">
         <div class="sheet-title-wrap">
           <span class="sheet-icon">阈</span>
-          <div class="sheet-title">设置下架阈值</div>
+          <div class="sheet-title">设置X单下架参数</div>
         </div>
         <div id="orderOffThresholdSheetResult" class="sheet-result"></div>
       </div>
       <div class="field" style="margin-top:0;">
         <label for="orderOffThresholdInput">X单下架阈值（1~10）</label>
         <input id="orderOffThresholdInput" type="number" step="1" min="1" max="10" inputmode="numeric" placeholder="请输入 1~10">
+      </div>
+      <div class="field">
+        <label>下架统计模式</label>
+        <div class="mode-options">
+          <button id="orderOffModeNatural" type="button" class="mode-option-row active" data-mode="natural_day">
+            <span class="mode-name">自然日</span>
+            <span class="mode-tip-inline">每天 06:00 ~ 次日 06:00</span>
+          </button>
+          <button id="orderOffModeRolling" type="button" class="mode-option-row" data-mode="rolling_24h">
+            <span class="mode-name">滑动窗口</span>
+            <span class="mode-tip-inline">当前时刻往前 24 小时</span>
+          </button>
+        </div>
       </div>
       <div class="sheet-actions">
         <button id="orderOffThresholdSaveBtn" class="sheet-btn">保存</button>

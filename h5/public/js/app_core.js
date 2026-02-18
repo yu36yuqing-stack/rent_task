@@ -63,6 +63,26 @@
 
     const initialAuth = loadInitialAuth();
     const SUPPORT_TOUCH_PULL = ('ontouchstart' in window) || Number(navigator.maxTouchPoints || 0) > 0;
+    const ORDER_OFF_MODE_NATURAL_DAY = 'natural_day';
+    const ORDER_OFF_MODE_ROLLING_24H = 'rolling_24h';
+    let orderOffModeDraft = ORDER_OFF_MODE_NATURAL_DAY;
+
+    function normalizeOrderOffMode(v, fallback = ORDER_OFF_MODE_NATURAL_DAY) {
+      const text = String(v || '').trim().toLowerCase();
+      if (text === ORDER_OFF_MODE_ROLLING_24H) return ORDER_OFF_MODE_ROLLING_24H;
+      if (text === ORDER_OFF_MODE_NATURAL_DAY) return ORDER_OFF_MODE_NATURAL_DAY;
+      return fallback;
+    }
+
+    function orderOffModeLabel(mode) {
+      return normalizeOrderOffMode(mode) === ORDER_OFF_MODE_ROLLING_24H ? '滑动窗口' : '自然日';
+    }
+
+    function orderOffModeRangeText(mode) {
+      return normalizeOrderOffMode(mode) === ORDER_OFF_MODE_ROLLING_24H
+        ? '滑动窗口：当前时刻往前 24 小时'
+        : '自然日：每天 06:00 ~ 次日 06:00';
+    }
 
     const state = {
       token: initialAuth.token,
@@ -105,8 +125,12 @@
         missing_purchase_accounts: [],
         configured_account_count: 0
       },
+      authManage: {
+        channels: []
+      },
       userRules: {
-        order_off_threshold: 3
+        order_off_threshold: 3,
+        order_off_mode: ORDER_OFF_MODE_NATURAL_DAY
       },
       onlineStatusMap: {},
       onlineLoadingMap: {},
@@ -170,6 +194,7 @@
       listView: document.getElementById('listView'),
       orderView: document.getElementById('orderView'),
       statsView: document.getElementById('statsView'),
+      authView: document.getElementById('authView'),
       heroLoginView: document.getElementById('heroLoginView'),
       heroAppView: document.getElementById('heroAppView'),
       heroMenuTitle: document.getElementById('heroMenuTitle'),
@@ -181,6 +206,10 @@
       btnLogout: document.getElementById('btnLogout'),
       drawerUserName: document.getElementById('drawerUserName'),
       drawerOrderOffThreshold: document.getElementById('drawerOrderOffThreshold'),
+      drawerOrderOffMode: document.getElementById('drawerOrderOffMode'),
+      drawerOrderOffModeHelpBtn: document.getElementById('drawerOrderOffModeHelpBtn'),
+      drawerOrderOffModeHelp: document.getElementById('drawerOrderOffModeHelp'),
+      drawerOrderOffModeHelpText: document.getElementById('drawerOrderOffModeHelpText'),
       btnSetOrderOffThreshold: document.getElementById('btnSetOrderOffThreshold'),
       pullRefresh: document.getElementById('pullRefresh'),
       pullRefreshInner: document.getElementById('pullRefreshInner'),
@@ -204,6 +233,7 @@
       statsCalGrid: document.getElementById('statsCalGrid'),
       statsAccountTitle: document.getElementById('statsAccountTitle'),
       statsAccountList: document.getElementById('statsAccountList'),
+      authChannelList: document.getElementById('authChannelList'),
       statsMissingOverlay: document.getElementById('statsMissingOverlay'),
       statsMissingList: document.getElementById('statsMissingList'),
       statsMissingClose: document.getElementById('statsMissingClose'),
@@ -237,6 +267,8 @@
       orderOffThresholdSheet: document.getElementById('orderOffThresholdSheet'),
       orderOffThresholdSheetResult: document.getElementById('orderOffThresholdSheetResult'),
       orderOffThresholdInput: document.getElementById('orderOffThresholdInput'),
+      orderOffModeNatural: document.getElementById('orderOffModeNatural'),
+      orderOffModeRolling: document.getElementById('orderOffModeRolling'),
       orderOffThresholdSaveBtn: document.getElementById('orderOffThresholdSaveBtn'),
       orderOffThresholdCancelBtn: document.getElementById('orderOffThresholdCancelBtn'),
       globalLoading: document.getElementById('globalLoading')
@@ -274,16 +306,43 @@
       }
     }
 
+    function closeOrderOffModeHelp() {
+      if (!els.drawerOrderOffModeHelp) return;
+      els.drawerOrderOffModeHelp.classList.add('hidden');
+    }
+
+    function toggleOrderOffModeHelp() {
+      if (!els.drawerOrderOffModeHelp) return;
+      const opened = !els.drawerOrderOffModeHelp.classList.contains('hidden');
+      els.drawerOrderOffModeHelp.classList.toggle('hidden', opened);
+      if (!opened && els.drawerOrderOffModeHelpText) {
+        els.drawerOrderOffModeHelpText.textContent = orderOffModeRangeText(state.userRules.order_off_mode);
+      }
+    }
+
     function openOrderOffThresholdSheet() {
       if (!els.orderOffThresholdSheet) return;
       if (els.orderOffThresholdInput) {
         els.orderOffThresholdInput.value = String(Number(state.userRules.order_off_threshold || 3));
       }
+      const mode = normalizeOrderOffMode(state.userRules.order_off_mode, ORDER_OFF_MODE_NATURAL_DAY);
+      orderOffModeDraft = mode;
+      renderOrderOffModeOptions();
       if (els.orderOffThresholdSheetResult) {
         els.orderOffThresholdSheetResult.textContent = '';
         els.orderOffThresholdSheetResult.classList.remove('ok', 'err');
       }
       els.orderOffThresholdSheet.classList.remove('hidden');
+    }
+
+    function renderOrderOffModeOptions() {
+      const mode = normalizeOrderOffMode(orderOffModeDraft, ORDER_OFF_MODE_NATURAL_DAY);
+      if (els.orderOffModeNatural) {
+        els.orderOffModeNatural.classList.toggle('active', mode === ORDER_OFF_MODE_NATURAL_DAY);
+      }
+      if (els.orderOffModeRolling) {
+        els.orderOffModeRolling.classList.toggle('active', mode === ORDER_OFF_MODE_ROLLING_24H);
+      }
     }
 
     async function submitOrderOffThreshold() {
@@ -297,14 +356,17 @@
         return;
       }
       const threshold = Math.floor(n);
+      const mode = normalizeOrderOffMode(orderOffModeDraft, ORDER_OFF_MODE_NATURAL_DAY);
       await request('/api/user-rules/order-off-threshold', {
         method: 'POST',
-        body: JSON.stringify({ threshold })
+        body: JSON.stringify({ threshold, mode })
       });
       state.userRules.order_off_threshold = threshold;
+      state.userRules.order_off_mode = mode;
+      await loadList();
       render();
       closeOrderOffThresholdSheet();
-      showToast(`已设置为${threshold}单下架`);
+      showToast(`已设置为${threshold}单下架（${orderOffModeLabel(mode)}）`);
     }
 
     function setAuth(accessToken, user, refreshToken = '', rememberLogin = state.rememberLogin) {
@@ -413,8 +475,8 @@
           remember
         );
         state.page = 1;
-        await loadList();
         await loadOrderOffThresholdRule();
+        await loadList();
         render();
       } catch (e) {
         els.loginErr.textContent = e.message;
@@ -460,10 +522,17 @@
       };
     }
 
+    async function loadAuthManage() {
+      const data = await request('/api/auth/platforms');
+      const channels = Array.isArray(data.data) ? data.data : [];
+      state.authManage = { channels };
+    }
+
     async function loadOrderOffThresholdRule() {
       const data = await request('/api/user-rules/order-off-threshold');
       const v = Number(data.threshold || 3);
       state.userRules.order_off_threshold = Number.isFinite(v) ? Math.max(1, Math.min(10, Math.floor(v))) : 3;
+      state.userRules.order_off_mode = normalizeOrderOffMode(data.mode, ORDER_OFF_MODE_NATURAL_DAY);
     }
     function renderDrawer() {
       const opened = Boolean(state.drawerOpen);
@@ -486,7 +555,50 @@
 
     function closeDrawer() {
       state.drawerOpen = false;
+      closeOrderOffModeHelp();
       renderDrawer();
+    }
+
+    function renderAuthView() {
+      const listNode = els.authChannelList;
+      if (!listNode) return;
+      const channels = (state.authManage && Array.isArray(state.authManage.channels))
+        ? state.authManage.channels
+        : [];
+      if (channels.length === 0) {
+        listNode.innerHTML = '<div class="panel auth-empty">暂无渠道配置</div>';
+        return;
+      }
+
+      listNode.innerHTML = channels.map((c) => {
+        const name = String((c && c.name) || '').trim() || '-';
+        const mode = String((c && c.mode) || '').trim() || '-';
+        const platform = String((c && c.platform) || '').trim() || '';
+        const authorized = Boolean(c && c.authorized);
+        const statusText = authorized ? '已授权' : '未授权';
+        const actionText = String((c && c.button_text) || (authorized ? '修改授权' : '新增授权'));
+        const keyValues = Array.isArray(c && c.key_values) ? c.key_values : [];
+        const keyHtml = keyValues.map((kv) => {
+          const key = String((kv && kv.key) || '').trim();
+          const masked = String((kv && kv.masked_value) || '').trim() || '空';
+          return `<div class="auth-kv-row"><span class="auth-kv-key">${key}</span><span class="auth-kv-val">${masked}</span></div>`;
+        }).join('');
+        return `
+          <div class="auth-channel-card">
+            <div class="auth-channel-head">
+              <div>
+                <p class="auth-channel-name">${name}</p>
+                <p class="auth-channel-mode">${mode}</p>
+              </div>
+              <span class="auth-status ${authorized ? 'ok' : 'empty'}">${statusText}</span>
+            </div>
+            <div class="auth-kv-list">${keyHtml}</div>
+            <div class="auth-op-row">
+              <button class="btn btn-ghost auth-op-btn" data-op="auth-edit" data-platform="${platform}">${actionText}</button>
+            </div>
+          </div>
+        `;
+      }).join('');
     }
 
     function render() {
@@ -495,9 +607,11 @@
       const showProducts = loggedIn && state.currentMenu === 'products';
       const showOrders = loggedIn && state.currentMenu === 'orders';
       const showStats = loggedIn && state.currentMenu === 'stats';
+      const showAuth = loggedIn && state.currentMenu === 'auth';
       els.listView.classList.toggle('hidden', !showProducts);
       els.orderView.classList.toggle('hidden', !showOrders);
       els.statsView.classList.toggle('hidden', !showStats);
+      els.authView.classList.toggle('hidden', !showAuth);
       els.heroLoginView.classList.toggle('hidden', loggedIn);
       els.heroAppView.classList.toggle('hidden', !loggedIn);
       els.heroMenuTitle.textContent = menuTitleByKey(state.currentMenu);
@@ -507,11 +621,26 @@
       if (loggedIn) {
         els.drawerUserName.textContent = `当前用户：${state.user.name || state.user.account}`;
         if (els.drawerOrderOffThreshold) {
-          els.drawerOrderOffThreshold.textContent = `X单下架阈值：${Number(state.userRules.order_off_threshold || 3)}`;
+          els.drawerOrderOffThreshold.textContent = `• 阈值：${Number(state.userRules.order_off_threshold || 3)}单`;
+        }
+        if (els.drawerOrderOffMode) {
+          const modeText = orderOffModeLabel(state.userRules.order_off_mode);
+          els.drawerOrderOffMode.innerHTML = `• 统计周期：${modeText} <button id="drawerOrderOffModeHelpBtn" class="drawer-help-btn" aria-label="查看下架模式时间范围说明" type="button">?</button>`;
+          const btn = document.getElementById('drawerOrderOffModeHelpBtn');
+          if (btn) {
+            btn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              toggleOrderOffModeHelp();
+            });
+          }
+        }
+        if (els.drawerOrderOffModeHelpText) {
+          els.drawerOrderOffModeHelpText.textContent = orderOffModeRangeText(state.userRules.order_off_mode);
         }
         if (showProducts) renderList();
         if (showOrders) renderOrdersView();
         if (showStats) renderStatsView();
+        if (showAuth) renderAuthView();
         renderDrawer();
         renderMoreOpsSheet();
         renderForbiddenSheet();
@@ -521,11 +650,22 @@
       } else {
         els.drawerUserName.textContent = '当前用户：-';
         if (els.drawerOrderOffThreshold) {
-          els.drawerOrderOffThreshold.textContent = 'X单下架阈值：-';
+          els.drawerOrderOffThreshold.textContent = '• 阈值：-';
+        }
+        if (els.drawerOrderOffMode) {
+          els.drawerOrderOffMode.innerHTML = '• 统计周期：自然日 <button id="drawerOrderOffModeHelpBtn" class="drawer-help-btn" aria-label="查看下架模式时间范围说明" type="button">?</button>';
+          const btn = document.getElementById('drawerOrderOffModeHelpBtn');
+          if (btn) {
+            btn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              toggleOrderOffModeHelp();
+            });
+          }
         }
         closeActionSheets();
         closePurchaseSheet();
         closeOrderOffThresholdSheet();
+        closeOrderOffModeHelp();
         els.statsMissingOverlay.classList.add('hidden');
         resetPullRefreshUi();
       }
@@ -574,7 +714,11 @@
         missing_purchase_accounts: [],
         configured_account_count: 0
       };
-      state.userRules = { order_off_threshold: 3 };
+      state.authManage = { channels: [] };
+      state.userRules = {
+        order_off_threshold: 3,
+        order_off_mode: ORDER_OFF_MODE_NATURAL_DAY
+      };
       state.orders.syncing = false;
       render();
     });
@@ -602,6 +746,25 @@
         if (e.target === els.orderOffThresholdSheet) closeOrderOffThresholdSheet();
       });
     }
+    if (els.orderOffModeNatural) {
+      els.orderOffModeNatural.addEventListener('click', () => {
+        orderOffModeDraft = ORDER_OFF_MODE_NATURAL_DAY;
+        renderOrderOffModeOptions();
+      });
+    }
+    if (els.orderOffModeRolling) {
+      els.orderOffModeRolling.addEventListener('click', () => {
+        orderOffModeDraft = ORDER_OFF_MODE_ROLLING_24H;
+        renderOrderOffModeOptions();
+      });
+    }
+    document.addEventListener('click', (e) => {
+      const helpBtn = document.getElementById('drawerOrderOffModeHelpBtn');
+      if (!els.drawerOrderOffModeHelp || !helpBtn) return;
+      const t = e.target;
+      if (els.drawerOrderOffModeHelp.contains(t) || helpBtn.contains(t)) return;
+      closeOrderOffModeHelp();
+    });
 
     els.prevPage.addEventListener('click', async () => {
       if (state.page <= 1) return;
@@ -712,6 +875,15 @@
         alert(e.message || '统计刷新失败');
       }
     });
+    if (els.authChannelList) {
+      els.authChannelList.addEventListener('click', (e) => {
+        const btn = e.target && e.target.closest ? e.target.closest('[data-op="auth-edit"]') : null;
+        if (!btn) return;
+        const platform = String(btn.getAttribute('data-platform') || '').trim();
+        if (!platform) return;
+        showToast(`${platform} 授权功能开发中`);
+      });
+    }
 
     els.menuTrigger.addEventListener('click', openDrawer);
     els.drawerMask.addEventListener('click', closeDrawer);
@@ -754,7 +926,14 @@
         }
         if (key === 'auth') {
           render();
-          alert('授权管理功能正在开发中');
+          (async () => {
+            try {
+              await loadAuthManage();
+              render();
+            } catch (e) {
+              showToast(e.message || '授权列表加载失败');
+            }
+          })();
           return;
         }
         render();
@@ -825,10 +1004,10 @@
       }
       if (state.token && state.user) {
         try {
+          await loadOrderOffThresholdRule();
           await loadList();
           await loadOrders();
           await loadStatsBoard();
-          await loadOrderOffThresholdRule();
         } catch {
           clearAuthState();
         }
