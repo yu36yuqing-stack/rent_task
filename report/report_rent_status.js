@@ -137,12 +137,13 @@ async function buildRecentActionsForUser(userId, options = {}) {
         const pfList = Array.from(g.platforms);
         const pfText = pfList.join('/');
         const platformCount = pfList.length;
-        const countText = platformCount > 1 ? `（${platformCount}平台）` : '';
-        const reason = g.latest_reason || '自动处理';
+        const reason = platformCount > 1
+            ? (g.direction === 'off' ? '检测到出租，执行下架' : '无租赁，自动补上架')
+            : (g.latest_reason || '自动处理');
         let mode = '';
         if (g.skipped_count === g.count && g.count > 0) mode = ' (只读跳过)';
         else if (g.skipped_count > 0) mode = ` (含${g.skipped_count}条只读跳过)`;
-        return `• ${ts} ${icon} ${name} -> ${pfText}${countText} (${reason})${mode}`;
+        return `• ${ts} ${icon} ${name} -> ${pfText} (${reason})${mode}`;
     });
 }
 
