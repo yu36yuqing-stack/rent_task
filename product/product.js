@@ -13,6 +13,7 @@ const PLATFORM_ZHW = 'zuhaowang';
 const PLATFORM_UHZ = 'uhaozu';
 const PLATFORM_YYZ = 'uuzuhao';
 const ONLINE_PROBE_WINDOW_SEC = 90;
+const ONLINE_PROBE_INTERVAL_SEC = Math.max(60, Number(process.env.ONLINE_PROBE_INTERVAL_SEC || 1800));
 const ONLINE_PROBE_FORCE = ['1', 'true', 'yes', 'on'].includes(String(process.env.ONLINE_PROBE_FORCE || 'false').toLowerCase());
 
 function keyOf(gameName, gameAccount) {
@@ -199,7 +200,8 @@ function sleep(ms) {
 
 function shouldProbeOnlineNow(now = new Date()) {
     const sec = (now.getMinutes() * 60) + now.getSeconds();
-    return sec <= ONLINE_PROBE_WINDOW_SEC || sec >= (3600 - ONLINE_PROBE_WINDOW_SEC);
+    const offset = sec % ONLINE_PROBE_INTERVAL_SEC;
+    return offset <= ONLINE_PROBE_WINDOW_SEC || offset >= (ONLINE_PROBE_INTERVAL_SEC - ONLINE_PROBE_WINDOW_SEC);
 }
 
 async function fillOnlineTagsByYouyou(user, accounts) {

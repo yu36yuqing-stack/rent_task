@@ -52,6 +52,9 @@ async function sendDingdingMessage(message, options = {}) {
         msgtype: 'text',
         text: { content: text }
     };
+    if (options && options.at_all === true) {
+        body.at = { isAtAll: true };
+    }
 
     const res = await fetch(url, {
         method: 'POST',

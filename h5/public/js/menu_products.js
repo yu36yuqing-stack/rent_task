@@ -52,6 +52,14 @@
     async function queryOnline(item) {
       const account = String(item && item.game_account || '').trim();
       if (!account) return;
+      // 每次主动查询先清空历史结果，避免旧结果误导为最新状态。
+      if (state.onlineStatusMap && Object.prototype.hasOwnProperty.call(state.onlineStatusMap, account)) {
+        delete state.onlineStatusMap[account];
+      }
+      const hitBeforeQuery = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
+      if (hitBeforeQuery && Object.prototype.hasOwnProperty.call(hitBeforeQuery, 'online_tag')) {
+        hitBeforeQuery.online_tag = '';
+      }
       state.onlineLoadingMap[account] = true;
       renderOnlinePart(account);
       try {
