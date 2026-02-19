@@ -317,7 +317,7 @@ async function getOrderComplaintDetailByUser(userId, options = {}) {
 
 function shouldTriggerOrderSyncNow(options = {}) {
     const now = options.now instanceof Date ? options.now : new Date();
-    const intervalMin = Math.max(1, Number(options.interval_min || 30));
+    const intervalMin = Math.max(1, Number(options.interval_min || 10));
     const windowSec = Math.max(0, Number(options.window_sec || 90));
     const force = Boolean(options.force);
     if (force) return true;
@@ -331,7 +331,7 @@ function shouldTriggerOrderSyncNow(options = {}) {
 function startOrderSyncWorkerIfNeeded(options = {}) {
     const enabled = Boolean(options.enabled);
     const force = Boolean(options.force);
-    const intervalMin = Math.max(1, Number(options.interval_min || 30));
+    const intervalMin = Math.max(1, Number(options.interval_min || 10));
     const windowSec = Math.max(0, Number(options.window_sec || 90));
     const taskDir = String(options.task_dir || path.join(__dirname, '..'));
     const runRecord = options.run_record && typeof options.run_record === 'object' ? options.run_record : null;
@@ -348,7 +348,7 @@ function startOrderSyncWorkerIfNeeded(options = {}) {
         return { triggered: false, reason: 'disabled', pid: 0 };
     }
     if (!shouldTriggerOrderSyncNow({ now: new Date(), interval_min: intervalMin, window_sec: windowSec, force })) {
-        logger.log('[OrderSync] 未命中30分钟窗口，跳过触发');
+        logger.log('[OrderSync] 未命中同步窗口，跳过触发');
         return { triggered: false, reason: 'out_of_window', pid: 0 };
     }
 

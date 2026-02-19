@@ -7,6 +7,14 @@
       ];
     }
 
+    function formatBlacklistTimeForCard(v) {
+      const t = String(v || '').trim();
+      if (!t) return '';
+      const m = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2}:\d{2})$/.exec(t);
+      if (m) return `${m[2]}-${m[3]} ${m[4]}`;
+      return t.length >= 14 ? t.slice(-14) : t;
+    }
+
     async function copyAccount(text) {
       const val = String(text || '').trim();
       if (!val) return;
@@ -459,8 +467,9 @@
           const account = String(item.game_account || '').trim();
           const querying = Boolean(state.onlineLoadingMap[account]);
           const forbiddenLoading = Boolean(state.forbiddenLoadingMap[account]);
+          const blacklistTime = formatBlacklistTimeForCard(item.blacklist_create_date);
           const statusText = item.blacklisted
-            ? `黑名单 · ${item.blacklist_reason || '无原因'}`
+            ? `黑名单 · ${item.blacklist_reason || '无原因'}${blacklistTime ? ` · ${blacklistTime}` : ''}`
             : (item.mode_restricted ? '渠道受限' : '状态正常');
           const statusClass = statusText === '状态正常' ? '' : 'chip-black';
           node.style.animationDelay = `${Math.min(idx * 35, 220)}ms`;

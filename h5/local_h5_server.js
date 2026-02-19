@@ -295,7 +295,8 @@ async function handleProducts(req, res, urlObj) {
         if (!acc) continue;
         blacklistMap[acc] = {
             reason: String((row && row.reason) || '').trim(),
-            remark: String((row && row.remark) || '').trim()
+            remark: String((row && row.remark) || '').trim(),
+            create_date: String((row && row.create_date) || '').trim()
         };
     }
 
@@ -342,6 +343,7 @@ async function handleProducts(req, res, urlObj) {
             today_paid_count: Number(paidMap[acc] || 0),
             blacklisted: Boolean(bl),
             blacklist_reason: bl ? bl.reason : '',
+            blacklist_create_date: bl ? bl.create_date : '',
             mode_restricted: modeRestricted,
             mode_reason: modeReason
         };
