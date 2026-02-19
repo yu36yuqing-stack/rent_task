@@ -3,7 +3,7 @@
       return [
         `悠悠: ${s.uuzuhao || '未'}`,
         `U号: ${s.uhaozu || '未'}`,
-        `租号王: ${s.zuhaowang || '未'}`
+        `ZHW: ${s.zuhaowang || '未'}`
       ];
     }
 
