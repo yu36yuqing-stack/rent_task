@@ -107,7 +107,17 @@
         total: 0,
         syncing: false,
         stats: { progress: 0, done: 0 },
-        list: []
+        list: [],
+        complaint_detail: {
+          open: false,
+          loading: false,
+          error: '',
+          order_no: '',
+          channel: '',
+          order: null,
+          data: null,
+          preview_image_url: ''
+        }
       },
       statsBoard: {
         period: 'today',
@@ -165,6 +175,15 @@
       return '商品列表';
     }
 
+    function parseInitialMenuFromUrl() {
+      try {
+        const url = new URL(window.location.href);
+        const m = String(url.searchParams.get('menu') || '').trim().toLowerCase();
+        if (m === 'orders' || m === 'stats' || m === 'auth' || m === 'products') return m;
+      } catch (_) {}
+      return 'products';
+    }
+
     function showReason(reason) {
       els.overlayBody.textContent = String(reason || '').trim() || '暂无具体原因';
       els.reasonOverlay.classList.remove('hidden');
@@ -193,6 +212,7 @@
       loginView: document.getElementById('loginView'),
       listView: document.getElementById('listView'),
       orderView: document.getElementById('orderView'),
+      orderComplaintView: document.getElementById('orderComplaintView'),
       statsView: document.getElementById('statsView'),
       authView: document.getElementById('authView'),
       heroLoginView: document.getElementById('heroLoginView'),
@@ -221,6 +241,8 @@
       orderQuickFilters: document.getElementById('orderQuickFilters'),
       orderGameHint: document.getElementById('orderGameHint'),
       orderListContainer: document.getElementById('orderListContainer'),
+      orderComplaintBackBtn: document.getElementById('orderComplaintBackBtn'),
+      orderComplaintContainer: document.getElementById('orderComplaintContainer'),
       orderPrevPage: document.getElementById('orderPrevPage'),
       orderNextPage: document.getElementById('orderNextPage'),
       orderPageInfo: document.getElementById('orderPageInfo'),
@@ -606,10 +628,12 @@
       els.loginView.classList.toggle('hidden', loggedIn);
       const showProducts = loggedIn && state.currentMenu === 'products';
       const showOrders = loggedIn && state.currentMenu === 'orders';
+      const showOrderComplaint = showOrders && Boolean(state.orders && state.orders.complaint_detail && state.orders.complaint_detail.open);
       const showStats = loggedIn && state.currentMenu === 'stats';
       const showAuth = loggedIn && state.currentMenu === 'auth';
       els.listView.classList.toggle('hidden', !showProducts);
-      els.orderView.classList.toggle('hidden', !showOrders);
+      els.orderView.classList.toggle('hidden', !showOrders || showOrderComplaint);
+      if (els.orderComplaintView) els.orderComplaintView.classList.toggle('hidden', !showOrderComplaint);
       els.statsView.classList.toggle('hidden', !showStats);
       els.authView.classList.toggle('hidden', !showAuth);
       els.heroLoginView.classList.toggle('hidden', loggedIn);
@@ -638,7 +662,8 @@
           els.drawerOrderOffModeHelpText.textContent = orderOffModeRangeText(state.userRules.order_off_mode);
         }
         if (showProducts) renderList();
-        if (showOrders) renderOrdersView();
+        if (showOrders && showOrderComplaint) renderOrderComplaintView();
+        if (showOrders && !showOrderComplaint) renderOrdersView();
         if (showStats) renderStatsView();
         if (showAuth) renderAuthView();
         renderDrawer();
@@ -720,6 +745,7 @@
         order_off_mode: ORDER_OFF_MODE_NATURAL_DAY
       };
       state.orders.syncing = false;
+      state.orders.complaint_detail = { open: false, loading: false, error: '', order_no: '', channel: '', order: null, data: null, preview_image_url: '' };
       render();
     });
 
@@ -898,6 +924,7 @@
           return;
         }
         if (key === 'orders') {
+          state.orders.complaint_detail = { open: false, loading: false, error: '', order_no: '', channel: '', order: null, data: null, preview_image_url: '' };
           render();
           (async () => {
             try {
@@ -995,6 +1022,7 @@
     }, { passive: true });
 
     window.__bootH5App = async () => {
+      state.currentMenu = parseInitialMenuFromUrl();
       if (state.user && !state.token && state.refreshToken) {
         try {
           await tryRefreshAccessToken();

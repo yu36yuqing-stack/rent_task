@@ -9,6 +9,7 @@ const { initOrderDb } = require('./order_db');
 const { initOrderSyncDb } = require('./order_sync_db');
 const { initOrderStatsDailyDb } = require('./order_stats_daily_db');
 const { initOrderStatsJobStateDb } = require('./order_stats_job_state_db');
+const { initOrderComplaintDb } = require('./order_complaint_db');
 
 function run(db, sql, params = []) {
     return new Promise((resolve, reject) => {
@@ -39,6 +40,7 @@ async function main() {
     await initOrderSyncDb();
     await initOrderStatsDailyDb();
     await initOrderStatsJobStateDb();
+    await initOrderComplaintDb();
 
     const db = openDatabase();
     try {

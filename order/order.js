@@ -15,7 +15,8 @@ const {
     upsertUserBlacklistEntry,
     hardDeleteUserBlacklistEntry
 } = require('../database/user_blacklist_db');
-const { listAllOrders } = require('../uuzuhao/uuzuhao_api');
+const { initOrderComplaintDb, upsertOrderComplaint, getOrderComplaintByOrder } = require('../database/order_complaint_db');
+const { listAllOrders, getOrderDetail } = require('../uuzuhao/uuzuhao_api');
 const { listAllOrderPages } = require('../uhaozu/uhaozu_api');
 const { getOrderListByEncryptedPayload } = require('../zuhaowang/zuhaowang_api');
 const { listAllUserGameAccountsByUser } = require('../product/product');
@@ -196,6 +197,7 @@ function normalizeOrderListOptions(options = {}) {
 
 async function listOrdersForUser(userId, options = {}) {
     await initOrderDb();
+    await initOrderComplaintDb();
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
     const cfg = normalizeOrderListOptions(options);
@@ -257,16 +259,28 @@ async function listOrdersForUser(userId, options = {}) {
               AND end_time < ?
         `, [uid, cfg.gameName, todayStart, todayEnd]);
         const offset = (cfg.page - 1) * cfg.pageSize;
-        const list = await dbAll(db, `
+        const listRaw = await dbAll(db, `
             SELECT
-              channel, order_no, game_id, game_name, game_account, role_name,
-              order_status, order_amount, rent_hour, ren_way, rec_amount,
-              start_time, end_time, create_date, modify_date
-            FROM "order"
+              o.channel, o.order_no, o.game_id, o.game_name, o.game_account, o.role_name,
+              o.order_status, o.order_amount, o.rent_hour, o.ren_way, o.rec_amount,
+              o.start_time, o.end_time, o.create_date, o.modify_date,
+              EXISTS(
+                  SELECT 1
+                  FROM order_complaint oc
+                  WHERE oc.user_id = o.user_id
+                    AND oc.channel = LOWER(COALESCE(o.channel, ''))
+                    AND oc.order_no = o.order_no
+                    AND oc.is_deleted = 0
+              ) AS has_complaint
+            FROM "order" o
             WHERE ${whereSql}
-            ORDER BY end_time DESC, id DESC
+            ORDER BY o.end_time DESC, o.id DESC
             LIMIT ? OFFSET ?
         `, [...params, cfg.pageSize, offset]);
+        const list = listRaw.map((row) => ({
+            ...row,
+            has_complaint: Number(row && row.has_complaint) > 0
+        }));
         return {
             page: cfg.page,
             page_size: cfg.pageSize,
@@ -289,6 +303,16 @@ async function listOrdersForUser(userId, options = {}) {
     } finally {
         db.close();
     }
+}
+
+async function getOrderComplaintDetailByUser(userId, options = {}) {
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+    const channel = String(options.channel || '').trim().toLowerCase();
+    const orderNo = String(options.order_no || options.orderNo || '').trim();
+    if (!channel) throw new Error('channel 不能为空');
+    if (!orderNo) throw new Error('order_no 不能为空');
+    return getOrderComplaintByOrder(uid, channel, orderNo);
 }
 
 function shouldTriggerOrderSyncNow(options = {}) {
@@ -697,6 +721,15 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
     let upserted = 0;
     let linked = 0;
     let unlinked = 0;
+    let complaint_candidates = 0;
+    let complaint_detail_ok = 0;
+    let complaint_upserted = 0;
+    let complaint_detail_fail = 0;
+    const needComplaintDetail = (raw = {}) => {
+        const complaintStatus = Number(raw && raw.complaintStatus);
+        const complaintId = String((raw && raw.complaintId) || '').trim();
+        return complaintStatus > 0 || complaintId.length > 0;
+    };
     for (const raw of orderList) {
         const productId = String(raw.productId || '').trim();
         const ref = productIndex.get(productId) || { game_account: '', role_name: '' };
@@ -710,9 +743,39 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
             desc: String(options.desc || 'sync by order/uuzuhao')
         });
         upserted += 1;
+
+        if (!needComplaintDetail(raw)) continue;
+        complaint_candidates += 1;
+        try {
+            const detailRes = await getOrderDetail({ purchaseOrderNo: mapped.order_no }, { auth });
+            const detail = detailRes && detailRes.detail && typeof detailRes.detail === 'object' ? detailRes.detail : {};
+            await upsertOrderComplaint({
+                user_id: uid,
+                channel: CHANNEL_UUZUHAO,
+                order_no: mapped.order_no,
+                complaint_status: Number(detail.complaintStatus || raw.complaintStatus || 0),
+                complaint_id: String(detail.complaintId || raw.complaintId || '').trim(),
+                complaint_type: Number(detail.complaintType || 0),
+                complaint_type_desc: String(detail.complaintTypeDesc || '').trim(),
+                complaint_context: String(detail.complaintContext || '').trim(),
+                complaint_start_time_raw: Number(detail.complaintStartTime || 0),
+                first_log_time_raw: Number(detail.firstLogTime || 0),
+                rent_duration: String(detail.rentDuration || '').trim(),
+                check_result_desc: String(detail.checkResultDesc || '').trim(),
+                complaint_attachment: String(detail.complaintAttachment || '').trim(),
+                raw_payload: detail
+            }, {
+                desc: String(options.desc || 'sync complaint by order/uuzuhao')
+            });
+            complaint_detail_ok += 1;
+            complaint_upserted += 1;
+        } catch (e) {
+            complaint_detail_fail += 1;
+            console.warn(`[OrderSync][uuzuhao][complaint] user_id=${uid} order_no=${mapped.order_no} detail_failed=${String(e && e.message ? e.message : e)}`);
+        }
     }
     await setLastSyncTimestamp(uid, CHANNEL_UUZUHAO, nowSec, 'order sync watermark');
-    console.log(`[OrderSync][uuzuhao] user_id=${uid} upserted=${upserted} linked=${linked} unlinked=${unlinked} set_last_sync_ts=${nowSec}`);
+    console.log(`[OrderSync][uuzuhao] user_id=${uid} upserted=${upserted} linked=${linked} unlinked=${unlinked} complaint_candidates=${complaint_candidates} complaint_detail_ok=${complaint_detail_ok} complaint_detail_fail=${complaint_detail_fail} set_last_sync_ts=${nowSec}`);
 
     return {
         user_id: uid,
@@ -728,6 +791,12 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
         upserted,
         linked,
         unlinked,
+        complaint: {
+            candidates: complaint_candidates,
+            detail_ok: complaint_detail_ok,
+            upserted: complaint_upserted,
+            detail_fail: complaint_detail_fail
+        },
         mapping: UUZUHAO_ORDER_FIELD_MAPPING
     };
 }
@@ -1085,6 +1154,7 @@ module.exports = {
     syncOrdersByUser,
     syncOrdersForAllUsers,
     listOrdersForUser,
+    getOrderComplaintDetailByUser,
     resolveUuzuhaoAuthByUser,
     resolveUhaozuAuthByUser,
     resolveZuhaowangAuthByUser,

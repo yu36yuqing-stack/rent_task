@@ -9,6 +9,7 @@ const PATH_OFF = '/api/youpin/rent-connector/product/v1/off';
 const PATH_GAME_ONLINE = '/api/youpin/rent-connector/product/v1/game/online';
 const PATH_FORBIDDEN_PLAY = '/api/youpin/rent-connector/product/v1/forbidden/play';
 const PATH_ORDER_LIST = '/api/youpin/rent-connector/order/v1/list';
+const PATH_ORDER_DETAIL = '/api/youpin/rent-connector/order/v1/detail';
 
 const GAME_ID_BY_NAME = {
     WZRY: 1
@@ -377,6 +378,24 @@ async function listAllOrders(params = {}, options = {}) {
     };
 }
 
+function sanitizeOrderDetailParams(params = {}) {
+    const purchaseOrderNo = String(params.purchaseOrderNo || params.orderNo || '').trim();
+    if (!purchaseOrderNo) throw new Error('purchaseOrderNo 必填');
+    return { purchaseOrderNo };
+}
+
+async function getOrderDetail(params = {}, options = {}) {
+    const auth = options.auth || {};
+    const req = sanitizeOrderDetailParams(params);
+    const json = await postSigned(PATH_ORDER_DETAIL, req, auth);
+    const data = json && json.data && typeof json.data === 'object' ? json.data : {};
+    return {
+        purchase_order_no: req.purchaseOrderNo,
+        detail: data,
+        raw: json
+    };
+}
+
 module.exports = {
     collectYoupinData,
     youpinOffShelf,
@@ -387,6 +406,7 @@ module.exports = {
     disableForbiddenPlay,
     listOrders,
     listAllOrders,
+    getOrderDetail,
 
     // 便于单测/诊断
     _internals: {
@@ -398,6 +418,7 @@ module.exports = {
         mapProductToRobotItem,
         resolveGameIdByName,
         sanitizeOrderListParams,
+        sanitizeOrderDetailParams,
         normalizeForbiddenEnabled
     }
 };

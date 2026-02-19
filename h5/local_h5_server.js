@@ -43,6 +43,7 @@ const { queryAccountOnlineStatus, setForbiddenPlay } = require('../uuzuhao/uuzuh
 const { listOrdersForUser, syncOrdersByUser } = require('../order/order');
 const { tryAcquireLock, releaseLock } = require('../database/lock_db');
 const { createAuthBff } = require('./h5_bff/auth_bff');
+const { createOrderBff } = require('./h5_bff/order_bff');
 const {
     getOrderStatsDashboardByUser,
     refreshOrderStatsDailyByUser,
@@ -62,6 +63,7 @@ const ORDER_SYNC_LOCK_LEASE_SEC = Math.max(60, Number(process.env.ORDER_SYNC_LOC
 const STATS_REFRESH_LOCK_WAIT_MS = Math.max(0, Number(process.env.STATS_REFRESH_LOCK_WAIT_MS || 120000));
 const STATS_REFRESH_LOCK_POLL_MS = Math.max(200, Number(process.env.STATS_REFRESH_LOCK_POLL_MS || 800));
 const authBff = createAuthBff({ requireAuth, readJsonBody, json });
+const orderBff = createOrderBff({ requireAuth, json });
 
 function normalizeOrderOffThreshold(v, fallback = 3) {
     const n = Number(v);
@@ -737,6 +739,7 @@ async function bootstrap() {
     await initUserSessionDb();
     await initUserRuleDb();
     await authBff.init();
+    await orderBff.init();
 
     const server = http.createServer(async (req, res) => {
         const urlObj = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -745,6 +748,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/refresh') return await handleRefresh(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/products') return await handleProducts(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/orders') return await handleOrders(req, res, urlObj);
+            if (req.method === 'GET' && urlObj.pathname === '/api/orders/complaint') return await orderBff.handleGetOrderComplaint(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/orders/sync') return await handleOrderSyncNow(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/dashboard') return await handleStatsDashboard(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/calendar') return await handleStatsCalendar(req, res, urlObj);
