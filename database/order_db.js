@@ -69,9 +69,10 @@ function normalizeOrderStatusForStore(value) {
     const raw = String(value ?? '').trim();
     if (!raw) return '';
     if (raw === '出租中') return '租赁中';
-    if (raw === '租赁中' || raw === '已完成' || raw === '部分完成' || raw === '已撤单' || raw === '退款中' || raw === '已退款' || raw === '结算中' || raw === '投诉/撤单') return raw;
+    if (raw === '预约中' || raw === '租赁中' || raw === '已完成' || raw === '部分完成' || raw === '已撤单' || raw === '退款中' || raw === '已退款' || raw === '结算中' || raw === '投诉/撤单') return raw;
     const n = Number(raw);
     if (!Number.isFinite(n)) return raw;
+    if (n === 30) return '预约中';
     if (n === 3000) return '租赁中';
     if (n === 4000) return '已完成';
     if (n === 4100) return '退款中';
@@ -297,8 +298,9 @@ async function initOrderDb() {
         await run(db, `
             UPDATE "order"
             SET order_status = CASE
-                WHEN order_status IN ('租赁中', '出租中', '已完成', '部分完成', '已撤单', '退款中', '已退款', '结算中', '投诉/撤单')
+                WHEN order_status IN ('预约中', '租赁中', '出租中', '已完成', '部分完成', '已撤单', '退款中', '已退款', '结算中', '投诉/撤单')
                     THEN CASE WHEN order_status = '出租中' THEN '租赁中' ELSE order_status END
+                WHEN order_status IN ('30', 30) THEN '预约中'
                 WHEN order_status IN ('50', 50) THEN '已完成'
                 WHEN order_status IN ('52', 52) THEN '部分完成'
                 WHEN order_status IN ('60', 60) THEN '已撤单'

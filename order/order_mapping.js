@@ -84,6 +84,7 @@ function mapOrderStatusToZh(rawStatus) {
 
 function mapUhaozuStatus(rawStatus) {
     const code = Number(rawStatus);
+    if (code === 30) return '预约中';
     if (code === 40) return '租赁中';
     if (code === 50) return '已完成';
     if (code === 52) return '部分完成';
