@@ -446,6 +446,11 @@
           renderList();
         });
       });
+      if (els.productSyncNowBtn) {
+        const syncing = Boolean(state.productsSyncing);
+        els.productSyncNowBtn.disabled = syncing;
+        els.productSyncNowBtn.textContent = syncing ? '同步中...' : '同步商品';
+      }
     }
 
     function renderList() {

@@ -40,6 +40,7 @@ const {
 const { createAccessToken, createOpaqueRefreshToken } = require('../user/auth_token');
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
 const { queryAccountOnlineStatus, setForbiddenPlay } = require('../uuzuhao/uuzuhao_api');
+const { syncUserAccountsByAuth } = require('../product/product');
 const { listOrdersForUser, syncOrdersByUser } = require('../order/order');
 const { tryAcquireLock, releaseLock } = require('../database/lock_db');
 const { createAuthBff } = require('./h5_bff/auth_bff');
@@ -387,6 +388,15 @@ async function handleProducts(req, res, urlObj) {
         order_count_mode: orderOffRule.mode,
         order_count_label: orderOffRule.mode === ORDER_OFF_MODE_ROLLING_24H ? '近24h订单' : '今日订单',
         list
+    });
+}
+
+async function handleProductSyncNow(req, res) {
+    const user = await requireAuth(req);
+    const out = await syncUserAccountsByAuth(user.id);
+    return json(res, 200, {
+        ok: true,
+        ...out
     });
 }
 
@@ -749,6 +759,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/login') return await handleLogin(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/refresh') return await handleRefresh(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/products') return await handleProducts(req, res, urlObj);
+            if (req.method === 'POST' && urlObj.pathname === '/api/products/sync') return await handleProductSyncNow(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/orders') return await handleOrders(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/orders/complaint') return await orderBff.handleGetOrderComplaint(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/orders/sync') return await handleOrderSyncNow(req, res);

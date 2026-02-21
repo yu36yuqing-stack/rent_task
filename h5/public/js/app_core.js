@@ -90,6 +90,7 @@
       rememberLogin: initialAuth.remember,
       user: initialAuth.user,
       filter: 'all',
+      productsSyncing: false,
       page: 1,
       pageSize: 20,
       total: 0,
@@ -241,6 +242,7 @@
       pullRefresh: document.getElementById('pullRefresh'),
       pullRefreshInner: document.getElementById('pullRefreshInner'),
       filters: document.getElementById('filters'),
+      productSyncNowBtn: document.getElementById('productSyncNowBtn'),
       orderTotal: document.getElementById('orderTotal'),
       listContainer: document.getElementById('listContainer'),
       orderStatusTabs: document.getElementById('orderStatusTabs'),
@@ -801,6 +803,7 @@
       closeDrawer();
       clearAuthState();
       state.list = [];
+      state.productsSyncing = false;
       state.total = 0;
       state.page = 1;
       state.currentMenu = 'products';
@@ -913,6 +916,26 @@
       await loadList();
       renderList();
     });
+
+    if (els.productSyncNowBtn) {
+      els.productSyncNowBtn.addEventListener('click', async () => {
+        if (state.productsSyncing) return;
+        state.productsSyncing = true;
+        renderList();
+        try {
+          await request('/api/products/sync', { method: 'POST', body: '{}' });
+          state.page = 1;
+          await loadList();
+          renderList();
+          showToast('商品已同步');
+        } catch (e) {
+          showToast(e.message || '商品同步失败');
+        } finally {
+          state.productsSyncing = false;
+          renderList();
+        }
+      });
+    }
 
     els.orderPrevPage.addEventListener('click', async () => {
       if (state.orders.page <= 1) return;
