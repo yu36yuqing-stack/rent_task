@@ -146,6 +146,13 @@
         saving: false,
         error: ''
       },
+      authCookieEditor: {
+        open: false,
+        platform: '',
+        title: '',
+        saving: false,
+        error: ''
+      },
       userRules: {
         order_off_threshold: 3,
         order_off_mode: ORDER_OFF_MODE_NATURAL_DAY
@@ -309,6 +316,12 @@
       authUuzuhaoAppSecret: document.getElementById('authUuzuhaoAppSecret'),
       authUuzuhaoSaveBtn: document.getElementById('authUuzuhaoSaveBtn'),
       authUuzuhaoCloseBtn: document.getElementById('authUuzuhaoCloseBtn'),
+      authUhaozuSheet: document.getElementById('authUhaozuSheet'),
+      authUhaozuTitle: document.getElementById('authUhaozuTitle'),
+      authUhaozuResult: document.getElementById('authUhaozuResult'),
+      authUhaozuCookie: document.getElementById('authUhaozuCookie'),
+      authUhaozuSaveBtn: document.getElementById('authUhaozuSaveBtn'),
+      authUhaozuCloseBtn: document.getElementById('authUhaozuCloseBtn'),
       globalLoading: document.getElementById('globalLoading')
     };
 
@@ -430,6 +443,84 @@
         state.authEditor.saving = false;
         state.authEditor.error = e.message || '授权保存失败';
         renderAuthUuzuhaoSheet();
+      }
+    }
+
+    function renderAuthUhaozuSheet() {
+      const opened = Boolean(state.authCookieEditor && state.authCookieEditor.open);
+      if (!els.authUhaozuSheet) return;
+      els.authUhaozuSheet.classList.toggle('hidden', !opened);
+      if (els.authUhaozuSaveBtn) {
+        const saving = Boolean(state.authCookieEditor && state.authCookieEditor.saving);
+        els.authUhaozuSaveBtn.disabled = saving;
+        els.authUhaozuSaveBtn.textContent = saving ? '保存中...' : '保存';
+      }
+      if (els.authUhaozuResult) {
+        const msg = String((state.authCookieEditor && state.authCookieEditor.error) || '').trim();
+        els.authUhaozuResult.textContent = msg;
+        els.authUhaozuResult.classList.toggle('err', Boolean(msg));
+        els.authUhaozuResult.classList.remove('ok');
+      }
+      if (els.authUhaozuTitle) {
+        els.authUhaozuTitle.textContent = String((state.authCookieEditor && state.authCookieEditor.title) || '新增U号租授权');
+      }
+    }
+
+    function closeAuthUhaozuSheet() {
+      state.authCookieEditor = {
+        open: false,
+        platform: '',
+        title: '',
+        saving: false,
+        error: ''
+      };
+      if (els.authUhaozuCookie) els.authUhaozuCookie.value = '';
+      renderAuthUhaozuSheet();
+    }
+
+    function openAuthUhaozuSheet(channel) {
+      const authorized = Boolean(channel && channel.authorized);
+      state.authCookieEditor = {
+        open: true,
+        platform: 'uhaozu',
+        title: authorized ? '修改U号租授权' : '新增U号租授权',
+        saving: false,
+        error: ''
+      };
+      if (els.authUhaozuCookie) els.authUhaozuCookie.value = '';
+      renderAuthUhaozuSheet();
+    }
+
+    async function submitAuthUhaozu() {
+      if (!state.authCookieEditor || state.authCookieEditor.saving) return;
+      const cookie = String((els.authUhaozuCookie && els.authUhaozuCookie.value) || '').trim();
+      if (!cookie) {
+        state.authCookieEditor.error = 'cookie 不能为空';
+        renderAuthUhaozuSheet();
+        return;
+      }
+      state.authCookieEditor.saving = true;
+      state.authCookieEditor.error = '';
+      renderAuthUhaozuSheet();
+      try {
+        await request('/api/auth/platforms/upsert', {
+          method: 'POST',
+          body: JSON.stringify({
+            platform: 'uhaozu',
+            auth_type: 'cookie',
+            auth_payload: { cookie },
+            auth_status: 'valid',
+            desc: 'h5 uhaozu auth upsert'
+          })
+        });
+        await loadAuthManage();
+        render();
+        closeAuthUhaozuSheet();
+        showToast('U号租授权已保存');
+      } catch (e) {
+        state.authCookieEditor.saving = false;
+        state.authCookieEditor.error = e.message || '授权保存失败';
+        renderAuthUhaozuSheet();
       }
     }
 
@@ -771,6 +862,7 @@
         renderForbiddenSheet();
         renderPurchaseSheet();
         renderAuthUuzuhaoSheet();
+        renderAuthUhaozuSheet();
         if (!showStats) els.statsMissingOverlay.classList.add('hidden');
         if (showProducts) updatePullRefreshUi();
       } else {
@@ -792,6 +884,7 @@
         closePurchaseSheet();
         closeOrderOffThresholdSheet();
         closeAuthUuzuhaoSheet();
+        closeAuthUhaozuSheet();
         closeOrderOffModeHelp();
         els.statsMissingOverlay.classList.add('hidden');
         resetPullRefreshUi();
@@ -844,6 +937,13 @@
       };
       state.authManage = { channels: [] };
       state.authEditor = {
+        open: false,
+        platform: '',
+        title: '',
+        saving: false,
+        error: ''
+      };
+      state.authCookieEditor = {
         open: false,
         platform: '',
         title: '',
@@ -1017,6 +1117,17 @@
         if (e.target === els.authUuzuhaoSheet) closeAuthUuzuhaoSheet();
       });
     }
+    if (els.authUhaozuSaveBtn) {
+      els.authUhaozuSaveBtn.addEventListener('click', () => submitAuthUhaozu());
+    }
+    if (els.authUhaozuCloseBtn) {
+      els.authUhaozuCloseBtn.addEventListener('click', () => closeAuthUhaozuSheet());
+    }
+    if (els.authUhaozuSheet) {
+      els.authUhaozuSheet.addEventListener('click', (e) => {
+        if (e.target === els.authUhaozuSheet) closeAuthUhaozuSheet();
+      });
+    }
     els.statsMissingClose.addEventListener('click', () => {
       els.statsMissingOverlay.classList.add('hidden');
     });
@@ -1048,15 +1159,20 @@
         if (!btn) return;
         const platform = String(btn.getAttribute('data-platform') || '').trim();
         if (!platform) return;
-        if (platform !== 'uuzuhao') {
-          showToast('当前仅支持悠悠授权');
-          return;
-        }
         const channels = (state.authManage && Array.isArray(state.authManage.channels))
           ? state.authManage.channels
           : [];
-        const channel = channels.find((c) => String((c && c.platform) || '').trim() === 'uuzuhao') || { platform: 'uuzuhao', authorized: false };
-        openAuthUuzuhaoSheet(channel);
+        if (platform === 'uuzuhao') {
+          const channel = channels.find((c) => String((c && c.platform) || '').trim() === 'uuzuhao') || { platform: 'uuzuhao', authorized: false };
+          openAuthUuzuhaoSheet(channel);
+          return;
+        }
+        if (platform === 'uhaozu') {
+          const channel = channels.find((c) => String((c && c.platform) || '').trim() === 'uhaozu') || { platform: 'uhaozu', authorized: false };
+          openAuthUhaozuSheet(channel);
+          return;
+        }
+        showToast('当前仅支持悠悠/U号租授权');
       });
     }
 
@@ -1068,6 +1184,7 @@
         state.currentMenu = key || 'products';
         closeActionSheets();
         closeAuthUuzuhaoSheet();
+        closeAuthUhaozuSheet();
         closeDrawer();
         if (key === 'products') {
           render();
@@ -1127,7 +1244,8 @@
         (state.moreOpsSheet && state.moreOpsSheet.open) ||
         (state.forbiddenSheet && state.forbiddenSheet.open) ||
         (state.purchaseSheet && state.purchaseSheet.open) ||
-        (state.authEditor && state.authEditor.open)
+        (state.authEditor && state.authEditor.open) ||
+        (state.authCookieEditor && state.authCookieEditor.open)
       ) return;
       if (window.scrollY > 0) return;
       const t = e.touches && e.touches[0];
