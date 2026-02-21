@@ -138,6 +138,13 @@
       authManage: {
         channels: []
       },
+      authEditor: {
+        open: false,
+        platform: '',
+        title: '',
+        saving: false,
+        error: ''
+      },
       userRules: {
         order_off_threshold: 3,
         order_off_mode: ORDER_OFF_MODE_NATURAL_DAY
@@ -293,6 +300,13 @@
       orderOffModeRolling: document.getElementById('orderOffModeRolling'),
       orderOffThresholdSaveBtn: document.getElementById('orderOffThresholdSaveBtn'),
       orderOffThresholdCancelBtn: document.getElementById('orderOffThresholdCancelBtn'),
+      authUuzuhaoSheet: document.getElementById('authUuzuhaoSheet'),
+      authUuzuhaoTitle: document.getElementById('authUuzuhaoTitle'),
+      authUuzuhaoResult: document.getElementById('authUuzuhaoResult'),
+      authUuzuhaoAppKey: document.getElementById('authUuzuhaoAppKey'),
+      authUuzuhaoAppSecret: document.getElementById('authUuzuhaoAppSecret'),
+      authUuzuhaoSaveBtn: document.getElementById('authUuzuhaoSaveBtn'),
+      authUuzuhaoCloseBtn: document.getElementById('authUuzuhaoCloseBtn'),
       globalLoading: document.getElementById('globalLoading')
     };
 
@@ -331,6 +345,90 @@
     function closeOrderOffModeHelp() {
       if (!els.drawerOrderOffModeHelp) return;
       els.drawerOrderOffModeHelp.classList.add('hidden');
+    }
+
+    function renderAuthUuzuhaoSheet() {
+      const opened = Boolean(state.authEditor && state.authEditor.open);
+      if (!els.authUuzuhaoSheet) return;
+      els.authUuzuhaoSheet.classList.toggle('hidden', !opened);
+      if (els.authUuzuhaoSaveBtn) {
+        const saving = Boolean(state.authEditor && state.authEditor.saving);
+        els.authUuzuhaoSaveBtn.disabled = saving;
+        els.authUuzuhaoSaveBtn.textContent = saving ? '保存中...' : '保存';
+      }
+      if (els.authUuzuhaoResult) {
+        const msg = String((state.authEditor && state.authEditor.error) || '').trim();
+        els.authUuzuhaoResult.textContent = msg;
+        els.authUuzuhaoResult.classList.toggle('err', Boolean(msg));
+        els.authUuzuhaoResult.classList.remove('ok');
+      }
+      if (els.authUuzuhaoTitle) {
+        els.authUuzuhaoTitle.textContent = String((state.authEditor && state.authEditor.title) || '新增悠悠授权');
+      }
+    }
+
+    function closeAuthUuzuhaoSheet() {
+      state.authEditor = {
+        open: false,
+        platform: '',
+        title: '',
+        saving: false,
+        error: ''
+      };
+      if (els.authUuzuhaoAppKey) els.authUuzuhaoAppKey.value = '';
+      if (els.authUuzuhaoAppSecret) els.authUuzuhaoAppSecret.value = '';
+      renderAuthUuzuhaoSheet();
+    }
+
+    function openAuthUuzuhaoSheet(channel) {
+      const authorized = Boolean(channel && channel.authorized);
+      state.authEditor = {
+        open: true,
+        platform: 'uuzuhao',
+        title: authorized ? '修改悠悠授权' : '新增悠悠授权',
+        saving: false,
+        error: ''
+      };
+      if (els.authUuzuhaoAppKey) els.authUuzuhaoAppKey.value = '';
+      if (els.authUuzuhaoAppSecret) els.authUuzuhaoAppSecret.value = '';
+      renderAuthUuzuhaoSheet();
+    }
+
+    async function submitAuthUuzuhao() {
+      if (!state.authEditor || state.authEditor.saving) return;
+      const appKey = String((els.authUuzuhaoAppKey && els.authUuzuhaoAppKey.value) || '').trim();
+      const appSecret = String((els.authUuzuhaoAppSecret && els.authUuzuhaoAppSecret.value) || '').trim();
+      if (!appKey || !appSecret) {
+        state.authEditor.error = 'app_key 和 app_secret 不能为空';
+        renderAuthUuzuhaoSheet();
+        return;
+      }
+      state.authEditor.saving = true;
+      state.authEditor.error = '';
+      renderAuthUuzuhaoSheet();
+      try {
+        await request('/api/auth/platforms/upsert', {
+          method: 'POST',
+          body: JSON.stringify({
+            platform: 'uuzuhao',
+            auth_type: 'token',
+            auth_payload: {
+              app_key: appKey,
+              app_secret: appSecret
+            },
+            auth_status: 'valid',
+            desc: 'h5 uuzuhao auth upsert'
+          })
+        });
+        await loadAuthManage();
+        render();
+        closeAuthUuzuhaoSheet();
+        showToast('悠悠授权已保存');
+      } catch (e) {
+        state.authEditor.saving = false;
+        state.authEditor.error = e.message || '授权保存失败';
+        renderAuthUuzuhaoSheet();
+      }
     }
 
     function toggleOrderOffModeHelp() {
@@ -670,6 +768,7 @@
         renderMoreOpsSheet();
         renderForbiddenSheet();
         renderPurchaseSheet();
+        renderAuthUuzuhaoSheet();
         if (!showStats) els.statsMissingOverlay.classList.add('hidden');
         if (showProducts) updatePullRefreshUi();
       } else {
@@ -690,6 +789,7 @@
         closeActionSheets();
         closePurchaseSheet();
         closeOrderOffThresholdSheet();
+        closeAuthUuzuhaoSheet();
         closeOrderOffModeHelp();
         els.statsMissingOverlay.classList.add('hidden');
         resetPullRefreshUi();
@@ -740,6 +840,13 @@
         configured_account_count: 0
       };
       state.authManage = { channels: [] };
+      state.authEditor = {
+        open: false,
+        platform: '',
+        title: '',
+        saving: false,
+        error: ''
+      };
       state.userRules = {
         order_off_threshold: 3,
         order_off_mode: ORDER_OFF_MODE_NATURAL_DAY
@@ -876,6 +983,17 @@
     els.purchaseSheet.addEventListener('click', (e) => {
       if (e.target === els.purchaseSheet) closePurchaseSheet();
     });
+    if (els.authUuzuhaoSaveBtn) {
+      els.authUuzuhaoSaveBtn.addEventListener('click', () => submitAuthUuzuhao());
+    }
+    if (els.authUuzuhaoCloseBtn) {
+      els.authUuzuhaoCloseBtn.addEventListener('click', () => closeAuthUuzuhaoSheet());
+    }
+    if (els.authUuzuhaoSheet) {
+      els.authUuzuhaoSheet.addEventListener('click', (e) => {
+        if (e.target === els.authUuzuhaoSheet) closeAuthUuzuhaoSheet();
+      });
+    }
     els.statsMissingClose.addEventListener('click', () => {
       els.statsMissingOverlay.classList.add('hidden');
     });
@@ -907,7 +1025,15 @@
         if (!btn) return;
         const platform = String(btn.getAttribute('data-platform') || '').trim();
         if (!platform) return;
-        showToast(`${platform} 授权功能开发中`);
+        if (platform !== 'uuzuhao') {
+          showToast('当前仅支持悠悠授权');
+          return;
+        }
+        const channels = (state.authManage && Array.isArray(state.authManage.channels))
+          ? state.authManage.channels
+          : [];
+        const channel = channels.find((c) => String((c && c.platform) || '').trim() === 'uuzuhao') || { platform: 'uuzuhao', authorized: false };
+        openAuthUuzuhaoSheet(channel);
       });
     }
 
@@ -918,6 +1044,7 @@
         const key = String(n.getAttribute('data-menu') || '').trim();
         state.currentMenu = key || 'products';
         closeActionSheets();
+        closeAuthUuzuhaoSheet();
         closeDrawer();
         if (key === 'products') {
           render();
@@ -976,7 +1103,8 @@
         state.drawerOpen ||
         (state.moreOpsSheet && state.moreOpsSheet.open) ||
         (state.forbiddenSheet && state.forbiddenSheet.open) ||
-        (state.purchaseSheet && state.purchaseSheet.open)
+        (state.purchaseSheet && state.purchaseSheet.open) ||
+        (state.authEditor && state.authEditor.open)
       ) return;
       if (window.scrollY > 0) return;
       const t = e.touches && e.touches[0];

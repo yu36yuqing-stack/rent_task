@@ -2023,6 +2023,13 @@
       font-size: 13px;
     }
 
+    .auth-uuzuhao-hint {
+      margin: 4px 0 10px;
+      color: #5f6f84;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
     @media (max-width: 360px) {
       .title { max-width: 64%; }
       .filters { gap: 5px; }

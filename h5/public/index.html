@@ -240,6 +240,31 @@
     </div>
   </div>
 
+  <div id="authUuzuhaoSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon">授</span>
+          <div id="authUuzuhaoTitle" class="sheet-title">新增悠悠授权</div>
+        </div>
+        <div id="authUuzuhaoResult" class="sheet-result"></div>
+      </div>
+      <p class="auth-uuzuhao-hint">请填写悠悠租号 app_key 和 app_secret。</p>
+      <div class="field" style="margin-top:0;">
+        <label for="authUuzuhaoAppKey">App Key</label>
+        <input id="authUuzuhaoAppKey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="请输入 app_key">
+      </div>
+      <div class="field">
+        <label for="authUuzuhaoAppSecret">App Secret</label>
+        <input id="authUuzuhaoAppSecret" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false" placeholder="请输入 app_secret">
+      </div>
+      <div class="sheet-actions">
+        <button id="authUuzuhaoSaveBtn" class="sheet-btn">保存</button>
+        <button id="authUuzuhaoCloseBtn" class="sheet-btn">关闭抽屉</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
 
   <div id="statsMissingOverlay" class="stats-missing-overlay hidden">
