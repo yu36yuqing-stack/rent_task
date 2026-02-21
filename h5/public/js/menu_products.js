@@ -420,6 +420,7 @@
         renting: Number(state.stats.total_renting || 0)
       };
       const summaryTotal = Number(summaryMap[state.filter] || 0);
+      const orderCountLabel = orderCountLabelByMode();
       els.filters.innerHTML = `
         <div class="filter-tab ${allActive ? 'active' : ''}" data-filter="all">
           <div class="txt">全部</div>
@@ -432,7 +433,7 @@
         </div>
       `;
       els.orderTotal.innerHTML = `
-        <span class="order-total-main">今日有效订单数：${Number(state.stats.total_paid || 0)}</span>
+        <span class="order-total-main">${orderCountLabel}：${Number(state.stats.total_paid || 0)}</span>
         <span class="order-total-divider" aria-hidden="true"></span>
         <span class="order-total-summary">汇总${summaryTotal}</span>
       `;
@@ -474,7 +475,7 @@
           const forbiddenLoading = Boolean(state.forbiddenLoadingMap[account]);
           const blacklistTime = formatBlacklistTimeForCard(item.blacklist_create_date);
           const statusText = item.blacklisted
-            ? `黑名单 · ${item.blacklist_reason || '无原因'}${blacklistTime ? ` · ${blacklistTime}` : ''}`
+            ? `${item.blacklist_reason || '无原因'}${blacklistTime ? ` · ${blacklistTime}` : ''}`
             : (item.mode_restricted ? '渠道受限' : '状态正常');
           const statusClass = statusText === '状态正常' ? '' : 'chip-black';
           node.style.animationDelay = `${Math.min(idx * 35, 220)}ms`;
