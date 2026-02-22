@@ -447,18 +447,23 @@ async function resolveZuhaowangAuthByUser(userId) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
     const rows = await listUserPlatformAuth(uid, { with_payload: true });
-    const hit = rows.find((r) => String(r.platform || '') === CHANNEL_ZHW_YUANBAO && isAuthUsable(r));
-    if (!hit || !hit.auth_payload || typeof hit.auth_payload !== 'object') {
-        throw new Error(`user_id=${uid} 缺少可用 ${CHANNEL_ZHW_YUANBAO} 授权`);
+    const hit = rows.find((r) => String(r.platform || '') === CHANNEL_ZHW && isAuthUsable(r));
+    const fallback = rows.find((r) => String(r.platform || '') === CHANNEL_ZHW_YUANBAO && isAuthUsable(r));
+    const resolved = hit || fallback;
+    if (!resolved || !resolved.auth_payload || typeof resolved.auth_payload !== 'object') {
+        throw new Error(`user_id=${uid} 缺少可用 ${CHANNEL_ZHW_YUANBAO}/${CHANNEL_ZHW} 授权`);
     }
-    const payload = hit.auth_payload || {};
-    const token = String(payload.token || '').trim();
+    const payload = resolved.auth_payload || {};
+    const yuanbaoPayload = payload && typeof payload.yuanbao === 'object'
+        ? payload.yuanbao
+        : payload;
+    const token = String(yuanbaoPayload.token_yuanbao || yuanbaoPayload.token || '').trim();
     return {
-        ...payload,
+        ...yuanbaoPayload,
         // 订单链路读取独立平台授权；商品链路仍走 zuhaowang 平台 token_get/token_post。
-        token_yuanbao: String(payload.token_yuanbao || token).trim(),
-        token_get: String(payload.token_get || token).trim(),
-        token_post: String(payload.token_post || token).trim()
+        token_yuanbao: String(yuanbaoPayload.token_yuanbao || token).trim(),
+        token_get: String(yuanbaoPayload.token_get || token).trim(),
+        token_post: String(yuanbaoPayload.token_post || token).trim()
     };
 }
 

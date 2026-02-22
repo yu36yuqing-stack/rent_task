@@ -638,6 +638,48 @@ async function listRolling24hPaidOrderCountByAccounts(userId, gameAccounts = [])
     }
 }
 
+async function listRentingOrderWindowByAccounts(userId, gameAccounts = []) {
+    await initOrderDb();
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+
+    const uniq = Array.from(new Set((Array.isArray(gameAccounts) ? gameAccounts : [])
+        .map((x) => String(x || '').trim())
+        .filter(Boolean)));
+    if (uniq.length === 0) return {};
+
+    const placeholders = uniq.map(() => '?').join(',');
+    const db = openDatabase();
+    try {
+        const rows = await all(db, `
+            SELECT
+                game_account,
+                MIN(start_time) AS start_time,
+                MAX(end_time) AS end_time,
+                COUNT(*) AS cnt
+            FROM "order"
+            WHERE user_id = ?
+              AND is_deleted = 0
+              AND game_account IN (${placeholders})
+              AND COALESCE(order_status, '') IN ('租赁中', '出租中')
+            GROUP BY game_account
+        `, [uid, ...uniq]);
+        const out = {};
+        for (const row of rows) {
+            const acc = String(row.game_account || '').trim();
+            if (!acc) continue;
+            out[acc] = {
+                start_time: String(row.start_time || '').trim(),
+                end_time: String(row.end_time || '').trim(),
+                count: Number(row.cnt || 0)
+            };
+        }
+        return out;
+    } finally {
+        db.close();
+    }
+}
+
 module.exports = {
     initOrderDb,
     upsertOrder,
@@ -645,6 +687,7 @@ module.exports = {
     listTodayOrderCountByAccounts,
     listTodayPaidOrderCountByAccounts,
     listRolling24hPaidOrderCountByAccounts,
+    listRentingOrderWindowByAccounts,
     // 兼容旧调用名
     initUserOrderDb: initOrderDb,
     upsertUserOrder: upsertOrder,

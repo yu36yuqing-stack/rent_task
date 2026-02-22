@@ -167,6 +167,36 @@
       `;
     }
 
+    function parseDateTimeText(v) {
+      const s = String(v || '').trim();
+      if (!s) return null;
+      const ms = Date.parse(s.replace(' ', 'T'));
+      if (!Number.isFinite(ms)) return null;
+      return new Date(ms);
+    }
+
+    function formatRemain(endTimeText) {
+      const end = parseDateTimeText(endTimeText);
+      if (!end) return '';
+      const diffSec = Math.floor((end.getTime() - Date.now()) / 1000);
+      if (diffSec <= 0) return '已结束';
+      const day = Math.floor(diffSec / 86400);
+      const hour = Math.floor((diffSec % 86400) / 3600);
+      const min = Math.floor((diffSec % 3600) / 60);
+      const sec = diffSec % 60;
+      if (day > 0) return `${day}天${hour}时${min}分`;
+      if (hour > 0) return `${hour}时${min}分${sec}秒`;
+      return `${min}分${sec}秒`;
+    }
+
+    function buildRentCountdownHtml(item) {
+      const endTime = String(item && item.renting_order_end_time || '').trim();
+      if (!endTime) return '';
+      const remain = formatRemain(endTime);
+      if (!remain) return '';
+      return `<p class="square-line">租赁倒计时：${remain}</p>`;
+    }
+
     function orderCountLabelByMode() {
       const mode = String((state.userRules && state.userRules.order_off_mode) || 'natural_day').trim();
       return mode === 'rolling_24h' ? '近24h订单' : '今日订单';
@@ -567,6 +597,7 @@
                 </div>
                 ${buildPurchaseBriefHtml(item)}
                 <p class="square-line">${orderCountLabelByMode()}：${item.today_paid_count}</p>
+                ${buildRentCountdownHtml(item)}
               </div>
               <div class="info-square channel-square">
                 <p class="square-title">渠道状态</p>

@@ -79,7 +79,10 @@ function isAuthUsable(row = {}) {
 
 async function pullPlatformDataByAuth(platform, authPayload = {}) {
     if (platform === PLATFORM_ZHW) {
-        const list = await getGoodsList(authPayload);
+        const nested = authPayload && typeof authPayload === 'object' && authPayload.zuhaowang && typeof authPayload.zuhaowang === 'object'
+            ? authPayload.zuhaowang
+            : authPayload;
+        const list = await getGoodsList(nested);
         return list.map((x) => ({
             game_account: String(x.account || '').trim(),
             game_name: normalizeGameName(x.gameName || 'WZRY'),
@@ -119,7 +122,9 @@ async function syncUserAccountsByAuth(userId) {
     if (!uid) throw new Error('user_id 不合法');
 
     const rows = await listUserPlatformAuth(uid, { with_payload: true });
-    const validAuthRows = rows.filter(isAuthUsable).filter((r) => r && r.auth_payload && typeof r.auth_payload === 'object');
+    const validAuthRows = rows
+        .filter(isAuthUsable)
+        .filter((r) => r && r.auth_payload && typeof r.auth_payload === 'object');
     if (validAuthRows.length === 0) {
         throw new Error('当前用户没有可用的平台授权，请先 upsert 平台授权');
     }

@@ -24,7 +24,8 @@ const {
 const {
     initOrderDb,
     listTodayPaidOrderCountByAccounts,
-    listRolling24hPaidOrderCountByAccounts
+    listRolling24hPaidOrderCountByAccounts,
+    listRentingOrderWindowByAccounts
 } = require('../database/order_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const {
@@ -317,6 +318,9 @@ async function handleProducts(req, res, urlObj) {
             ? await listRolling24hPaidOrderCountByAccounts(user.id, allAccs)
             : await listTodayPaidOrderCountByAccounts(user.id, allAccs))
         : {};
+    const rentingWindowMap = allAccs.length > 0
+        ? await listRentingOrderWindowByAccounts(user.id, allAccs)
+        : {};
     const restrictRowsRaw = allAccs.length > 0 ? await listPlatformRestrictByUserAndAccounts(user.id, allAccs) : [];
     const restrictRows = [];
     for (const row of restrictRowsRaw) {
@@ -374,6 +378,9 @@ async function handleProducts(req, res, urlObj) {
             platform_status_norm: platformStatusNorm,
             overall_status_norm: overallStatusNorm,
             today_paid_count: Number(paidMap[acc] || 0),
+            renting_order_start_time: String(((rentingWindowMap[acc] || {}).start_time) || '').trim(),
+            renting_order_end_time: String(((rentingWindowMap[acc] || {}).end_time) || '').trim(),
+            renting_order_count: Number(((rentingWindowMap[acc] || {}).count) || 0),
             blacklisted: Boolean(bl),
             blacklist_reason: bl ? bl.reason : '',
             blacklist_create_date: bl ? bl.create_date : '',
