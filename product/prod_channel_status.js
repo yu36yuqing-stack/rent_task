@@ -27,6 +27,13 @@ function isUhaozuOnlineDetectReason(reason) {
     return /检测.*游戏在线/.test(text) && /离线后手动上架/.test(text);
 }
 
+function restrictedLabelByReason(reason) {
+    const text = String(reason || '').trim();
+    if (!text) return NORM_CODE_LABEL_MAP.restricted;
+    if (text.includes('仅卖家下架状态支持直接上架')) return '平台限制上架';
+    return NORM_CODE_LABEL_MAP.restricted;
+}
+
 function buildNormalizedStatus(code, reason = '') {
     const c = String(code || '').trim() || 'unknown';
     return {
@@ -66,7 +73,14 @@ function normalizeOnePlatformStatus(platform, channelStatus = {}, channelPrdInfo
                 level: Number(NORM_CODE_LEVEL_MAP.auth_abnormal || 100)
             };
         }
-        if (restrictMsg) return buildNormalizedStatus('restricted', restrictMsg);
+        if (restrictMsg) {
+            return {
+                code: 'restricted',
+                label: restrictedLabelByReason(restrictMsg),
+                reason: restrictMsg,
+                level: Number(NORM_CODE_LEVEL_MAP.restricted || 80)
+            };
+        }
         const goodsStatus = Number(prd.goods_status);
         const rentStatus = Number(prd.rent_status);
         if (goodsStatus === 4) return buildNormalizedStatus('off_shelf');
@@ -78,7 +92,14 @@ function normalizeOnePlatformStatus(platform, channelStatus = {}, channelPrdInfo
     if (p === 'zuhaowang') {
         const exceptionMsg = String(prd.exception_msg || '').trim();
         if (exceptionMsg) return buildNormalizedStatus('auth_abnormal', exceptionMsg);
-        if (restrictMsg) return buildNormalizedStatus('restricted', restrictMsg);
+        if (restrictMsg) {
+            return {
+                code: 'restricted',
+                label: restrictedLabelByReason(restrictMsg),
+                reason: restrictMsg,
+                level: Number(NORM_CODE_LEVEL_MAP.restricted || 80)
+            };
+        }
         const rawStatus = Number(prd.raw_status);
         if (rawStatus === 2) return buildNormalizedStatus('renting');
         if (rawStatus === 1) return buildNormalizedStatus('listed');
@@ -86,7 +107,14 @@ function normalizeOnePlatformStatus(platform, channelStatus = {}, channelPrdInfo
         return buildNormalizedStatus(codeByText);
     }
 
-    if (restrictMsg) return buildNormalizedStatus('restricted', restrictMsg);
+    if (restrictMsg) {
+        return {
+            code: 'restricted',
+            label: restrictedLabelByReason(restrictMsg),
+            reason: restrictMsg,
+            level: Number(NORM_CODE_LEVEL_MAP.restricted || 80)
+        };
+    }
     return buildNormalizedStatus(codeByText, String(prd.reason || '').trim());
 }
 
@@ -126,5 +154,6 @@ module.exports = {
     pickOverallStatusNorm,
     isRestrictedLikeStatus,
     isOnAllowedByCode,
-    isUhaozuOnlineDetectReason
+    isUhaozuOnlineDetectReason,
+    restrictedLabelByReason
 };

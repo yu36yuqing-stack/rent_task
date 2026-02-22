@@ -15,8 +15,11 @@
         const code = one && String(one.code || '').trim() ? String(one.code || '').trim() : '';
         const shortReason = isDangerStatusCode(code) ? shortenDangerReason(reason) : '';
         const suffix = shortReason && shortReason !== label ? `·${shortReason}` : '';
+        const display = (code === 'auth_abnormal' && shortReason)
+          ? shortReason
+          : `${label}${suffix}`;
         return {
-          text: `${d.name}: ${label}${suffix}`,
+          text: `${d.name}: ${display}`,
           code,
           reason
         };
@@ -31,6 +34,7 @@
     function shortenDangerReason(reason) {
       const r = String(reason || '').trim();
       if (!r) return '';
+      if (r.includes('仅卖家下架状态支持直接上架')) return '平台限制上架';
       if (r.includes('检测游戏在线') || (r.includes('检测') && r.includes('在线'))) return '检测在线';
       if (r.includes('游戏在线')) return '游戏在线';
       if (r.includes('授权')) return '授权异常';

@@ -84,6 +84,14 @@ function testProdChannelStatus() {
     );
     assertEqual(normZ.zuhaowang.code, 'auth_abnormal', '租号王 exception_msg 命中 auth_abnormal');
 
+    const normRestricted = buildPlatformStatusNorm(
+        { uuzuhao: '下架' },
+        { uuzuhao: {} },
+        { uuzuhao: '悠悠: 仅卖家下架状态支持直接上架' }
+    );
+    assertEqual(normRestricted.uuzuhao.code, 'restricted', '渠道限制命中 restricted');
+    assertEqual(normRestricted.uuzuhao.label, '平台限制上架', '特定平台限制文案映射为平台限制上架');
+
     const overall = pickOverallStatusNorm({
         uuzuhao: buildNormalizedStatus('listed'),
         uhaozu: buildNormalizedStatus('auth_abnormal', '账号异常'),
