@@ -789,6 +789,12 @@
       border-radius: 7px;
     }
 
+    .rent-countdown-chip {
+      display: inline-flex;
+      margin-top: 2px;
+      width: fit-content;
+    }
+
     .meta-grid {
       margin-top: 9px;
       display: grid;

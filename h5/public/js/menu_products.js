@@ -175,11 +175,9 @@
       return new Date(ms);
     }
 
-    function formatRemain(endTimeText) {
-      const end = parseDateTimeText(endTimeText);
-      if (!end) return '';
-      const diffSec = Math.floor((end.getTime() - Date.now()) / 1000);
-      if (diffSec <= 0) return '已结束';
+    function formatRemainByEndMs(endMs) {
+      const diffSec = Math.floor((Number(endMs || 0) - Date.now()) / 1000);
+      if (diffSec <= 0) return '';
       const day = Math.floor(diffSec / 86400);
       const hour = Math.floor((diffSec % 86400) / 3600);
       const min = Math.floor((diffSec % 3600) / 60);
@@ -192,9 +190,51 @@
     function buildRentCountdownHtml(item) {
       const endTime = String(item && item.renting_order_end_time || '').trim();
       if (!endTime) return '';
-      const remain = formatRemain(endTime);
+      const end = parseDateTimeText(endTime);
+      if (!end) return '';
+      const endMs = end.getTime();
+      const remain = formatRemainByEndMs(endMs);
       if (!remain) return '';
-      return `<p class="square-line">租赁倒计时：${remain}</p>`;
+      return `<span class="plat plat-renting rent-countdown-chip" data-slot="rent-countdown" data-end-ms="${endMs}">租赁倒计时：${remain}</span>`;
+    }
+
+    function renderRentCountdownPart(account) {
+      const acc = String(account || '').trim();
+      if (!acc) return;
+      const card = state.cardNodeMap[acc];
+      if (!card) return;
+      const slot = card.querySelector('[data-slot="rent-countdown"]');
+      if (!slot) return;
+      const endMs = Number(slot.getAttribute('data-end-ms') || 0);
+      const remain = formatRemainByEndMs(endMs);
+      if (!remain) {
+        slot.remove();
+        return;
+      }
+      slot.textContent = `租赁倒计时：${remain}`;
+    }
+
+    function startRentCountdownTicker() {
+      if (state.rentCountdownTimer) {
+        clearInterval(state.rentCountdownTimer);
+        state.rentCountdownTimer = 0;
+      }
+      const hasCountdown = (state.list || []).some((x) => String((x && x.renting_order_end_time) || '').trim());
+      if (!hasCountdown) return;
+      state.rentCountdownTimer = setInterval(() => {
+        let active = 0;
+        for (const item of (state.list || [])) {
+          const acc = String((item && item.game_account) || '').trim();
+          if (!acc) continue;
+          const card = state.cardNodeMap[acc];
+          if (card && card.querySelector('[data-slot="rent-countdown"]')) active += 1;
+          renderRentCountdownPart(acc);
+        }
+        if (active <= 0 && state.rentCountdownTimer) {
+          clearInterval(state.rentCountdownTimer);
+          state.rentCountdownTimer = 0;
+        }
+      }, 1000);
     }
 
     function orderCountLabelByMode() {
@@ -543,6 +583,10 @@
       const root = els.listContainer;
       root.innerHTML = '';
       state.cardNodeMap = {};
+      if (state.rentCountdownTimer) {
+        clearInterval(state.rentCountdownTimer);
+        state.rentCountdownTimer = 0;
+      }
       renderFilters();
 
       if (state.list.length === 0) {
@@ -632,4 +676,5 @@
       els.pageInfo.textContent = `第 ${state.page} / ${totalPages} 页 · 每页 ${state.pageSize} 条`;
       els.prevPage.disabled = state.page <= 1;
       els.nextPage.disabled = state.page >= totalPages;
+      startRentCountdownTicker();
     }
