@@ -727,7 +727,7 @@
     .info-squares {
       margin-top: 8px;
       display: grid;
-      grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1.85fr) minmax(0, 1.15fr);
       gap: 8px;
       align-items: stretch;
     }

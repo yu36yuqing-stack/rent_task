@@ -22,7 +22,7 @@
  * - 前端渲染样式
  *
  * 运行方式：
- *   node test/smoke.js
+ *   node test/prod_channel_status_smoke_test.js
  *
  * 预期结果：
  * - 所有检查输出 [PASS]
@@ -66,7 +66,16 @@ function testProdChannelStatus() {
         {}
     );
     assertEqual(normU.uhaozu.code, 'auth_abnormal', 'U号租 audit_reason 命中 auth_abnormal');
+    assertEqual(normU.uhaozu.label, '授权异常', 'U号租普通异常文案保持授权异常');
     assertEqual(normU.uhaozu.reason, '账号异常', 'U号租 reason 透传');
+
+    const normUOnline = buildPlatformStatusNorm(
+        { uhaozu: '上架' },
+        { uhaozu: { audit_reason: '检测游戏在线，请确认游戏离线后手动上架', goods_status: 3, rent_status: 1 } },
+        {}
+    );
+    assertEqual(normUOnline.uhaozu.code, 'auth_abnormal', 'U号租在线检测仍保持 auth_abnormal code');
+    assertEqual(normUOnline.uhaozu.label, '检测在线', 'U号租命中特定在线文案映射为检测在线');
 
     const normZ = buildPlatformStatusNorm(
         { zuhaowang: '上架' },

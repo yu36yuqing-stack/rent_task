@@ -13,8 +13,10 @@
           : (String(legacy[d.key] || '').trim() || '未');
         const reason = one && String(one.reason || '').trim() ? String(one.reason || '').trim() : '';
         const code = one && String(one.code || '').trim() ? String(one.code || '').trim() : '';
+        const shortReason = isDangerStatusCode(code) ? shortenDangerReason(reason) : '';
+        const suffix = shortReason && shortReason !== label ? `·${shortReason}` : '';
         return {
-          text: `${d.name}: ${label}`,
+          text: `${d.name}: ${label}${suffix}`,
           code,
           reason
         };
@@ -24,6 +26,28 @@
     function isDangerStatusCode(code) {
       const c = String(code || '').trim();
       return c === 'auth_abnormal' || c === 'review_fail' || c === 'restricted';
+    }
+
+    function shortenDangerReason(reason) {
+      const r = String(reason || '').trim();
+      if (!r) return '';
+      if (r.includes('检测游戏在线') || (r.includes('检测') && r.includes('在线'))) return '检测在线';
+      if (r.includes('游戏在线')) return '游戏在线';
+      if (r.includes('授权')) return '授权异常';
+      if (r.includes('审核')) return '审核失败';
+      if (r.includes('限制') || r.includes('禁玩')) return '平台限制';
+      return r.length > 6 ? `${r.slice(0, 6)}...` : r;
+    }
+
+    function hasAnyNormalChannel(item) {
+      const norm = item && item.platform_status_norm && typeof item.platform_status_norm === 'object'
+        ? item.platform_status_norm
+        : {};
+      return Object.values(norm).some((one) => {
+        if (!one || typeof one !== 'object') return false;
+        const code = String(one.code || '').trim();
+        return code === 'listed' || code === 'renting';
+      });
     }
 
     function escapeAttr(v) {
@@ -511,14 +535,15 @@
             ? item.overall_status_norm
             : {};
           const overallLabel = String(overall.label || '').trim();
-          const overallReason = String(overall.reason || '').trim();
-          const overallCode = String(overall.code || '').trim();
+          const anyNormalChannel = hasAnyNormalChannel(item);
           const statusText = item.blacklisted
             ? `${item.blacklist_reason || '无原因'}${blacklistTime ? ` · ${blacklistTime}` : ''}`
-            : (overallLabel && overallLabel !== '上架' && overallLabel !== '下架' && overallLabel !== '租赁中' && overallLabel !== '未知'
-              ? `${overallLabel}${overallReason ? ` · ${overallReason}` : ''}`
-              : (item.mode_restricted ? '渠道受限' : '状态正常'));
-          const statusClass = (statusText === '状态正常' && !isDangerStatusCode(overallCode)) ? '' : 'chip-black';
+            : (anyNormalChannel
+              ? '状态正常'
+              : (overallLabel && overallLabel !== '上架' && overallLabel !== '下架' && overallLabel !== '租赁中' && overallLabel !== '未知'
+              ? `${overallLabel}`
+              : (item.mode_restricted ? '渠道受限' : '状态正常')));
+          const statusClass = statusText === '状态正常' ? '' : 'chip-black';
           node.style.animationDelay = `${Math.min(idx * 35, 220)}ms`;
           node.innerHTML = `
             <div class="row">

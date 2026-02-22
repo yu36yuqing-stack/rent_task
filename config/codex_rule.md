@@ -47,3 +47,12 @@
   - `refresh`（写路径）与 `dashboard/calendar`（读路径）分离实现，读路径优先查快照表。
 - 配置收口：
   - 锁和同步相关参数（如 `LOCK_KEY/LEASE/WAIT/POLL/maxPages`）集中在配置区，避免散落。
+
+## Rule 4 - 发布宿主机触发规则
+
+当用户明确提出“发布宿主机”时，默认执行以下流程：
+
+- 执行 `scripts/merge_code.sh`（若用户口语提到 `merge_code.js`，按本项目实际脚本 `merge_code.sh` 执行）。
+- 完成发布后，必须把宿主机的数据库与日志同步回本机：
+  - `database/*.db`
+  - `log/`

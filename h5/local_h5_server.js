@@ -18,7 +18,8 @@ const {
 const {
     RESTRICT_REASON,
     initUserPlatformRestrictDb,
-    listPlatformRestrictByUserAndAccounts
+    listPlatformRestrictByUserAndAccounts,
+    removePlatformRestrict
 } = require('../database/user_platform_restrict_db');
 const {
     initOrderDb,
@@ -308,12 +309,30 @@ async function handleProducts(req, res, urlObj) {
     const orderOffRule = await getOrderOffRuleByUser(user.id);
     const allRows = await listAllAccountsByUser(user.id);
     const allAccs = allRows.list.map((x) => String(x.game_account || '').trim()).filter(Boolean);
+    const accountRowMap = new Map(
+        allRows.list.map((x) => [String((x && x.game_account) || '').trim(), x]).filter(([acc]) => Boolean(acc))
+    );
     const paidMap = allAccs.length > 0
         ? (orderOffRule.mode === ORDER_OFF_MODE_ROLLING_24H
             ? await listRolling24hPaidOrderCountByAccounts(user.id, allAccs)
             : await listTodayPaidOrderCountByAccounts(user.id, allAccs))
         : {};
-    const restrictRows = allAccs.length > 0 ? await listPlatformRestrictByUserAndAccounts(user.id, allAccs) : [];
+    const restrictRowsRaw = allAccs.length > 0 ? await listPlatformRestrictByUserAndAccounts(user.id, allAccs) : [];
+    const restrictRows = [];
+    for (const row of restrictRowsRaw) {
+        const acc = String((row && row.game_account) || '').trim();
+        const detail = row && typeof row.detail === 'object' ? row.detail : {};
+        const platform = String((row && row.platform) || detail.platform || '').trim();
+        const hit = accountRowMap.get(acc);
+        const channelStatus = hit && typeof hit.channel_status === 'object' ? hit.channel_status : {};
+        const statusText = String((channelStatus && channelStatus[platform]) || '').trim();
+        const shouldClear = Boolean(platform) && ['上架', '租赁中', '出租中'].includes(statusText);
+        if (shouldClear) {
+            await removePlatformRestrict(user.id, acc, platform, `auto clear by products status=${statusText}`).catch(() => {});
+            continue;
+        }
+        restrictRows.push(row);
+    }
     const restrictMap = {};
     const restrictPlatformMap = {};
     for (const row of restrictRows) {

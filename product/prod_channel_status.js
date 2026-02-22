@@ -20,6 +20,13 @@ const NORM_CODE_LEVEL_MAP = {
 
 const PLATFORM_STATUS_KEYS = ['uuzuhao', 'uhaozu', 'zuhaowang'];
 
+function isUhaozuOnlineDetectReason(reason) {
+    const text = String(reason || '').trim();
+    if (!text) return false;
+    if (text.includes('检测游戏在线，请确认游戏离线后手动上架')) return true;
+    return /检测.*游戏在线/.test(text) && /离线后手动上架/.test(text);
+}
+
 function buildNormalizedStatus(code, reason = '') {
     const c = String(code || '').trim() || 'unknown';
     return {
@@ -50,7 +57,15 @@ function normalizeOnePlatformStatus(platform, channelStatus = {}, channelPrdInfo
 
     if (p === 'uhaozu') {
         const auditReason = String(prd.audit_reason || prd.reason || '').trim();
-        if (auditReason) return buildNormalizedStatus('auth_abnormal', auditReason);
+        if (auditReason) {
+            const label = isUhaozuOnlineDetectReason(auditReason) ? '检测在线' : NORM_CODE_LABEL_MAP.auth_abnormal;
+            return {
+                code: 'auth_abnormal',
+                label,
+                reason: auditReason,
+                level: Number(NORM_CODE_LEVEL_MAP.auth_abnormal || 100)
+            };
+        }
         if (restrictMsg) return buildNormalizedStatus('restricted', restrictMsg);
         const goodsStatus = Number(prd.goods_status);
         const rentStatus = Number(prd.rent_status);
@@ -110,5 +125,6 @@ module.exports = {
     buildPlatformStatusNorm,
     pickOverallStatusNorm,
     isRestrictedLikeStatus,
-    isOnAllowedByCode
+    isOnAllowedByCode,
+    isUhaozuOnlineDetectReason
 };
