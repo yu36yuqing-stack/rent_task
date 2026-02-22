@@ -3,6 +3,10 @@ const { buildAuthMap } = require('../user/user');
 const { youpinOffShelf, youpinOnShelf } = require('../uuzuhao/uuzuhao_api');
 const { uhaozuOffShelf, uhaozuOnShelf } = require('../uhaozu/uhaozu_api');
 const { changeStatus: changeZhwStatus } = require('../zuhaowang/zuhaowang_api');
+const {
+    buildPlatformStatusNorm,
+    isOnAllowedByCode
+} = require('../product/prod_channel_status');
 const { appendProductOnoffHistory } = require('../database/product_onoff_history_db');
 const {
     RESTRICT_REASON,
@@ -11,7 +15,14 @@ const {
     listPlatformRestrictByUserAndAccounts
 } = require('../database/user_platform_restrict_db');
 
-function detectConflictsAndBuildSnapshot({ youpinData, uhaozuData, zhwData, blacklistAccounts, platformRestrictSet = new Set() }) {
+function detectConflictsAndBuildSnapshot({
+    youpinData,
+    uhaozuData,
+    zhwData,
+    blacklistAccounts,
+    platformRestrictSet = new Set(),
+    platformStatusNormMap = {}
+}) {
     const snapshot = {
         timestamp: Date.now(),
         accounts: []
@@ -48,6 +59,12 @@ function detectConflictsAndBuildSnapshot({ youpinData, uhaozuData, zhwData, blac
         // 规则逻辑：
         // 1. 任意一个平台为 "租赁中"，则其他所有 "上架" 的平台必须 "下架"。
         const anyRenting = (statY === '租赁中') || (statU === '租赁中') || (statZ === '租赁中');
+        const normByAcc = platformStatusNormMap && typeof platformStatusNormMap === 'object'
+            ? (platformStatusNormMap[acc] || {})
+            : {};
+        const canAutoOnY = isOnAllowedByCode(String((normByAcc.uuzuhao && normByAcc.uuzuhao.code) || ''));
+        const canAutoOnU = isOnAllowedByCode(String((normByAcc.uhaozu && normByAcc.uhaozu.code) || ''));
+        const canAutoOnZ = isOnAllowedByCode(String((normByAcc.zuhaowang && normByAcc.zuhaowang.code) || ''));
 
         if (anyRenting) {
             if (statY === '上架') actions.push({ type: 'off_y', item: y, reason: `检测到出租(U:${statU}/Z:${statZ})，下架悠悠` });
@@ -71,13 +88,13 @@ function detectConflictsAndBuildSnapshot({ youpinData, uhaozuData, zhwData, blac
                 if (statZ === '上架') actions.push({ type: 'off_z', item: z, reason: `${reasonMsg}，同步下架租号王` });
             } else {
                 // 正常状态下：无租赁，且无系统惩罚 -> 全部上架
-                if (statY === '下架' && !platformRestrictSet.has(`${acc}::uuzuhao`)) {
+                if (statY === '下架' && !platformRestrictSet.has(`${acc}::uuzuhao`) && canAutoOnY) {
                     actions.push({ type: 'on_y', item: { account: acc }, reason: '无租赁，自动补上架悠悠' });
                 }
-                if (statU === '下架' && !platformRestrictSet.has(`${acc}::uhaozu`)) {
+                if (statU === '下架' && !platformRestrictSet.has(`${acc}::uhaozu`) && canAutoOnU) {
                     actions.push({ type: 'on_u', item: { account: acc }, reason: '无租赁，自动补上架U号租' });
                 }
-                if (statZ === '下架' && !platformRestrictSet.has(`${acc}::zuhaowang`)) {
+                if (statZ === '下架' && !platformRestrictSet.has(`${acc}::zuhaowang`) && canAutoOnZ) {
                     actions.push({ type: 'on_z', item: { account: acc, gameId: z ? z.gameId : 1104466820 }, reason: '无租赁，自动补上架租号王' });
                 }
             }
@@ -266,6 +283,18 @@ function buildPlatformRowsFromUserAccounts(rows = []) {
     return { youpinData, uhaozuData, zhwData };
 }
 
+function buildPlatformStatusNormMapByAccount(rows = []) {
+    const out = {};
+    for (const row of rows) {
+        const account = String((row && row.game_account) || '').trim();
+        if (!account) continue;
+        const channelStatus = row && typeof row.channel_status === 'object' ? row.channel_status : {};
+        const channelPrdInfo = row && typeof row.channel_prd_info === 'object' ? row.channel_prd_info : {};
+        out[account] = buildPlatformStatusNorm(channelStatus, channelPrdInfo, {});
+    }
+    return out;
+}
+
 async function executeUserActionsIfNeeded({
     user,
     rows,
@@ -279,6 +308,7 @@ async function executeUserActionsIfNeeded({
     const authRows = await listUserPlatformAuth(user.id, { with_payload: true });
     const authMap = buildAuthMap(authRows);
     const { youpinData, uhaozuData, zhwData } = buildPlatformRowsFromUserAccounts(rows);
+    const platformStatusNormMap = buildPlatformStatusNormMapByAccount(rows);
     const accounts = [...new Set((rows || []).map((r) => String((r && r.game_account) || '').trim()).filter(Boolean))];
     const restrictRows = await listPlatformRestrictByUserAndAccounts(user.id, accounts);
     const platformRestrictSet = new Set(
@@ -308,7 +338,8 @@ async function executeUserActionsIfNeeded({
         uhaozuData,
         zhwData,
         blacklistAccounts: blacklistSet,
-        platformRestrictSet
+        platformRestrictSet,
+        platformStatusNormMap
     });
 
     const requiredPlatforms = new Set();

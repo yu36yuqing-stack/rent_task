@@ -41,6 +41,11 @@ const { createAccessToken, createOpaqueRefreshToken } = require('../user/auth_to
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
 const { queryAccountOnlineStatus, setForbiddenPlay } = require('../uuzuhao/uuzuhao_api');
 const { syncUserAccountsByAuth } = require('../product/product');
+const {
+    buildPlatformStatusNorm,
+    pickOverallStatusNorm,
+    isRestrictedLikeStatus
+} = require('../product/prod_channel_status');
 const { listOrdersForUser, syncOrdersByUser } = require('../order/order');
 const { tryAcquireLock, releaseLock } = require('../database/lock_db');
 const { createAuthBff } = require('./h5_bff/auth_bff');
@@ -65,7 +70,6 @@ const STATS_REFRESH_LOCK_WAIT_MS = Math.max(0, Number(process.env.STATS_REFRESH_
 const STATS_REFRESH_LOCK_POLL_MS = Math.max(200, Number(process.env.STATS_REFRESH_LOCK_POLL_MS || 800));
 const authBff = createAuthBff({ requireAuth, readJsonBody, json });
 const orderBff = createOrderBff({ requireAuth, json });
-
 function normalizeOrderOffThreshold(v, fallback = 3) {
     const n = Number(v);
     if (!Number.isFinite(n)) return fallback;
@@ -311,10 +315,12 @@ async function handleProducts(req, res, urlObj) {
         : {};
     const restrictRows = allAccs.length > 0 ? await listPlatformRestrictByUserAndAccounts(user.id, allAccs) : [];
     const restrictMap = {};
+    const restrictPlatformMap = {};
     for (const row of restrictRows) {
         const acc = String((row && row.game_account) || '').trim();
         if (!acc) continue;
         if (!restrictMap[acc]) restrictMap[acc] = [];
+        if (!restrictPlatformMap[acc]) restrictPlatformMap[acc] = {};
         const detail = row && typeof row.detail === 'object' ? row.detail : {};
         const platform = String((row && row.platform) || detail.platform || '').trim();
         const msg = String(detail.msg || '').trim();
@@ -324,15 +330,20 @@ async function handleProducts(req, res, urlObj) {
             : platform;
         const text = platformName && msg ? `${platformName}: ${msg}` : (msg || platformName || RESTRICT_REASON);
         restrictMap[acc].push(text);
+        if (platform) restrictPlatformMap[acc][platform] = text;
     }
     const fullList = allRows.list.map((x) => {
         const acc = String(x.game_account || '').trim();
         const bl = blacklistMap[acc] || null;
         const restrictList = Array.isArray(restrictMap[acc]) ? restrictMap[acc] : [];
-        const modeRestricted = Boolean(bl) || restrictList.length > 0;
+        const channelStatus = x.channel_status || {};
+        const channelPrdInfo = x.channel_prd_info || {};
+        const platformStatusNorm = buildPlatformStatusNorm(channelStatus, channelPrdInfo, restrictPlatformMap[acc] || {});
+        const overallStatusNorm = pickOverallStatusNorm(platformStatusNorm);
+        const modeRestricted = Boolean(bl) || restrictList.length > 0 || isRestrictedLikeStatus(overallStatusNorm.code);
         const modeReason = bl
             ? String(bl.reason || '').trim()
-            : restrictList.join('；');
+            : (restrictList.join('；') || String(overallStatusNorm.reason || '').trim());
         return {
             id: x.id,
             game_name: x.game_name,
@@ -340,7 +351,9 @@ async function handleProducts(req, res, urlObj) {
             role_name: String(x.account_remark || '').trim() || acc,
             purchase_price: Number(x.purchase_price || 0),
             purchase_date: String(x.purchase_date || '').slice(0, 10),
-            channel_status: x.channel_status || {},
+            channel_status: channelStatus,
+            platform_status_norm: platformStatusNorm,
+            overall_status_norm: overallStatusNorm,
             today_paid_count: Number(paidMap[acc] || 0),
             blacklisted: Boolean(bl),
             blacklist_reason: bl ? bl.reason : '',

@@ -1,10 +1,37 @@
-    function platformBadges(v) {
-      const s = v || {};
-      return [
-        `悠悠: ${s.uuzuhao || '未'}`,
-        `U号: ${s.uhaozu || '未'}`,
-        `ZHW: ${s.zuhaowang || '未'}`
+    function platformBadges(item) {
+      const legacy = item && item.channel_status && typeof item.channel_status === 'object' ? item.channel_status : {};
+      const norm = item && item.platform_status_norm && typeof item.platform_status_norm === 'object' ? item.platform_status_norm : {};
+      const defs = [
+        { key: 'uuzuhao', name: '悠悠' },
+        { key: 'uhaozu', name: 'U号' },
+        { key: 'zuhaowang', name: 'ZHW' }
       ];
+      return defs.map((d) => {
+        const one = norm[d.key] && typeof norm[d.key] === 'object' ? norm[d.key] : null;
+        const label = one && String(one.label || '').trim()
+          ? String(one.label || '').trim()
+          : (String(legacy[d.key] || '').trim() || '未');
+        const reason = one && String(one.reason || '').trim() ? String(one.reason || '').trim() : '';
+        const code = one && String(one.code || '').trim() ? String(one.code || '').trim() : '';
+        return {
+          text: `${d.name}: ${label}`,
+          code,
+          reason
+        };
+      });
+    }
+
+    function isDangerStatusCode(code) {
+      const c = String(code || '').trim();
+      return c === 'auth_abnormal' || c === 'review_fail' || c === 'restricted';
+    }
+
+    function escapeAttr(v) {
+      return String(v || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
     }
 
     function formatBlacklistTimeForCard(v) {
@@ -466,18 +493,32 @@
         state.list.forEach((item, idx) => {
           const node = document.createElement('div');
           node.className = 'list-item';
-          const plat = platformBadges(item.channel_status).map((x) => {
-            const isRenting = /租赁中/.test(String(x || ''));
-            return `<span class="plat ${isRenting ? 'plat-renting' : ''}">${x}</span>`;
+          const plat = platformBadges(item).map((x) => {
+            const text = String((x && x.text) || '').trim();
+            const code = String((x && x.code) || '').trim();
+            const reason = String((x && x.reason) || '').trim();
+            const isRenting = code === 'renting' || /租赁中/.test(text);
+            const isDanger = isDangerStatusCode(code);
+            const cls = isDanger ? 'plat-abnormal' : (isRenting ? 'plat-renting' : '');
+            const title = reason ? ` title="${escapeAttr(reason)}"` : '';
+            return `<span class="plat ${cls}"${title}>${text}</span>`;
           }).join('');
           const account = String(item.game_account || '').trim();
           const querying = Boolean(state.onlineLoadingMap[account]);
           const forbiddenLoading = Boolean(state.forbiddenLoadingMap[account]);
           const blacklistTime = formatBlacklistTimeForCard(item.blacklist_create_date);
+          const overall = item && item.overall_status_norm && typeof item.overall_status_norm === 'object'
+            ? item.overall_status_norm
+            : {};
+          const overallLabel = String(overall.label || '').trim();
+          const overallReason = String(overall.reason || '').trim();
+          const overallCode = String(overall.code || '').trim();
           const statusText = item.blacklisted
             ? `${item.blacklist_reason || '无原因'}${blacklistTime ? ` · ${blacklistTime}` : ''}`
-            : (item.mode_restricted ? '渠道受限' : '状态正常');
-          const statusClass = statusText === '状态正常' ? '' : 'chip-black';
+            : (overallLabel && overallLabel !== '上架' && overallLabel !== '下架' && overallLabel !== '租赁中' && overallLabel !== '未知'
+              ? `${overallLabel}${overallReason ? ` · ${overallReason}` : ''}`
+              : (item.mode_restricted ? '渠道受限' : '状态正常'));
+          const statusClass = (statusText === '状态正常' && !isDangerStatusCode(overallCode)) ? '' : 'chip-black';
           node.style.animationDelay = `${Math.min(idx * 35, 220)}ms`;
           node.innerHTML = `
             <div class="row">

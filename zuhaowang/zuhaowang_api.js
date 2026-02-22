@@ -93,6 +93,7 @@ async function getGoodsList(auth = {}) {
             account: String(item.accountNo), // 统一转字符串
             gameName: item.gameName,
             roleName: item.roleName,
+            exceptionMsg: String(item.exceptionMsg || ''),
             status: statusText,
             rawStatus: rawStatus,
             gameId: item.gameId,

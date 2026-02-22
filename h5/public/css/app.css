@@ -1087,6 +1087,13 @@
       font-weight: 600;
     }
 
+    .plat-abnormal {
+      color: #b5423b;
+      border-color: #efc9c5;
+      background: #fff4f3;
+      font-weight: 600;
+    }
+
     .ops {
       margin-top: 8px;
       display: flex;

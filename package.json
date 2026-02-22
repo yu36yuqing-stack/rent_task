@@ -1,7 +1,8 @@
 {
   "scripts": {
     "h5:local": "node h5/local_h5_server.js",
-    "h5:smoke": "node scripts/h5_smoke.js"
+    "h5:smoke": "node scripts/h5_smoke.js",
+    "test:smoke": "node test/prod_channel_status_smoke_test.js"
   },
   "dependencies": {
     "puppeteer-core": "^24.37.2",

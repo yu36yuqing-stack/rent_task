@@ -33,21 +33,32 @@ function buildPlatformPrdInfo(platform, row = {}) {
             prd_id: String(row.id || ''),
             game_id: String(row.gameId || ''),
             remark: String(row.roleName || ''),
-            role_name: String(row.roleName || '')
+            role_name: String(row.roleName || ''),
+            raw_status: Number(row.rawStatus),
+            exception_msg: String(row.exceptionMsg || '').trim()
         };
     }
     if (platform === PLATFORM_UHZ) {
+        const raw = row.raw && typeof row.raw === 'object' ? row.raw : {};
         return {
             prd_id: String(row.id || ''),
             remark: String(row.remark || ''),
-            role_name: String((row.raw && row.raw.gameRoleName) || '')
+            role_name: String(raw.gameRoleName || ''),
+            reason: String(row.reason || '').trim(),
+            audit_reason: String(raw.auditReason || '').trim(),
+            auth_status: raw.authStatus === undefined ? null : raw.authStatus,
+            goods_status: Number(raw.goodsStatus),
+            rent_status: Number(raw.rentStatus),
+            customer_unshelves: Boolean(raw.customerUnshelves)
         };
     }
     if (platform === PLATFORM_YYZ) {
+        const raw = row.raw && typeof row.raw === 'object' ? row.raw : {};
         return {
             prd_id: String(row.id || ''),
             remark: String(row.remark || ''),
-            role_name: String((row.raw && row.raw.roleName) || '')
+            role_name: String(raw.roleName || ''),
+            reason: String(row.reason || '').trim()
         };
     }
     return {};
