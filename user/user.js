@@ -31,13 +31,28 @@ function isAuthUsable(row = {}) {
     return t > Date.now();
 }
 
+function resolveAuthPayloadByPlatform(platform, payload = {}) {
+    const p = String(platform || '').trim();
+    const raw = payload && typeof payload === 'object' ? payload : {};
+
+    // 兼容租号王授权结构升级：
+    // - 旧结构：auth_payload.token_get/token_post...
+    // - 新结构：auth_payload.zuhaowang.{token_get/token_post...}
+    if (p === 'zuhaowang') {
+        const nested = raw.zuhaowang && typeof raw.zuhaowang === 'object' ? raw.zuhaowang : null;
+        return nested || raw;
+    }
+
+    return raw;
+}
+
 function buildAuthMap(rows = []) {
     const map = {};
     for (const row of rows) {
         if (!isAuthUsable(row)) continue;
         const platform = String(row.platform || '').trim();
         if (!platform) continue;
-        map[platform] = row.auth_payload || {};
+        map[platform] = resolveAuthPayloadByPlatform(platform, row.auth_payload || {});
     }
     return map;
 }
@@ -73,6 +88,7 @@ module.exports = {
     login,
     register,
     isAuthUsable,
+    resolveAuthPayloadByPlatform,
     buildAuthMap,
     loadUserBlacklistSet,
     loadUserBlacklistReasonMap,
