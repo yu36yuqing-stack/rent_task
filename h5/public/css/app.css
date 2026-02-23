@@ -1032,6 +1032,16 @@
       gap: 8px;
     }
 
+    .sheet-actions-4 {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .sheet-actions-4 .sheet-btn {
+      font-size: 12px;
+      min-height: 30px;
+      padding: 6px 6px;
+    }
+
     .mode-options {
       display: flex;
       flex-direction: column;

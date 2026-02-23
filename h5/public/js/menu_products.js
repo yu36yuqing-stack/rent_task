@@ -561,8 +561,8 @@
         const on = Boolean(out && out.data && out.data.enabled);
         state.forbiddenSheet.query_status = on ? 'on' : 'off';
         state.forbiddenSheet.query_text = on ? '禁玩中' : '未禁玩';
-        state.forbiddenSheet.result_text = '查询成功';
-        state.forbiddenSheet.result_type = 'ok';
+        state.forbiddenSheet.result_text = '';
+        state.forbiddenSheet.result_type = '';
       } catch (e) {
         state.forbiddenSheet.query_status = 'err';
         state.forbiddenSheet.query_text = '查询失败';
