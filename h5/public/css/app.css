@@ -1387,15 +1387,15 @@
     .order-bottom {
       margin-top: 8px;
       display: flex;
-      align-items: baseline;
+      align-items: center;
       justify-content: space-between;
       gap: 10px;
-      flex-wrap: wrap;
     }
 
     .order-bottom-left {
-      color: #5b6f85;
-      font-size: 13px;
+      min-height: 28px;
+      display: flex;
+      align-items: center;
     }
 
     .order-income {
@@ -1404,6 +1404,7 @@
       font-size: 19px;
       letter-spacing: .2px;
       white-space: nowrap;
+      text-align: right;
     }
 
     .order-income-label {

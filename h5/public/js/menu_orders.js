@@ -4,6 +4,69 @@
       return `${s} ~ ${e}`;
     }
 
+    function parseDateTimeText(v) {
+      const s = String(v || '').trim();
+      if (!s) return null;
+      const ms = Date.parse(s.replace(' ', 'T'));
+      if (!Number.isFinite(ms)) return null;
+      return new Date(ms);
+    }
+
+    function formatRemainByEndMs(endMs) {
+      const diffSec = Math.floor((Number(endMs || 0) - Date.now()) / 1000);
+      if (diffSec <= 0) return '';
+      const day = Math.floor(diffSec / 86400);
+      const hour = Math.floor((diffSec % 86400) / 3600);
+      const min = Math.floor((diffSec % 3600) / 60);
+      const sec = diffSec % 60;
+      if (day > 0) return `${day}天${hour}时${min}分`;
+      if (hour > 0) return `${hour}时${min}分${sec}秒`;
+      return `${min}分${sec}秒`;
+    }
+
+    function isOrderRenting(item) {
+      const s = String((item && item.order_status) || '').trim();
+      return s === '租赁中' || s === '出租中';
+    }
+
+    function buildOrderCountdownHtml(item) {
+      if (!isOrderRenting(item)) return '';
+      const end = parseDateTimeText(item && item.end_time);
+      if (!end) return '';
+      const endMs = end.getTime();
+      const remain = formatRemainByEndMs(endMs);
+      if (!remain) return '';
+      return `<span class="plat plat-renting rent-countdown-chip" data-order-countdown="1" data-end-ms="${endMs}">租赁倒计时：${remain}</span>`;
+    }
+
+    function renderOrderCountdownPart() {
+      const root = els.orderListContainer;
+      if (!root) return;
+      const nodes = Array.from(root.querySelectorAll('[data-order-countdown="1"]'));
+      nodes.forEach((node) => {
+        const endMs = Number(node.getAttribute('data-end-ms') || 0);
+        const remain = formatRemainByEndMs(endMs);
+        if (!remain) {
+          node.remove();
+          return;
+        }
+        node.textContent = `租赁倒计时：${remain}`;
+      });
+    }
+
+    function startOrderCountdownTicker() {
+      if (state.orders && state.orders.countdown_timer_id) {
+        clearInterval(state.orders.countdown_timer_id);
+        state.orders.countdown_timer_id = 0;
+      }
+      renderOrderCountdownPart();
+      const root = els.orderListContainer;
+      if (!root || root.querySelectorAll('[data-order-countdown="1"]').length === 0) return;
+      state.orders.countdown_timer_id = setInterval(() => {
+        renderOrderCountdownPart();
+      }, 1000);
+    }
+
     function textOrDash(v) {
       const t = String(v == null ? '' : v).trim();
       return t || '-';
@@ -280,6 +343,10 @@
 
     function renderOrdersView() {
       const o = state.orders || {};
+      if (o.countdown_timer_id) {
+        clearInterval(o.countdown_timer_id);
+        o.countdown_timer_id = 0;
+      }
       const tabs = [
         { k: 'all', t: '全部' },
         { k: 'progress', t: '租赁中' },
@@ -323,12 +390,13 @@
             </div>
             <div class="order-card-line">${formatOrderTimeRange(item)}</div>
             <div class="order-card-line">渠道：${item.channel || '-'} · 账号：${item.game_account || '-'}</div>
+            <div class="order-card-line">时长：${Number(item.rent_hour || 0)}小时 · 订单金额：¥${Number(item.order_amount || 0).toFixed(2)}</div>
             <div class="order-bottom">
               <div class="order-bottom-left">
-                时长：${Number(item.rent_hour || 0)}小时 · 订单金额：¥${Number(item.order_amount || 0).toFixed(2)}
+                ${buildOrderCountdownHtml(item)}
               </div>
               <div class="order-income">
-                <span class="order-income-label">实际收入</span>¥${Number(item.rec_amount || 0).toFixed(2)}
+                <span class="order-income-label">到手</span>¥${Number(item.rec_amount || 0).toFixed(2)}
               </div>
             </div>
           </div>
@@ -377,6 +445,7 @@
       els.orderPageInfo.textContent = `第 ${o.page} / ${totalPages} 页 · 每页 ${o.pageSize} 条`;
       els.orderPrevPage.disabled = o.page <= 1;
       els.orderNextPage.disabled = o.page >= totalPages;
+      startOrderCountdownTicker();
     }
 
     window.addEventListener('popstate', () => {
