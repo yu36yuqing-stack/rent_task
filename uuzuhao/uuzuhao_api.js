@@ -276,7 +276,9 @@ function normalizeForbiddenEnabled(enabled) {
 // 账号禁玩开关：
 // - enabled=true 开启禁玩
 // - enabled=false 取消禁玩
-// - type 默认 2（与抓包示例一致）
+// - type=1 查询禁玩状态（enabled 可不传）
+// - type=2 设置禁玩状态（enabled 必传）
+// - 默认 type=2（与抓包示例一致）
 async function setForbiddenPlay(accountId, enabled, options = {}) {
     const auth = options.auth || {};
     const acc = String(accountId || '').trim();
@@ -285,14 +287,19 @@ async function setForbiddenPlay(accountId, enabled, options = {}) {
     const gameName = String(options.game_name || 'WZRY').trim().toUpperCase();
     const gameId = Number(options.game_id || resolveGameIdByName(gameName));
     const type = Number(options.type || 2);
-    const enabledText = normalizeForbiddenEnabled(enabled);
-
-    const json = await postSigned(PATH_FORBIDDEN_PLAY, {
+    if (type !== 1 && type !== 2) {
+        throw new Error('type 仅支持 1(查询) 或 2(设置)');
+    }
+    const payload = {
         gameId,
         accountId: acc,
-        type,
-        enabled: enabledText
-    }, auth);
+        type
+    };
+    if (type === 2) {
+        payload.enabled = normalizeForbiddenEnabled(enabled);
+    }
+
+    const json = await postSigned(PATH_FORBIDDEN_PLAY, payload, auth);
 
     return {
         account: acc,
@@ -302,6 +309,13 @@ async function setForbiddenPlay(accountId, enabled, options = {}) {
         enabled: Boolean(json && json.data && json.data.enabled),
         raw: json
     };
+}
+
+async function queryForbiddenPlay(accountId, options = {}) {
+    return setForbiddenPlay(accountId, undefined, {
+        ...options,
+        type: 1
+    });
 }
 
 async function enableForbiddenPlay(accountId, options = {}) {
@@ -402,6 +416,7 @@ module.exports = {
     youpinOnShelf,
     queryAccountOnlineStatus,
     setForbiddenPlay,
+    queryForbiddenPlay,
     enableForbiddenPlay,
     disableForbiddenPlay,
     listOrders,

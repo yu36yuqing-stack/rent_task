@@ -4,9 +4,9 @@ const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { getLastSyncTimestamp } = require('../database/order_sync_db');
 const {
     listUserBlacklistByUserWithMeta,
-    upsertUserBlacklistEntry,
-    hardDeleteUserBlacklistEntry
+    upsertUserBlacklistEntry
 } = require('../database/user_blacklist_db');
+const { deleteBlacklistWithGuard } = require('../blacklist/blacklist_release_guard');
 
 const CHANNEL_UUZUHAO = 'uuzuhao';
 const CHANNEL_UHAOZU = 'uhaozu';
@@ -233,13 +233,13 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
             pending += 1;
             continue;
         }
-        const ok = await hardDeleteUserBlacklistEntry(uid, acc, {
+        const out = await deleteBlacklistWithGuard(uid, acc, {
             source: COOLDOWN_SOURCE,
             operator: 'product_sync',
             desc: 'auto release by cooldown_until',
             reason_expected: COOLDOWN_REASON
         });
-        if (ok) released += 1;
+        if (out && out.removed) released += 1;
     }
 
     return {

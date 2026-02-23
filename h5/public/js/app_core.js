@@ -160,7 +160,17 @@
       onlineStatusMap: {},
       onlineLoadingMap: {},
       forbiddenLoadingMap: {},
-      forbiddenSheet: { open: false, account: '', role_name: '', result_text: '', result_type: '', loading: false },
+      forbiddenSheet: {
+        open: false,
+        account: '',
+        role_name: '',
+        result_text: '',
+        result_type: '',
+        loading: false,
+        query_loading: false,
+        query_status: '',
+        query_text: ''
+      },
       moreOpsSheet: { open: false, account: '', role_name: '' },
       activeActionSheet: '',
       purchaseSheet: {
@@ -286,7 +296,9 @@
       overlayClose: document.getElementById('overlayClose'),
       forbiddenSheet: document.getElementById('forbiddenSheet'),
       forbiddenSheetTitle: document.getElementById('forbiddenSheetTitle'),
+      forbiddenSheetQueryResult: document.getElementById('forbiddenSheetQueryResult'),
       forbiddenSheetResult: document.getElementById('forbiddenSheetResult'),
+      sheetQueryForbidden: document.getElementById('sheetQueryForbidden'),
       sheetEnableForbidden: document.getElementById('sheetEnableForbidden'),
       sheetDisableForbidden: document.getElementById('sheetDisableForbidden'),
       sheetCancelForbidden: document.getElementById('sheetCancelForbidden'),
@@ -904,7 +916,17 @@
       state.onlineStatusMap = {};
       state.onlineLoadingMap = {};
       state.forbiddenLoadingMap = {};
-      state.forbiddenSheet = { open: false, account: '', role_name: '', result_text: '', result_type: '', loading: false };
+      state.forbiddenSheet = {
+        open: false,
+        account: '',
+        role_name: '',
+        result_text: '',
+        result_type: '',
+        loading: false,
+        query_loading: false,
+        query_status: '',
+        query_text: ''
+      };
       state.moreOpsSheet = { open: false, account: '', role_name: '' };
       state.activeActionSheet = '';
       state.purchaseSheet = {
@@ -1075,6 +1097,7 @@
     els.reasonOverlay.addEventListener('click', (e) => {
       if (e.target === els.reasonOverlay) hideReason();
     });
+    els.sheetQueryForbidden.addEventListener('click', () => queryForbidden());
     els.sheetEnableForbidden.addEventListener('click', () => submitForbidden(true));
     els.sheetDisableForbidden.addEventListener('click', () => submitForbidden(false));
     els.sheetCancelForbidden.addEventListener('click', () => closeForbiddenSheet());

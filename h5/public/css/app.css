@@ -973,6 +973,36 @@
       color: #b5423b;
     }
 
+    .sheet-query-result {
+      font-size: 12px;
+      line-height: 1;
+      padding: 6px 8px;
+      border-radius: 999px;
+      border: 1px solid #d3deea;
+      background: #f3f7fb;
+      color: #6b7f95;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .sheet-query-result.on {
+      border-color: #f0b6bc;
+      background: #fff4f5;
+      color: #b5423b;
+    }
+
+    .sheet-query-result.off {
+      border-color: #a8d6c0;
+      background: #ecfbf3;
+      color: #0b6a40;
+    }
+
+    .sheet-query-result.err {
+      border-color: #f0b6bc;
+      background: #fff4f5;
+      color: #b5423b;
+    }
+
     .sheet-btn {
       border: 1px solid #d7e1eb;
       border-radius: 9px;

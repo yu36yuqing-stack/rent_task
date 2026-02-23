@@ -284,14 +284,21 @@
       if (!opened) return;
       const name = String(state.forbiddenSheet.role_name || state.forbiddenSheet.account || '').trim();
       els.forbiddenSheetTitle.textContent = `处理禁玩 · ${name || '当前账号'}`;
+      const queryText = String(state.forbiddenSheet.query_text || '').trim() || '未查询';
+      const queryStatus = String(state.forbiddenSheet.query_status || '').trim();
+      els.forbiddenSheetQueryResult.className = `sheet-query-result ${queryStatus}`;
+      els.forbiddenSheetQueryResult.textContent = queryText;
       const resultText = String(state.forbiddenSheet.result_text || '').trim();
       const resultType = String(state.forbiddenSheet.result_type || '').trim();
       els.forbiddenSheetResult.className = `sheet-result ${resultType}`;
       els.forbiddenSheetResult.textContent = resultText;
       const loading = Boolean(state.forbiddenSheet.loading);
-      els.sheetEnableForbidden.disabled = loading;
-      els.sheetDisableForbidden.disabled = loading;
-      els.sheetCancelForbidden.disabled = loading;
+      const queryLoading = Boolean(state.forbiddenSheet.query_loading);
+      els.sheetQueryForbidden.disabled = loading || queryLoading;
+      els.sheetEnableForbidden.disabled = loading || queryLoading;
+      els.sheetDisableForbidden.disabled = loading || queryLoading;
+      els.sheetCancelForbidden.disabled = loading || queryLoading;
+      els.sheetQueryForbidden.textContent = queryLoading ? '查询中...' : '查询禁玩';
     }
 
     function renderMoreOpsSheet() {
@@ -312,7 +319,17 @@
     function closeActionSheets() {
       state.activeActionSheet = '';
       state.moreOpsSheet = { open: false, account: '', role_name: '' };
-      state.forbiddenSheet = { open: false, account: '', role_name: '', result_text: '', result_type: '', loading: false };
+      state.forbiddenSheet = {
+        open: false,
+        account: '',
+        role_name: '',
+        result_text: '',
+        result_type: '',
+        loading: false,
+        query_loading: false,
+        query_status: '',
+        query_text: ''
+      };
       renderMoreOpsSheet();
       renderForbiddenSheet();
     }
@@ -329,21 +346,44 @@
         role_name: String(item && (item.role_name || item.game_account) || '').trim(),
         result_text: '',
         result_type: '',
-        loading: false
+        loading: false,
+        query_loading: false,
+        query_status: '',
+        query_text: ''
       };
       renderForbiddenSheet();
     }
 
     function closeForbiddenSheet() {
       if (state.activeActionSheet === 'forbidden') state.activeActionSheet = '';
-      state.forbiddenSheet = { open: false, account: '', role_name: '', result_text: '', result_type: '', loading: false };
+      state.forbiddenSheet = {
+        open: false,
+        account: '',
+        role_name: '',
+        result_text: '',
+        result_type: '',
+        loading: false,
+        query_loading: false,
+        query_status: '',
+        query_text: ''
+      };
       renderForbiddenSheet();
     }
 
     function openMoreOpsSheet(item) {
       const account = String(item && item.game_account || '').trim();
       if (!account) return;
-      state.forbiddenSheet = { open: false, account: '', role_name: '', result_text: '', result_type: '', loading: false };
+      state.forbiddenSheet = {
+        open: false,
+        account: '',
+        role_name: '',
+        result_text: '',
+        result_type: '',
+        loading: false,
+        query_loading: false,
+        query_status: '',
+        query_text: ''
+      };
       state.activeActionSheet = 'more';
       state.moreOpsSheet = {
         open: true,
@@ -490,11 +530,46 @@
         const on = Boolean(out && out.data && out.data.enabled);
         state.forbiddenSheet.result_text = on ? '禁玩已开启' : '禁玩已解除';
         state.forbiddenSheet.result_type = 'ok';
+        state.forbiddenSheet.query_status = on ? 'on' : 'off';
+        state.forbiddenSheet.query_text = on ? '禁玩中' : '未禁玩';
       } catch (e) {
         state.forbiddenSheet.result_text = String(e && e.message ? e.message : '禁玩操作失败');
         state.forbiddenSheet.result_type = 'err';
       } finally {
         state.forbiddenSheet.loading = false;
+        renderForbiddenSheet();
+        state.forbiddenLoadingMap[account] = false;
+        renderForbiddenPart(account);
+        renderMoreOpsSheet();
+      }
+    }
+
+    async function queryForbidden() {
+      const account = String((state.forbiddenSheet || {}).account || '').trim();
+      if (!account) return;
+      state.forbiddenSheet.query_loading = true;
+      state.forbiddenSheet.result_text = '';
+      state.forbiddenSheet.result_type = '';
+      renderForbiddenSheet();
+      state.forbiddenLoadingMap[account] = true;
+      renderForbiddenPart(account);
+      try {
+        const out = await request('/api/products/forbidden/query', {
+          method: 'POST',
+          body: JSON.stringify({ game_account: account, game_name: 'WZRY' })
+        });
+        const on = Boolean(out && out.data && out.data.enabled);
+        state.forbiddenSheet.query_status = on ? 'on' : 'off';
+        state.forbiddenSheet.query_text = on ? '禁玩中' : '未禁玩';
+        state.forbiddenSheet.result_text = '查询成功';
+        state.forbiddenSheet.result_type = 'ok';
+      } catch (e) {
+        state.forbiddenSheet.query_status = 'err';
+        state.forbiddenSheet.query_text = '查询失败';
+        state.forbiddenSheet.result_text = String(e && e.message ? e.message : '禁玩查询失败');
+        state.forbiddenSheet.result_type = 'err';
+      } finally {
+        state.forbiddenSheet.query_loading = false;
         renderForbiddenSheet();
         state.forbiddenLoadingMap[account] = false;
         renderForbiddenPart(account);

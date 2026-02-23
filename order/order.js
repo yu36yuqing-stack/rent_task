@@ -13,8 +13,8 @@ const { getUserRuleByName } = require('../database/user_rule_db');
 const {
     listUserBlacklistByUserWithMeta,
     upsertUserBlacklistEntry,
-    hardDeleteUserBlacklistEntry
 } = require('../database/user_blacklist_db');
+const { deleteBlacklistWithGuard } = require('../blacklist/blacklist_release_guard');
 const {
     reconcileOrderCooldownEntryByUser
 } = require('./order_cooldown');
@@ -662,12 +662,12 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
         added += 1;
     }
     for (const acc of toDelete) {
-        const ok = await hardDeleteUserBlacklistEntry(uid, acc, {
+        const out = await deleteBlacklistWithGuard(uid, acc, {
             source: ORDER_3_OFF_SOURCE,
             operator: 'order_worker',
             desc: `auto remove by ${ORDER_3_OFF_SOURCE}`
         });
-        if (ok) deleted += 1;
+        if (out && out.removed) deleted += 1;
     }
 
     return {

@@ -13,8 +13,8 @@ const {
     initUserBlacklistDb,
     listUserBlacklistByUserWithMeta,
     upsertUserBlacklistEntry,
-    hardDeleteUserBlacklistEntry
 } = require('../database/user_blacklist_db');
+const { deleteBlacklistWithGuard } = require('../blacklist/blacklist_release_guard');
 const {
     RESTRICT_REASON,
     initUserPlatformRestrictDb,
@@ -41,7 +41,7 @@ const {
 } = require('../database/user_rule_db');
 const { createAccessToken, createOpaqueRefreshToken } = require('../user/auth_token');
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
-const { queryAccountOnlineStatus, setForbiddenPlay } = require('../uuzuhao/uuzuhao_api');
+const { queryAccountOnlineStatus, setForbiddenPlay, queryForbiddenPlay } = require('../uuzuhao/uuzuhao_api');
 const { syncUserAccountsByAuth } = require('../product/product');
 const {
     buildPlatformStatusNorm,
@@ -706,12 +706,17 @@ async function handleBlacklistRemove(req, res) {
     const body = await readJsonBody(req);
     const gameAccount = String(body.game_account || '').trim();
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
-    const ok = await hardDeleteUserBlacklistEntry(user.id, gameAccount, {
+    const out = await deleteBlacklistWithGuard(user.id, gameAccount, {
         source: 'h5',
         operator: user.account || 'h5_user',
         desc: 'manual remove by h5'
     });
-    return json(res, 200, { ok: true, removed: ok });
+    return json(res, 200, {
+        ok: true,
+        removed: Boolean(out && out.removed),
+        blocked: Boolean(out && out.blocked),
+        blocked_reason: String((out && out.blocked_reason) || '')
+    });
 }
 
 async function resolveUuzuhaoAuthByUser(userId) {
@@ -797,6 +802,39 @@ async function handleProductForbiddenPlay(req, res) {
     });
 }
 
+async function handleProductForbiddenQuery(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const gameAccount = String(body.game_account || '').trim();
+    const gameName = String(body.game_name || 'WZRY').trim() || 'WZRY';
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+
+    const auth = await resolveUuzuhaoAuthByUser(user.id);
+    let result;
+    try {
+        result = await queryForbiddenPlay(gameAccount, { auth, game_name: gameName });
+    } catch (e) {
+        const msg = String(e && e.message ? e.message : e || '').trim();
+        if (/uuzuhao .*未配置|不支持的 game_name|accountId 不能为空|type 仅支持/i.test(msg)) {
+            throw httpError(422, msg);
+        }
+        if (/code=\d+/i.test(msg) || /HTTP \d+/i.test(msg) || /API 返回非JSON/i.test(msg)) {
+            throw httpError(502, `禁玩查询失败: ${msg}`);
+        }
+        throw e;
+    }
+
+    return json(res, 200, {
+        ok: true,
+        data: {
+            game_account: gameAccount,
+            game_name: result.game_name,
+            enabled: Boolean(result.enabled),
+            type: Number(result.type || 1)
+        }
+    });
+}
+
 async function handleProductPurchaseConfig(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
@@ -873,6 +911,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/user-rules/order-off-threshold') return await handleSetOrderOffThreshold(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/online') return await handleProductOnlineQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/play') return await handleProductForbiddenPlay(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/query') return await handleProductForbiddenQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/purchase-config') return await handleProductPurchaseConfig(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/add') return await handleBlacklistAdd(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/remove') return await handleBlacklistRemove(req, res);
