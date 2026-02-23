@@ -313,7 +313,7 @@
         els.orderListContainer.innerHTML = o.list.map((item) => `
           <div class="order-card">
             <div class="order-card-top">
-              <p class="order-card-role">${item.role_name || item.game_account || '-'}</p>
+              <p class="order-card-role">${item.display_name || item.role_name || item.game_account || '-'}</p>
               <span class="order-chip ${(String(item.order_status || '') === '租赁中' || String(item.order_status || '') === '出租中') ? 'progress' : 'done'}">${item.order_status || '-'}</span>
             </div>
             <div class="order-id-row">

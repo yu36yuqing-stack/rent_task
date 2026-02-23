@@ -186,6 +186,17 @@ function resolveBlacklistDisplayDate(row = {}) {
     return cooldownDate || createDate;
 }
 
+function resolveProductDisplayName(row = {}, fallbackAccount = '') {
+    const acc = String(fallbackAccount || '').trim();
+    const channelPrdInfo = row && typeof row.channel_prd_info === 'object' ? row.channel_prd_info : {};
+    const uuzuhao = channelPrdInfo && typeof channelPrdInfo.uuzuhao === 'object' ? channelPrdInfo.uuzuhao : {};
+    const uuzuhaoRemark = String((uuzuhao && uuzuhao.remark) || '').trim();
+    if (uuzuhaoRemark) return uuzuhaoRemark;
+    const roleName = String((row && row.account_remark) || '').trim();
+    if (roleName) return roleName;
+    return acc;
+}
+
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms || 0))));
 }
@@ -404,6 +415,7 @@ async function handleProducts(req, res, urlObj) {
             game_name: x.game_name,
             game_account: acc,
             role_name: String(x.account_remark || '').trim() || acc,
+            display_name: resolveProductDisplayName(x, acc),
             purchase_price: Number(x.purchase_price || 0),
             purchase_date: String(x.purchase_date || '').slice(0, 10),
             channel_status: channelStatus,
@@ -486,7 +498,26 @@ async function handleOrders(req, res, urlObj) {
         status_filter: statusFilter,
         game_name: gameName
     });
-    return json(res, 200, { ok: true, ...data });
+    let list = Array.isArray(data && data.list) ? data.list : [];
+    if (list.length > 0) {
+        const allRows = await listAllAccountsByUser(user.id);
+        const accountMap = new Map(
+            (allRows.list || [])
+                .map((x) => [String((x && x.game_account) || '').trim(), x])
+                .filter(([acc]) => Boolean(acc))
+        );
+        list = list.map((item) => {
+            const acc = String((item && item.game_account) || '').trim();
+            const hit = accountMap.get(acc);
+            const fallback = String((item && item.role_name) || '').trim() || acc;
+            const displayName = hit ? resolveProductDisplayName(hit, acc) : fallback;
+            return {
+                ...item,
+                display_name: displayName || fallback
+            };
+        });
+    }
+    return json(res, 200, { ok: true, ...data, list });
 }
 
 async function handleOrderSyncNow(req, res) {

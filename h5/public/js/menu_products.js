@@ -626,7 +626,7 @@
           node.style.animationDelay = `${Math.min(idx * 35, 220)}ms`;
           node.innerHTML = `
             <div class="row">
-              <p class="title">${item.role_name || item.game_account}</p>
+              <p class="title">${item.display_name || item.role_name || item.game_account}</p>
               <div style="display:flex;align-items:center;gap:6px;">
                 <span data-slot="online-chip">${buildOnlineChipHtml(account)}</span>
                 <span class="chip ${statusClass}">
