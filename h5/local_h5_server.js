@@ -70,6 +70,7 @@ const ORDER_SYNC_LOCK_KEY = String(process.env.ORDER_SYNC_LOCK_KEY || 'order_syn
 const ORDER_SYNC_LOCK_LEASE_SEC = Math.max(60, Number(process.env.ORDER_SYNC_LOCK_LEASE_SEC || 1800));
 const STATS_REFRESH_LOCK_WAIT_MS = Math.max(0, Number(process.env.STATS_REFRESH_LOCK_WAIT_MS || 120000));
 const STATS_REFRESH_LOCK_POLL_MS = Math.max(200, Number(process.env.STATS_REFRESH_LOCK_POLL_MS || 800));
+const COOLDOWN_BLACKLIST_REASON = '冷却期下架';
 const authBff = createAuthBff({ requireAuth, readJsonBody, json });
 const orderBff = createOrderBff({ requireAuth, json });
 function normalizeOrderOffThreshold(v, fallback = 3) {
@@ -153,6 +154,36 @@ function normalizePage(v, fallback) {
     const n = Number(v);
     if (!Number.isFinite(n)) return fallback;
     return Math.max(1, Math.floor(n));
+}
+
+function parseCooldownUntilSecFromDesc(descText) {
+    const raw = String(descText || '').trim();
+    if (!raw) return 0;
+    try {
+        const obj = JSON.parse(raw);
+        const sec = Number((obj && obj.cooldown_until) || 0);
+        return Number.isFinite(sec) && sec > 0 ? sec : 0;
+    } catch {
+        return 0;
+    }
+}
+
+function formatDateTimeByUnixSec(sec) {
+    const n = Number(sec || 0);
+    if (!Number.isFinite(n) || n <= 0) return '';
+    const d = new Date(n * 1000);
+    if (!(d instanceof Date) || Number.isNaN(d.getTime())) return '';
+    const p = (x) => String(x).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function resolveBlacklistDisplayDate(row = {}) {
+    const createDate = String((row && row.create_date) || '').trim();
+    const reason = String((row && row.reason) || '').trim();
+    if (reason !== COOLDOWN_BLACKLIST_REASON) return createDate;
+    const untilSec = parseCooldownUntilSecFromDesc(row.desc);
+    const cooldownDate = formatDateTimeByUnixSec(untilSec);
+    return cooldownDate || createDate;
 }
 
 function sleep(ms) {
@@ -303,7 +334,8 @@ async function handleProducts(req, res, urlObj) {
         blacklistMap[acc] = {
             reason: String((row && row.reason) || '').trim(),
             remark: String((row && row.remark) || '').trim(),
-            create_date: String((row && row.create_date) || '').trim()
+            create_date: String((row && row.create_date) || '').trim(),
+            display_date: resolveBlacklistDisplayDate(row)
         };
     }
 
@@ -384,6 +416,7 @@ async function handleProducts(req, res, urlObj) {
             blacklisted: Boolean(bl),
             blacklist_reason: bl ? bl.reason : '',
             blacklist_create_date: bl ? bl.create_date : '',
+            blacklist_display_date: bl ? bl.display_date : '',
             mode_restricted: modeRestricted,
             mode_reason: modeReason
         };

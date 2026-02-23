@@ -66,8 +66,8 @@
       const t = String(v || '').trim();
       if (!t) return '';
       const m = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2}:\d{2})$/.exec(t);
-      if (m) return `${m[2]}-${m[3]} ${m[4]}`;
-      return t.length >= 14 ? t.slice(-14) : t;
+      if (m) return `${m[2]}-${m[3]} ${m[4].slice(0, 5)}`;
+      return t.length >= 16 ? t.slice(5, 16) : t;
     }
 
     async function copyAccount(text) {
@@ -608,7 +608,8 @@
           const account = String(item.game_account || '').trim();
           const querying = Boolean(state.onlineLoadingMap[account]);
           const forbiddenLoading = Boolean(state.forbiddenLoadingMap[account]);
-          const blacklistTime = formatBlacklistTimeForCard(item.blacklist_create_date);
+          const blacklistDisplayDate = String(item.blacklist_display_date || item.blacklist_create_date || '').trim();
+          const blacklistTime = formatBlacklistTimeForCard(blacklistDisplayDate);
           const overall = item && item.overall_status_norm && typeof item.overall_status_norm === 'object'
             ? item.overall_status_norm
             : {};
