@@ -1,4 +1,6 @@
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
+const { openDatabase } = require('../database/sqlite_client');
+const { initOrderDb } = require('../database/order_db');
 const { queryAccountOnlineStatus } = require('../uuzuhao/uuzuhao_api');
 const { sendDingdingMessage } = require('../report/dingding/ding_notify');
 
@@ -6,9 +8,24 @@ const PLATFORM_YYZ = 'uuzuhao';
 const ONLINE_PROBE_WINDOW_SEC = 90;
 const ONLINE_PROBE_INTERVAL_SEC = Math.max(60, Number(process.env.ONLINE_PROBE_INTERVAL_SEC || 600));
 const ONLINE_PROBE_FORCE = ['1', 'true', 'yes', 'on'].includes(String(process.env.ONLINE_PROBE_FORCE || 'false').toLowerCase());
+const RECENT_ORDER_END_SUPPRESS_SEC = Math.max(60, Number(process.env.ONLINE_ALERT_RECENT_END_SUPPRESS_SEC || 600));
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function dbAll(db, sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.all(sql, params, (err, rows) => {
+            if (err) return reject(err);
+            resolve(rows || []);
+        });
+    });
+}
+
+function toDateTimeText(d = new Date()) {
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
 function shouldProbeOnlineNow(now = new Date()) {
@@ -77,6 +94,36 @@ function buildOnlineButNotRentingAlertText(user, badAccounts = []) {
     return lines.join('\n');
 }
 
+async function listRecentlyEndedAccountsByUser(userId, accounts = [], suppressSec = RECENT_ORDER_END_SUPPRESS_SEC) {
+    const uid = Number(userId || 0);
+    if (!uid) return new Set();
+    const accs = Array.isArray(accounts) ? accounts.map((x) => String(x || '').trim()).filter(Boolean) : [];
+    if (accs.length === 0) return new Set();
+
+    await initOrderDb();
+    const db = openDatabase();
+    try {
+        const now = new Date();
+        const lower = new Date(now.getTime() - Math.max(60, Number(suppressSec || RECENT_ORDER_END_SUPPRESS_SEC)) * 1000);
+        const nowText = toDateTimeText(now);
+        const lowerText = toDateTimeText(lower);
+        const marks = accs.map(() => '?').join(',');
+        const rows = await dbAll(db, `
+            SELECT DISTINCT game_account
+            FROM "order"
+            WHERE user_id = ?
+              AND is_deleted = 0
+              AND TRIM(COALESCE(game_account, '')) <> ''
+              AND game_account IN (${marks})
+              AND end_time >= ?
+              AND end_time <= ?
+        `, [uid, ...accs, lowerText, nowText]);
+        return new Set(rows.map((r) => String((r && r.game_account) || '').trim()).filter(Boolean));
+    } finally {
+        db.close();
+    }
+}
+
 async function runProdStatusGuard(user, accounts = [], options = {}) {
     const logger = options.logger && typeof options.logger.log === 'function' ? options.logger : console;
     const dingCfg = user && user.notify_config && user.notify_config.dingding && typeof user.notify_config.dingding === 'object'
@@ -110,8 +157,22 @@ async function runProdStatusGuard(user, accounts = [], options = {}) {
         await sleep(180);
     }
 
-    const badAccounts = collectOnlineButNotRenting(probeRows);
-    if (badAccounts.length === 0) return { ok: true, skipped: true, reason: 'no_conflict' };
+    const badAccountsRaw = collectOnlineButNotRenting(probeRows);
+    if (badAccountsRaw.length === 0) return { ok: true, skipped: true, reason: 'no_conflict' };
+    const recentEnded = await listRecentlyEndedAccountsByUser(
+        user && user.id,
+        badAccountsRaw.map((x) => x.account),
+        RECENT_ORDER_END_SUPPRESS_SEC
+    );
+    const badAccounts = badAccountsRaw.filter((x) => !recentEnded.has(String(x.account || '').trim()));
+    if (badAccounts.length === 0) {
+        return {
+            ok: true,
+            skipped: true,
+            reason: 'recent_order_ended_within_suppress_window',
+            suppressed: badAccountsRaw.length
+        };
+    }
 
     const text = buildOnlineButNotRentingAlertText(user, badAccounts);
     await sendDingdingMessage(text, {

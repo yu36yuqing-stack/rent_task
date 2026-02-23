@@ -8,7 +8,7 @@
         return;
       }
       els.statsMissingList.innerHTML = missing.map((x) => {
-        const role = String(x.role_name || '').trim();
+        const role = String(x.display_name || x.role_name || '').trim();
         const acc = String(x.game_account || '').trim();
         return `<li>${role || acc}（${acc}）</li>`;
       }).join('');
@@ -163,7 +163,7 @@
         els.statsAccountList.innerHTML = list.map((x) => `
           <div class="stats-acc-item">
             <div class="stats-acc-top">
-              <p class="stats-acc-name">${x.role_name || x.game_account || '-'}</p>
+              <p class="stats-acc-name">${x.display_name || x.role_name || x.game_account || '-'}</p>
               <span class="stats-acc-money">¥${Number(x.amount_rec_sum || 0).toFixed(2)}</span>
             </div>
             <p class="stats-acc-meta">账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)}</p>

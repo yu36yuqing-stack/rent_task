@@ -14,6 +14,7 @@ const {
     getLastRunDate,
     setLastRunDate
 } = require('../database/order_stats_job_state_db');
+const { resolveDisplayNameByRow } = require('../product/display_name');
 
 const STATS_JOB_KEY_ALL_USERS = 'order_stats_daily_all_users';
 const DEFAULT_TARGET_HOUR = 2;
@@ -96,6 +97,20 @@ function buildAccountConfigStatus(rows = []) {
         const gameAccount = String(row.game_account || '').trim();
         if (!gameAccount) continue;
         const roleName = String(row.account_remark || '').trim();
+        let channelPrdInfo = {};
+        try {
+            const raw = row.channel_prd_info;
+            if (raw && typeof raw === 'object') channelPrdInfo = raw;
+            else if (typeof raw === 'string' && raw.trim()) channelPrdInfo = JSON.parse(raw);
+        } catch {
+            channelPrdInfo = {};
+        }
+        const displayName = resolveDisplayNameByRow({
+            game_account: gameAccount,
+            account_remark: roleName,
+            role_name: roleName,
+            channel_prd_info: channelPrdInfo
+        }, gameAccount);
         const purchasePrice = toMoney2(row.purchase_price);
         const purchaseDate = String(row.purchase_date || '').slice(0, 10);
         const ok = purchasePrice > 0 && /^\d{4}-\d{2}-\d{2}$/.test(purchaseDate);
@@ -103,6 +118,7 @@ function buildAccountConfigStatus(rows = []) {
             configured.push({
                 game_account: gameAccount,
                 role_name: roleName,
+                display_name: displayName,
                 purchase_price: purchasePrice,
                 purchase_date: purchaseDate
             });
@@ -110,6 +126,7 @@ function buildAccountConfigStatus(rows = []) {
             missing.push({
                 game_account: gameAccount,
                 role_name: roleName,
+                display_name: displayName,
                 purchase_price: purchasePrice,
                 purchase_date: purchaseDate
             });
@@ -126,7 +143,7 @@ async function loadAccountConfigByUser(userId, gameName = DEFAULT_GAME_NAME) {
     const db = openDatabase();
     try {
         const rows = await all(db, `
-            SELECT game_account, account_remark, purchase_price, purchase_date
+            SELECT game_account, account_remark, channel_prd_info, purchase_price, purchase_date
             FROM user_game_account
             WHERE user_id = ?
               AND is_deleted = 0
@@ -438,9 +455,9 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const periodInfo = buildPeriodRange(options.period, now);
     const rows = await listOrderStatsRows(uid, periodInfo.startDate, periodInfo.endDate, gameName);
     const config = await loadAccountConfigByUser(uid, gameName);
-    const latestRoleMap = new Map(
+    const latestDisplayNameMap = new Map(
         [...(config.configured || []), ...(config.missing || [])]
-            .map((x) => [String(x.game_account || '').trim(), String(x.role_name || '').trim()])
+            .map((x) => [String(x.game_account || '').trim(), String(x.display_name || x.role_name || '').trim()])
             .filter(([k]) => Boolean(k))
     );
 
@@ -469,7 +486,8 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
 
     const by_account = Array.from(byAccountMap.entries()).map(([game_account, arr]) => {
         const s = reduceRows(arr);
-        const roleName = String(latestRoleMap.get(game_account) || (arr[0] && arr[0].role_name) || '').trim();
+        const roleName = String((arr[0] && arr[0].role_name) || '').trim();
+        const displayName = String(latestDisplayNameMap.get(game_account) || roleName || game_account).trim();
         const hitDays = arr.reduce((sum, r) => sum + (Number(r.order_cnt_effective || 0) >= 3 ? 1 : 0), 0);
         const orderBase = Math.max(1, Number(s.order_cnt_effective || 0));
         const accountPurchaseBase = toMoney2((config.configured || [])
@@ -481,6 +499,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         return {
             game_account,
             role_name: roleName || game_account,
+            display_name: displayName,
             purchase_base: accountPurchaseBase,
             avg_daily_order_cnt: Number((Number(s.order_cnt_effective || 0) / periodDays).toFixed(4)),
             avg_daily_rent_hour: Number((Number(s.rent_hour_sum || 0) / periodDays).toFixed(4)),
