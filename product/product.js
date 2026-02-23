@@ -8,6 +8,7 @@ const {
     softDeleteEmptyAccountsByUser
 } = require('../database/user_game_account_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
+const { releaseOrderCooldownBlacklistByUser } = require('../order/order_cooldown');
 
 const PLATFORM_ZHW = 'zuhaowang';
 const PLATFORM_UHZ = 'uhaozu';
@@ -121,6 +122,17 @@ async function syncUserAccountsByAuth(userId) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
 
+    // 先释放已到期的“冷却期下架”黑名单，再进入本轮商品状态拉取，
+    // 保证后续上架判断读取到的是最新黑名单状态。
+    let cooldownRelease = { skipped: true, reason: 'not_run' };
+    try {
+        cooldownRelease = await releaseOrderCooldownBlacklistByUser(uid);
+        console.log(`[CooldownRelease] user_id=${uid} result=${JSON.stringify(cooldownRelease)}`);
+    } catch (e) {
+        cooldownRelease = { error: String(e && e.message ? e.message : e) };
+        console.warn(`[CooldownRelease] user_id=${uid} failed=${cooldownRelease.error}`);
+    }
+
     const rows = await listUserPlatformAuth(uid, { with_payload: true });
     const validAuthRows = rows
         .filter(isAuthUsable)
@@ -190,6 +202,7 @@ async function syncUserAccountsByAuth(userId) {
         pulled,
         upserted,
         cleaned,
+        order_cooldown_release: cooldownRelease,
         errors
     };
 }

@@ -15,6 +15,9 @@ const {
     upsertUserBlacklistEntry,
     hardDeleteUserBlacklistEntry
 } = require('../database/user_blacklist_db');
+const {
+    reconcileOrderCooldownEntryByUser
+} = require('./order_cooldown');
 const { initOrderComplaintDb, upsertOrderComplaint, getOrderComplaintByOrder } = require('../database/order_complaint_db');
 const { listAllOrders, getOrderDetail } = require('../uuzuhao/uuzuhao_api');
 const { listAllOrderPages } = require('../uhaozu/uhaozu_api');
@@ -1081,6 +1084,23 @@ async function syncOrdersByUser(userId, options = {}) {
         missing: missingPlatforms,
         can_reconcile: canReconcileOrder3Off
     };
+
+    if (canReconcileOrder3Off) {
+        try {
+            result.order_cooldown = await reconcileOrderCooldownEntryByUser(uid);
+        } catch (e) {
+            result.order_cooldown = { error: String(e.message || e) };
+            result.ok = false;
+        }
+    } else {
+        result.order_cooldown = {
+            skipped: true,
+            reason: expectedPlatforms.length === 0
+                ? 'no_authorized_platform'
+                : 'authorized_platform_sync_incomplete',
+            missing_platforms: missingPlatforms
+        };
+    }
 
     if (canReconcileOrder3Off) {
         try {
