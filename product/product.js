@@ -1,6 +1,6 @@
 const { getGoodsList } = require('../zuhaowang/zuhaowang_api');
 const { collectUhaozuData } = require('../uhaozu/uhaozu_api');
-const { collectYoupinData, queryAccountOnlineStatus } = require('../uuzuhao/uuzuhao_api');
+const { collectYoupinData } = require('../uuzuhao/uuzuhao_api');
 const {
     upsertUserGameAccount,
     listUserGameAccounts,
@@ -13,9 +13,6 @@ const { releaseOrderCooldownBlacklistByUser } = require('../order/order_cooldown
 const PLATFORM_ZHW = 'zuhaowang';
 const PLATFORM_UHZ = 'uhaozu';
 const PLATFORM_YYZ = 'uuzuhao';
-const ONLINE_PROBE_WINDOW_SEC = 90;
-const ONLINE_PROBE_INTERVAL_SEC = Math.max(60, Number(process.env.ONLINE_PROBE_INTERVAL_SEC || 600));
-const ONLINE_PROBE_FORCE = ['1', 'true', 'yes', 'on'].includes(String(process.env.ONLINE_PROBE_FORCE || 'false').toLowerCase());
 
 function keyOf(gameName, gameAccount) {
     return `${String(gameName || 'WZRY')}::${String(gameAccount || '')}`;
@@ -223,52 +220,7 @@ async function listAllUserGameAccountsByUser(userId) {
     return rows;
 }
 
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function shouldProbeOnlineNow(now = new Date()) {
-    const sec = (now.getMinutes() * 60) + now.getSeconds();
-    const offset = sec % ONLINE_PROBE_INTERVAL_SEC;
-    return offset <= ONLINE_PROBE_WINDOW_SEC || offset >= (ONLINE_PROBE_INTERVAL_SEC - ONLINE_PROBE_WINDOW_SEC);
-}
-
-async function fillOnlineTagsByYouyou(user, accounts) {
-    if (!ONLINE_PROBE_FORCE && !shouldProbeOnlineNow()) {
-        return;
-    }
-    const list = Array.isArray(accounts) ? accounts : [];
-    if (list.length === 0) return;
-
-    for (const acc of list) acc.online_tag = '';
-    if (!user || !user.id) return;
-
-    const authRows = await listUserPlatformAuth(user.id, { with_payload: true });
-    const authRow = authRows.find((r) => String(r.platform || '') === PLATFORM_YYZ && isAuthUsable(r));
-    const auth = authRow && authRow.auth_payload && typeof authRow.auth_payload === 'object'
-        ? authRow.auth_payload
-        : null;
-    if (!auth) {
-        console.warn(`[OnlineProbe] 跳过 user=${user.id}, 缺少 ${PLATFORM_YYZ} 授权`);
-        return;
-    }
-
-    for (const acc of list) {
-        const account = String(acc.account || '').trim();
-        if (!account) continue;
-        try {
-            const r = await queryAccountOnlineStatus(account, 'WZRY', { auth });
-            acc.online_tag = r.online ? 'ON' : 'OFF';
-        } catch (e) {
-            acc.online_tag = '';
-            console.warn(`[OnlineProbe] 查询失败 user=${user.id} account=${account}: ${e.message}`);
-        }
-        await sleep(180);
-    }
-}
-
 module.exports = {
     syncUserAccountsByAuth,
-    listAllUserGameAccountsByUser,
-    fillOnlineTagsByYouyou
+    listAllUserGameAccountsByUser
 };

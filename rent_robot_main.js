@@ -3,7 +3,6 @@ const path = require('path');
 const util = require('util');
 const {
     sendTelegram,
-    sendDingding,
     toReportAccountFromUserGameRow,
     fillTodayOrderCounts,
     buildRecentActionsForUser,
@@ -11,7 +10,8 @@ const {
     notifyUserByPayload
 } = require('./report/report_rent_status.js');
 const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('./database/user_db.js');
-const { syncUserAccountsByAuth, listAllUserGameAccountsByUser, fillOnlineTagsByYouyou } = require('./product/product');
+const { syncUserAccountsByAuth, listAllUserGameAccountsByUser } = require('./product/product');
+const { triggerProdStatusGuard } = require('./product/prod_status_guard');
 const { startOrderSyncWorkerIfNeeded, reconcileOrder3OffBlacklistByUser } = require('./order/order');
 const { startOrderStatsWorkerIfNeeded } = require('./stats/order_stats');
 const { loadUserBlacklistSet, loadUserBlacklistReasonMap } = require('./user/user');
@@ -128,62 +128,6 @@ function applyActionResultToRows(rows = [], actions = []) {
     }
 }
 
-function isRentingStatus(v) {
-    const s = String(v || '').trim();
-    return s === '租赁中' || s === '出租中';
-}
-
-function collectOnlineButNotRenting(accounts = []) {
-    const list = Array.isArray(accounts) ? accounts : [];
-    return list.filter((acc) => {
-        const y = String((acc && acc.youpin) || '').trim();
-        const u = String((acc && acc.uhaozu) || '').trim();
-        const z = String((acc && acc.zuhaowan) || '').trim();
-        const online = String((acc && acc.online_tag) || '').trim().toUpperCase();
-        const anyRent = isRentingStatus(y) || isRentingStatus(u) || isRentingStatus(z);
-        return online === 'ON' && !anyRent;
-    });
-}
-
-function buildOnlineButNotRentingAlertText(user, badAccounts = []) {
-    const nowText = new Date().toLocaleString('zh-CN', { hour12: false });
-    const owner = String((user && (user.name || user.account)) || '').trim() || `user_${user && user.id ? user.id : 'unknown'}`;
-    const lines = [
-        `⚠️ ${owner} 在线状态告警`,
-        `时间: ${nowText}`,
-        '命中条件: 非租赁中，但状态为在线(ON)',
-        `账号数: ${badAccounts.length}`
-    ];
-    const limit = Math.min(20, badAccounts.length);
-    for (let i = 0; i < limit; i += 1) {
-        const a = badAccounts[i] || {};
-        const name = String(a.remark || a.account || `账号${i + 1}`).trim();
-        lines.push(`• ${name} (Y:${a.youpin || '-'} / U:${a.uhaozu || '-'} / Z:${a.zuhaowan || '-'})`);
-    }
-    if (badAccounts.length > limit) {
-        lines.push(`… 其余 ${badAccounts.length - limit} 个账号未展开`);
-    }
-    return lines.join('\n');
-}
-
-async function notifyOnlineButNotRentingIfNeeded(user, accounts = []) {
-    const dingCfg = user && user.notify_config && user.notify_config.dingding && typeof user.notify_config.dingding === 'object'
-        ? user.notify_config.dingding
-        : {};
-    if (!dingCfg.webhook) return { ok: true, skipped: true, reason: 'dingding_not_configured' };
-
-    const badAccounts = collectOnlineButNotRenting(accounts);
-    if (badAccounts.length === 0) return { ok: true, skipped: true, reason: 'no_conflict' };
-
-    const text = buildOnlineButNotRentingAlertText(user, badAccounts);
-    await sendDingding(text, {
-        webhook: dingCfg.webhook,
-        secret: dingCfg.secret || '',
-        at_all: true
-    });
-    return { ok: true, skipped: false, alerted: badAccounts.length };
-}
-
 const HISTORY_FILE = path.join(TASK_DIR, 'rent_robot_history.jsonl');
 
 async function runPipeline(runRecord) {
@@ -259,16 +203,7 @@ async function runPipeline(runRecord) {
             // Step 4: 组装并发送用户通知（Telegram/Dingding）
             const accounts = rows.map((r) => toReportAccountFromUserGameRow(r, blacklistSet, blacklistReasonMap));
             await fillTodayOrderCounts(user.id, accounts);
-            await fillOnlineTagsByYouyou(user, accounts);
-            try {
-                const alertResult = await notifyOnlineButNotRentingIfNeeded(user, accounts);
-                if (!alertResult.skipped) {
-                    console.warn(`[OnlineAlert] user_id=${user.id} alerted=${alertResult.alerted || 0}`);
-                }
-            } catch (alertErr) {
-                console.error(`[OnlineAlert] 发送失败 user_id=${user.id}: ${alertErr.message}`);
-                runRecord.errors.push(`online_alert_error user=${user.id} ${alertErr.message}`);
-            }
+            triggerProdStatusGuard(user, accounts, { logger: console });
             const recentActions = await buildRecentActionsForUser(user.id, { limit: 8 });
             const payload = buildPayloadForOneUser(accounts, {
                 report_owner: String(user.name || user.account || '').trim(),
