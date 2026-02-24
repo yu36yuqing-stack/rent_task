@@ -315,21 +315,24 @@ async function executeUserActionsIfNeeded({
         restrictRows.map((r) => `${String(r.game_account || '').trim()}::${String(r.platform || '').trim()}`).filter(Boolean)
     );
 
-    // 平台状态已非“下架”时，自动清理限制标记，避免永久冻结。
+    // 平台状态已恢复（上架/租赁中）时，自动清理限制标记，避免“平台限制上架”残留卡住。
     for (const row of rows || []) {
         const acc = String((row && row.game_account) || '').trim();
         const st = row && typeof row.channel_status === 'object' ? row.channel_status : {};
         if (!acc) continue;
-        if (String(st.uuzuhao || '').trim() && String(st.uuzuhao || '').trim() !== '下架' && platformRestrictSet.has(`${acc}::uuzuhao`)) {
-            await removePlatformRestrict(user.id, acc, 'uuzuhao', 'auto clear by status != 下架').catch(() => {});
+        const y = String(st.uuzuhao || '').trim();
+        const u = String(st.uhaozu || '').trim();
+        const z = String(st.zuhaowang || '').trim();
+        if (['上架', '租赁中', '出租中'].includes(y) && platformRestrictSet.has(`${acc}::uuzuhao`)) {
+            await removePlatformRestrict(user.id, acc, 'uuzuhao', `auto clear by status=${y}`).catch(() => {});
             platformRestrictSet.delete(`${acc}::uuzuhao`);
         }
-        if (String(st.uhaozu || '').trim() && String(st.uhaozu || '').trim() !== '下架' && platformRestrictSet.has(`${acc}::uhaozu`)) {
-            await removePlatformRestrict(user.id, acc, 'uhaozu', 'auto clear by status != 下架').catch(() => {});
+        if (['上架', '租赁中', '出租中'].includes(u) && platformRestrictSet.has(`${acc}::uhaozu`)) {
+            await removePlatformRestrict(user.id, acc, 'uhaozu', `auto clear by status=${u}`).catch(() => {});
             platformRestrictSet.delete(`${acc}::uhaozu`);
         }
-        if (String(st.zuhaowang || '').trim() && String(st.zuhaowang || '').trim() !== '下架' && platformRestrictSet.has(`${acc}::zuhaowang`)) {
-            await removePlatformRestrict(user.id, acc, 'zuhaowang', 'auto clear by status != 下架').catch(() => {});
+        if (['上架', '租赁中', '出租中'].includes(z) && platformRestrictSet.has(`${acc}::zuhaowang`)) {
+            await removePlatformRestrict(user.id, acc, 'zuhaowang', `auto clear by status=${z}`).catch(() => {});
             platformRestrictSet.delete(`${acc}::zuhaowang`);
         }
     }

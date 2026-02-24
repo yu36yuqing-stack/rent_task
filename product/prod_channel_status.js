@@ -61,6 +61,7 @@ function normalizeOnePlatformStatus(platform, channelStatus = {}, channelPrdInfo
     const prd = channelPrdInfo && typeof channelPrdInfo === 'object' ? (channelPrdInfo[p] || {}) : {};
     const restrictMsg = String(restrictReason || '').trim();
     const codeByText = normalizedCodeFromChannelText(statusText);
+    const recovered = statusText === '上架' || statusText === '租赁中' || statusText === '出租中';
 
     if (p === 'uhaozu') {
         const auditReason = String(prd.audit_reason || prd.reason || '').trim();
@@ -73,7 +74,7 @@ function normalizeOnePlatformStatus(platform, channelStatus = {}, channelPrdInfo
                 level: Number(NORM_CODE_LEVEL_MAP.auth_abnormal || 100)
             };
         }
-        if (restrictMsg) {
+        if (restrictMsg && !recovered) {
             return {
                 code: 'restricted',
                 label: restrictedLabelByReason(restrictMsg),
@@ -92,7 +93,7 @@ function normalizeOnePlatformStatus(platform, channelStatus = {}, channelPrdInfo
     if (p === 'zuhaowang') {
         const exceptionMsg = String(prd.exception_msg || '').trim();
         if (exceptionMsg) return buildNormalizedStatus('auth_abnormal', exceptionMsg);
-        if (restrictMsg) {
+        if (restrictMsg && !recovered) {
             return {
                 code: 'restricted',
                 label: restrictedLabelByReason(restrictMsg),
@@ -107,7 +108,7 @@ function normalizeOnePlatformStatus(platform, channelStatus = {}, channelPrdInfo
         return buildNormalizedStatus(codeByText);
     }
 
-    if (restrictMsg) {
+    if (restrictMsg && !recovered) {
         return {
             code: 'restricted',
             label: restrictedLabelByReason(restrictMsg),
