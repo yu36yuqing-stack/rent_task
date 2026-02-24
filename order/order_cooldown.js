@@ -28,6 +28,15 @@ function dbAll(db, sql, params = []) {
     });
 }
 
+function dbGet(db, sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.get(sql, params, (err, row) => {
+            if (err) return reject(err);
+            resolve(row || null);
+        });
+    });
+}
+
 function parseDateTimeTextToSec(v) {
     const text = String(v || '').trim();
     if (!text) return 0;
@@ -71,6 +80,55 @@ function parseCooldownUntilFromDesc(descText) {
         return Number((obj && obj.cooldown_until) || 0);
     } catch {
         return 0;
+    }
+}
+
+function parseCooldownMetaFromDesc(descText) {
+    const text = String(descText || '').trim();
+    if (!text) return { cooldown_until: 0, source_order_no: '', source_channel: '' };
+    try {
+        const obj = JSON.parse(text);
+        return {
+            cooldown_until: Number((obj && obj.cooldown_until) || 0),
+            source_order_no: String((obj && obj.source_order_no) || '').trim(),
+            source_channel: normalizeOrderPlatform(String((obj && obj.source_channel) || '').trim())
+        };
+    } catch {
+        return { cooldown_until: 0, source_order_no: '', source_channel: '' };
+    }
+}
+
+async function getOrderStatusByOrderNo(userId, orderNo, channel = '') {
+    const uid = Number(userId || 0);
+    const no = String(orderNo || '').trim();
+    const ch = normalizeOrderPlatform(channel);
+    if (!uid || !no) return '';
+    await initOrderDb();
+    const db = openDatabase();
+    try {
+        const row = ch
+            ? await dbGet(db, `
+                SELECT order_status
+                FROM "order"
+                WHERE user_id = ?
+                  AND is_deleted = 0
+                  AND order_no = ?
+                  AND channel = ?
+                ORDER BY id DESC
+                LIMIT 1
+            `, [uid, no, ch])
+            : await dbGet(db, `
+                SELECT order_status
+                FROM "order"
+                WHERE user_id = ?
+                  AND is_deleted = 0
+                  AND order_no = ?
+                ORDER BY id DESC
+                LIMIT 1
+            `, [uid, no]);
+        return String((row && row.order_status) || '').trim();
+    } finally {
+        db.close();
     }
 }
 
@@ -220,15 +278,33 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
     const current = await listUserBlacklistByUserWithMeta(uid);
     const cooldownRows = current.filter((x) => String(x.reason || '').trim() === COOLDOWN_REASON);
     let released = 0;
+    let released_by_refund = 0;
     let pending = 0;
     let invalid = 0;
     for (const row of cooldownRows) {
         const acc = String(row.game_account || '').trim();
         if (!acc) continue;
-        const untilSec = parseCooldownUntilFromDesc(row.desc);
+        const meta = parseCooldownMetaFromDesc(row.desc);
+        const untilSec = Number(meta.cooldown_until || 0);
         if (!untilSec) {
             invalid += 1;
             continue;
+        }
+        if (meta.source_order_no) {
+            const orderStatus = await getOrderStatusByOrderNo(uid, meta.source_order_no, meta.source_channel);
+            if (orderStatus === '已退款') {
+                const out = await deleteBlacklistWithGuard(uid, acc, {
+                    source: COOLDOWN_SOURCE,
+                    operator: 'product_sync',
+                    desc: `auto release by refunded order status (${meta.source_order_no})`,
+                    reason_expected: COOLDOWN_REASON
+                });
+                if (out && out.removed) {
+                    released += 1;
+                    released_by_refund += 1;
+                    continue;
+                }
+            }
         }
         if (nowSec < untilSec) {
             pending += 1;
@@ -250,6 +326,7 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
         freshness,
         total_cooldown_rows: cooldownRows.length,
         released,
+        released_by_refund,
         pending,
         invalid
     };
