@@ -150,6 +150,7 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
         if (!startSec || !endSec) continue;
         if (nowSec < startSec + startDelaySec) continue;
         const untilSec = endSec + endDelaySec;
+        if (untilSec <= nowSec) continue;
         const acc = row.game_account;
         const prev = cooldownByAccount.get(acc);
         if (!prev || untilSec > prev.cooldown_until) {
