@@ -8,6 +8,7 @@ const { listTodayPaidOrderCountByAccounts } = require('../database/order_db');
 const { listRecentProductOnoffByUser } = require('../database/product_onoff_history_db');
 const { listAccountRemarksByUserAndAccounts } = require('../database/user_game_account_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
+const { resolveDisplayNameByRow } = require('../product/display_name');
 
 const TASK_DIR = path.resolve(__dirname, '..');
 const STATUS_FILE = path.join(TASK_DIR, 'rent_robot_status.json');
@@ -229,7 +230,7 @@ function toReportAccountFromUserGameRow(row, blacklistSet = new Set(), blacklist
     const reason = String((blacklistReasonMap && blacklistReasonMap[account]) || '').trim() || '黑名单';
     return {
         account,
-        remark: String(row.account_remark || account),
+        remark: resolveDisplayNameByRow(row, account),
         youpin: String(status.uuzuhao || ''),
         uhaozu: String(status.uhaozu || ''),
         zuhaowan: String(status.zuhaowang || ''),

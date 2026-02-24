@@ -204,22 +204,21 @@ async function runPipeline(runRecord) {
             const accounts = rows.map((r) => toReportAccountFromUserGameRow(r, blacklistSet, blacklistReasonMap));
             await fillTodayOrderCounts(user.id, accounts);
             const onlineProbe = await probeProdOnlineStatus(user, accounts, { logger: console, include_rows: true });
+            const onlineTagMap = {};
+            for (const row of (onlineProbe && Array.isArray(onlineProbe.probe_rows) ? onlineProbe.probe_rows : [])) {
+                const acc = String((row && row.account) || '').trim();
+                if (!acc) continue;
+                onlineTagMap[acc] = String((row && row.online_tag) || '').trim().toUpperCase();
+            }
+            for (const one of accounts) {
+                const acc = String((one && one.account) || '').trim();
+                one.online_tag = String(onlineTagMap[acc] || '').trim();
+            }
             triggerProdStatusGuard(user, accounts, { logger: console, snapshot: onlineProbe });
             const recentActions = await buildRecentActionsForUser(user.id, { limit: 8 });
             const payload = buildPayloadForOneUser(accounts, {
                 report_owner: String(user.name || user.account || '').trim(),
-                recentActions,
-                online_probe: onlineProbe && !onlineProbe.skipped
-                    ? {
-                        probe_time: String(onlineProbe.probe_time || ''),
-                        total_accounts: Number(onlineProbe.total_accounts || 0),
-                        queried: Number(onlineProbe.queried || 0),
-                        success: Number(onlineProbe.success || 0),
-                        failed: Number(onlineProbe.failed || 0),
-                        on: Number(onlineProbe.on || 0),
-                        off: Number(onlineProbe.off || 0)
-                    }
-                    : null
+                recentActions
             });
 
             const notifyResult = await notifyUserByPayload(user, payload);

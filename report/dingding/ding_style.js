@@ -65,17 +65,6 @@ function buildDingdingMessage(payload) {
     }
     lines.push('');
 
-    const onlineProbe = payload && payload.online_probe && typeof payload.online_probe === 'object'
-        ? payload.online_probe
-        : null;
-    if (onlineProbe) {
-        lines.push('🛰️ 在线状态查询(10分钟)');
-        lines.push(`• 时间: ${String(onlineProbe.probe_time || '').slice(11, 19) || '-'}`);
-        lines.push(`• 覆盖: ${Number(onlineProbe.queried || 0)}/${Number(onlineProbe.total_accounts || 0)} 成功: ${Number(onlineProbe.success || 0)} 失败: ${Number(onlineProbe.failed || 0)}`);
-        lines.push(`• ON: ${Number(onlineProbe.on || 0)} OFF: ${Number(onlineProbe.off || 0)}`);
-        lines.push('');
-    }
-
     const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
     const authorizedPlatforms = normalizeAuthorizedPlatforms(payload.authorized_platforms);
     lines.push(`📋 完整账号列表 (${accounts.length}个)`);
