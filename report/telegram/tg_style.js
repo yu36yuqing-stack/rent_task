@@ -80,6 +80,17 @@ function buildTelegramMessage(payload) {
         msg += '• 无\n\n';
     }
 
+    const onlineProbe = payload && payload.online_probe && typeof payload.online_probe === 'object'
+        ? payload.online_probe
+        : null;
+    if (onlineProbe) {
+        msg += '<b>🛰️ 在线状态查询(10分钟)</b>\n';
+        msg += `• 时间: <code>${esc(String(onlineProbe.probe_time || '').slice(11, 19) || '-')}</code>\n`;
+        msg += `• 覆盖: <code>${esc(Number(onlineProbe.queried || 0))}</code>/<code>${esc(Number(onlineProbe.total_accounts || 0))}</code> `;
+        msg += `成功: <code>${esc(Number(onlineProbe.success || 0))}</code> 失败: <code>${esc(Number(onlineProbe.failed || 0))}</code>\n`;
+        msg += `• ON: <code>${esc(Number(onlineProbe.on || 0))}</code> OFF: <code>${esc(Number(onlineProbe.off || 0))}</code>\n\n`;
+    }
+
     const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
     const authorizedPlatforms = normalizeAuthorizedPlatforms(payload.authorized_platforms);
     msg += `<b>📋 完整账号列表</b> <code>(${esc(accounts.length)}个)</code>\n\n`;

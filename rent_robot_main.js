@@ -11,7 +11,7 @@ const {
 } = require('./report/report_rent_status.js');
 const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('./database/user_db.js');
 const { syncUserAccountsByAuth, listAllUserGameAccountsByUser } = require('./product/product');
-const { triggerProdStatusGuard } = require('./product/prod_status_guard');
+const { triggerProdStatusGuard, probeProdOnlineStatus } = require('./product/prod_status_guard');
 const { startOrderSyncWorkerIfNeeded, reconcileOrder3OffBlacklistByUser } = require('./order/order');
 const { startOrderStatsWorkerIfNeeded } = require('./stats/order_stats');
 const { loadUserBlacklistSet, loadUserBlacklistReasonMap } = require('./user/user');
@@ -203,11 +203,23 @@ async function runPipeline(runRecord) {
             // Step 4: 组装并发送用户通知（Telegram/Dingding）
             const accounts = rows.map((r) => toReportAccountFromUserGameRow(r, blacklistSet, blacklistReasonMap));
             await fillTodayOrderCounts(user.id, accounts);
-            triggerProdStatusGuard(user, accounts, { logger: console });
+            const onlineProbe = await probeProdOnlineStatus(user, accounts, { logger: console, include_rows: true });
+            triggerProdStatusGuard(user, accounts, { logger: console, snapshot: onlineProbe });
             const recentActions = await buildRecentActionsForUser(user.id, { limit: 8 });
             const payload = buildPayloadForOneUser(accounts, {
                 report_owner: String(user.name || user.account || '').trim(),
-                recentActions
+                recentActions,
+                online_probe: onlineProbe && !onlineProbe.skipped
+                    ? {
+                        probe_time: String(onlineProbe.probe_time || ''),
+                        total_accounts: Number(onlineProbe.total_accounts || 0),
+                        queried: Number(onlineProbe.queried || 0),
+                        success: Number(onlineProbe.success || 0),
+                        failed: Number(onlineProbe.failed || 0),
+                        on: Number(onlineProbe.on || 0),
+                        off: Number(onlineProbe.off || 0)
+                    }
+                    : null
             });
 
             const notifyResult = await notifyUserByPayload(user, payload);

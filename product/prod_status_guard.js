@@ -124,20 +124,9 @@ async function listRecentlyEndedAccountsByUser(userId, accounts = [], suppressSe
     }
 }
 
-async function runProdStatusGuard(user, accounts = [], options = {}) {
-    const logger = options.logger && typeof options.logger.log === 'function' ? options.logger : console;
-    const dingCfg = user && user.notify_config && user.notify_config.dingding && typeof user.notify_config.dingding === 'object'
-        ? user.notify_config.dingding
-        : {};
-    if (!dingCfg.webhook) return { ok: true, skipped: true, reason: 'dingding_not_configured' };
-    if (!ONLINE_PROBE_FORCE && !shouldProbeOnlineNow()) return { ok: true, skipped: true, reason: 'out_of_probe_window' };
-
+function buildProbeRows(accounts = []) {
     const list = Array.isArray(accounts) ? accounts : [];
-    if (list.length === 0) return { ok: true, skipped: true, reason: 'empty_accounts' };
-    const auth = await resolveUuzuhaoAuthByUser(user && user.id);
-    if (!auth) return { ok: true, skipped: true, reason: 'uuzuhao_auth_missing' };
-
-    const probeRows = list.map((x) => ({
+    return list.map((x) => ({
         account: String(x.account || '').trim(),
         remark: String(x.remark || '').trim(),
         youpin: String(x.youpin || '').trim(),
@@ -145,6 +134,42 @@ async function runProdStatusGuard(user, accounts = [], options = {}) {
         zuhaowan: String(x.zuhaowan || '').trim(),
         online_tag: ''
     })).filter((x) => x.account);
+}
+
+function summarizeProbeRows(probeRows = []) {
+    const rows = Array.isArray(probeRows) ? probeRows : [];
+    let on = 0;
+    let off = 0;
+    let failed = 0;
+    for (const row of rows) {
+        const tag = String((row && row.online_tag) || '').trim().toUpperCase();
+        if (tag === 'ON') on += 1;
+        else if (tag === 'OFF') off += 1;
+        else failed += 1;
+    }
+    return {
+        queried: rows.length,
+        on,
+        off,
+        failed,
+        success: on + off
+    };
+}
+
+async function probeProdOnlineStatus(user, accounts = [], options = {}) {
+    const logger = options.logger && typeof options.logger.log === 'function' ? options.logger : console;
+    const forceProbe = Boolean(options.force_probe);
+    if (!forceProbe && !ONLINE_PROBE_FORCE && !shouldProbeOnlineNow()) {
+        return { ok: true, skipped: true, reason: 'out_of_probe_window' };
+    }
+
+    const list = Array.isArray(accounts) ? accounts : [];
+    if (list.length === 0) return { ok: true, skipped: true, reason: 'empty_accounts' };
+    const auth = await resolveUuzuhaoAuthByUser(user && user.id);
+    if (!auth) return { ok: true, skipped: true, reason: 'uuzuhao_auth_missing' };
+
+    const probeRows = buildProbeRows(list);
+    const probeAt = new Date();
 
     for (const row of probeRows) {
         try {
@@ -157,7 +182,31 @@ async function runProdStatusGuard(user, accounts = [], options = {}) {
         await sleep(180);
     }
 
-    const badAccountsRaw = collectOnlineButNotRenting(probeRows);
+    const summary = summarizeProbeRows(probeRows);
+    return {
+        ok: true,
+        skipped: false,
+        reason: '',
+        probe_time: toDateTimeText(probeAt),
+        total_accounts: list.length,
+        queried: summary.queried,
+        success: summary.success,
+        failed: summary.failed,
+        on: summary.on,
+        off: summary.off,
+        probe_rows: options.include_rows ? probeRows : []
+    };
+}
+
+async function alertOnlineConflictIfNeeded(user, probeRows = [], options = {}) {
+    const dingCfg = user && user.notify_config && user.notify_config.dingding && typeof user.notify_config.dingding === 'object'
+        ? user.notify_config.dingding
+        : {};
+    if (!dingCfg.webhook) return { ok: true, skipped: true, reason: 'dingding_not_configured' };
+    const rows = Array.isArray(probeRows) ? probeRows : [];
+    if (rows.length === 0) return { ok: true, skipped: true, reason: 'empty_probe_rows' };
+
+    const badAccountsRaw = collectOnlineButNotRenting(rows);
     if (badAccountsRaw.length === 0) return { ok: true, skipped: true, reason: 'no_conflict' };
     const recentEnded = await listRecentlyEndedAccountsByUser(
         user && user.id,
@@ -183,6 +232,15 @@ async function runProdStatusGuard(user, accounts = [], options = {}) {
     return { ok: true, skipped: false, alerted: badAccounts.length };
 }
 
+async function runProdStatusGuard(user, accounts = [], options = {}) {
+    const snapshot = options && options.snapshot && typeof options.snapshot === 'object'
+        ? options.snapshot
+        : await probeProdOnlineStatus(user, accounts, { ...options, include_rows: true });
+    if (snapshot && snapshot.skipped) return snapshot;
+    const probeRows = Array.isArray(snapshot.probe_rows) ? snapshot.probe_rows : [];
+    return alertOnlineConflictIfNeeded(user, probeRows, options);
+}
+
 function triggerProdStatusGuard(user, accounts = [], options = {}) {
     const logger = options.logger && typeof options.logger.log === 'function' ? options.logger : console;
     const userId = Number((user && user.id) || 0);
@@ -199,6 +257,9 @@ function triggerProdStatusGuard(user, accounts = [], options = {}) {
 }
 
 module.exports = {
+    shouldProbeOnlineNow,
+    probeProdOnlineStatus,
+    alertOnlineConflictIfNeeded,
     runProdStatusGuard,
     triggerProdStatusGuard
 };
