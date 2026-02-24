@@ -44,6 +44,9 @@ const ORDER_OFF_THRESHOLD_RULE_NAME = 'X单下架阈值';
 const ORDER_3_OFF_BLOCK_RECOVER_RULE_NAME = '3单下架-不恢复时段';
 const ORDER_OFF_MODE_NATURAL_DAY = 'natural_day';
 const ORDER_OFF_MODE_ROLLING_24H = 'rolling_24h';
+const ORDER_COMPENSATE_INTERVAL_MIN = 180;
+const ORDER_COMPENSATE_WINDOW_SEC = 90;
+const ORDER_COMPENSATE_LOOKBACK_SEC = 30 * 3600;
 
 function normalizeOrderOffThreshold(v, fallback = ORDER_3_OFF_THRESHOLD) {
     const n = Number(v);
@@ -697,7 +700,9 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
     const auth = await resolveUuzuhaoAuthByUser(uid);
     const nowSec = Math.floor(Date.now() / 1000);
     const lastSyncTs = await getLastSyncTimestamp(uid, CHANNEL_UUZUHAO);
-    const overlapSec = 3 * 3600;
+    const overlapSecBase = 3 * 3600;
+    const compensateLookbackSec = Math.max(0, Number(options.compensation_lookback_sec || 0));
+    const overlapSec = Math.max(overlapSecBase, compensateLookbackSec);
     // 默认策略：用上次拉取时间向前回退3小时，保证冗余覆盖；首次无游标时兜底最近30天。
     const startSec = lastSyncTs > 0
         ? Math.max(0, lastSyncTs - overlapSec)
@@ -819,7 +824,9 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
     const auth = await resolveUhaozuAuthByUser(uid);
     const nowSec = Math.floor(Date.now() / 1000);
     const lastSyncTs = await getLastSyncTimestamp(uid, CHANNEL_UHAOZU);
-    const overlapSec = 2 * 24 * 3600;
+    const overlapSecBase = 2 * 24 * 3600;
+    const compensateLookbackSec = Math.max(0, Number(options.compensation_lookback_sec || 0));
+    const overlapSec = Math.max(overlapSecBase, compensateLookbackSec);
     const startSec = lastSyncTs > 0
         ? Math.max(0, lastSyncTs - overlapSec)
         : (nowSec - 30 * 24 * 3600);
@@ -944,7 +951,9 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
     const auth = await resolveZuhaowangAuthByUser(uid);
     const nowSec = Math.floor(Date.now() / 1000);
     const lastSyncTs = await getLastSyncTimestamp(uid, CHANNEL_ZHW);
-    const overlapSec = 3 * 3600;
+    const overlapSecBase = 3 * 3600;
+    const compensateLookbackSec = Math.max(0, Number(options.compensation_lookback_sec || 0));
+    const overlapSec = Math.max(overlapSecBase, compensateLookbackSec);
     const startSec = lastSyncTs > 0
         ? Math.max(0, lastSyncTs - overlapSec)
         : (nowSec - 30 * 24 * 3600);
@@ -1034,9 +1043,44 @@ async function syncOrdersByUser(userId, options = {}) {
         ok: true
     };
     console.log(`[OrderSync] user_id=${uid} begin`);
+    const now = options.now instanceof Date ? options.now : new Date();
+    const compensateInWindow = shouldTriggerOrderSyncNow({
+        now,
+        interval_min: Number(options.compensation_interval_min || ORDER_COMPENSATE_INTERVAL_MIN),
+        window_sec: Number(options.compensation_window_sec || ORDER_COMPENSATE_WINDOW_SEC),
+        force: Boolean(options.compensation_force)
+    });
+    const compensateLookbackSec = compensateInWindow
+        ? Math.max(0, Number(options.compensation_lookback_sec || ORDER_COMPENSATE_LOOKBACK_SEC))
+        : 0;
+    if (compensateLookbackSec > 0) {
+        console.log(`[OrderSync] user_id=${uid} compensate_window_hit=true lookback_sec=${compensateLookbackSec}`);
+    }
+
+    const uuzuhaoOptions = {
+        ...(options.uuzuhao || {}),
+        compensation_lookback_sec: Math.max(
+            Number((options.uuzuhao || {}).compensation_lookback_sec || 0),
+            compensateLookbackSec
+        )
+    };
+    const uhaozuOptions = {
+        ...(options.uhaozu || {}),
+        compensation_lookback_sec: Math.max(
+            Number((options.uhaozu || {}).compensation_lookback_sec || 0),
+            compensateLookbackSec
+        )
+    };
+    const zuhaowangOptions = {
+        ...(options.zuhaowang || {}),
+        compensation_lookback_sec: Math.max(
+            Number((options.zuhaowang || {}).compensation_lookback_sec || 0),
+            compensateLookbackSec
+        )
+    };
 
     try {
-        result.platforms.uuzuhao = await syncUuzuhaoOrdersToDb(uid, options.uuzuhao || {});
+        result.platforms.uuzuhao = await syncUuzuhaoOrdersToDb(uid, uuzuhaoOptions);
         console.log(`[OrderSync] user_id=${uid} platform=uuzuhao done ${JSON.stringify({
             pulled: result.platforms.uuzuhao.pulled,
             upserted: result.platforms.uuzuhao.upserted,
@@ -1049,7 +1093,7 @@ async function syncOrdersByUser(userId, options = {}) {
     }
 
     try {
-        result.platforms.uhaozu = await syncUhaozuOrdersToDb(uid, options.uhaozu || {});
+        result.platforms.uhaozu = await syncUhaozuOrdersToDb(uid, uhaozuOptions);
         console.log(`[OrderSync] user_id=${uid} platform=uhaozu done ${JSON.stringify({
             pulled: result.platforms.uhaozu.pulled,
             upserted: result.platforms.uhaozu.upserted,
@@ -1062,7 +1106,7 @@ async function syncOrdersByUser(userId, options = {}) {
     }
 
     try {
-        result.platforms.zuhaowang = await syncZuhaowangOrdersToDb(uid, options.zuhaowang || {});
+        result.platforms.zuhaowang = await syncZuhaowangOrdersToDb(uid, zuhaowangOptions);
         console.log(`[OrderSync] user_id=${uid} platform=zuhaowang done ${JSON.stringify({
             pulled: result.platforms.zuhaowang.pulled,
             upserted: result.platforms.zuhaowang.upserted,
