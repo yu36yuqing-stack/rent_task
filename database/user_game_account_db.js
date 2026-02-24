@@ -331,22 +331,64 @@ async function upsertUserGameAccount(input = {}) {
         `, [userId, gameName, gameAccount]);
 
         if (!row) {
-            await run(db, `
-                INSERT INTO user_game_account
-                (user_id, game_account, account_remark, game_name, channel_status, channel_prd_info, purchase_price, purchase_date, modify_date, is_deleted, desc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-            `, [
-                userId,
-                gameAccount,
-                accountRemark,
-                gameName,
-                JSON.stringify(nextStatus),
-                JSON.stringify(nextPrdInfo),
-                hasPurchasePrice ? purchasePriceRaw : 0,
-                hasPurchaseDate ? purchaseDateRaw : '',
-                nowText(),
-                desc
-            ]);
+            const deletedRow = await get(db, `
+                SELECT * FROM user_game_account
+                WHERE user_id = ? AND game_name = ? AND game_account = ? AND is_deleted = 1
+                ORDER BY id DESC
+                LIMIT 1
+            `, [userId, gameName, gameAccount]);
+
+            if (deletedRow) {
+                let deletedStatus = {};
+                let deletedPrdInfo = {};
+                try {
+                    deletedStatus = JSON.parse(String(deletedRow.channel_status || '{}')) || {};
+                } catch {
+                    deletedStatus = {};
+                }
+                try {
+                    deletedPrdInfo = JSON.parse(String(deletedRow.channel_prd_info || '{}')) || {};
+                } catch {
+                    deletedPrdInfo = {};
+                }
+                const mergedStatus = { ...deletedStatus, ...nextStatus };
+                const mergedPrdInfo = { ...deletedPrdInfo, ...nextPrdInfo };
+                const mergedRemark = accountRemark || String(deletedRow.account_remark || '');
+                const mergedPurchasePrice = hasPurchasePrice ? purchasePriceRaw : Number(deletedRow.purchase_price || 0);
+                const mergedPurchaseDate = hasPurchaseDate ? purchaseDateRaw : String(deletedRow.purchase_date || '').slice(0, 10);
+                await run(db, `
+                    UPDATE user_game_account
+                    SET account_remark = ?, channel_status = ?, channel_prd_info = ?,
+                        purchase_price = ?, purchase_date = ?, modify_date = ?, is_deleted = 0, desc = ?
+                    WHERE id = ?
+                `, [
+                    mergedRemark,
+                    JSON.stringify(mergedStatus),
+                    JSON.stringify(mergedPrdInfo),
+                    mergedPurchasePrice,
+                    mergedPurchaseDate,
+                    nowText(),
+                    desc || String(deletedRow.desc || ''),
+                    Number(deletedRow.id)
+                ]);
+            } else {
+                await run(db, `
+                    INSERT INTO user_game_account
+                    (user_id, game_account, account_remark, game_name, channel_status, channel_prd_info, purchase_price, purchase_date, modify_date, is_deleted, desc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                `, [
+                    userId,
+                    gameAccount,
+                    accountRemark,
+                    gameName,
+                    JSON.stringify(nextStatus),
+                    JSON.stringify(nextPrdInfo),
+                    hasPurchasePrice ? purchasePriceRaw : 0,
+                    hasPurchaseDate ? purchaseDateRaw : '',
+                    nowText(),
+                    desc
+                ]);
+            }
         } else {
             let currentStatus = {};
             let currentPrdInfo = {};
@@ -426,17 +468,71 @@ async function softDeleteEmptyAccountsByUser(userId) {
 
     const db = openDatabase();
     try {
-        const rows = await all(db, `SELECT id, channel_status FROM user_game_account WHERE user_id = ? AND is_deleted = 0`, [uid]);
+        const rows = await all(db, `SELECT * FROM user_game_account WHERE user_id = ? AND is_deleted = 0`, [uid]);
         let count = 0;
         for (const row of rows) {
             let status = {};
             try { status = JSON.parse(String(row.channel_status || '{}')) || {}; } catch { status = {}; }
             if (Object.keys(status).length > 0) continue;
+
+            const deletedRow = await get(db, `
+                SELECT * FROM user_game_account
+                WHERE user_id = ? AND game_name = ? AND game_account = ? AND is_deleted = 1
+                ORDER BY id DESC
+                LIMIT 1
+            `, [uid, String(row.game_name || ''), String(row.game_account || '')]);
+
+            if (!deletedRow) {
+                await run(db, `
+                    UPDATE user_game_account
+                    SET is_deleted = 1, modify_date = ?
+                    WHERE id = ?
+                `, [nowText(), row.id]);
+                count += 1;
+                continue;
+            }
+
+            const mergedStatus = {
+                ...parseJsonObject(deletedRow.channel_status),
+                ...parseJsonObject(row.channel_status)
+            };
+            const mergedPrdInfo = {
+                ...parseJsonObject(deletedRow.channel_prd_info),
+                ...parseJsonObject(row.channel_prd_info)
+            };
+            const rowPurchasePrice = Number(row.purchase_price || 0);
+            const deletedPurchasePrice = Number(deletedRow.purchase_price || 0);
+            const mergedPurchasePrice = Number.isFinite(rowPurchasePrice) && rowPurchasePrice > 0
+                ? rowPurchasePrice
+                : deletedPurchasePrice;
+            const rowPurchaseDate = String(row.purchase_date || '').slice(0, 10);
+            const deletedPurchaseDate = String(deletedRow.purchase_date || '').slice(0, 10);
+            const mergedPurchaseDate = /^\d{4}-\d{2}-\d{2}$/.test(rowPurchaseDate)
+                ? rowPurchaseDate
+                : deletedPurchaseDate;
+            const mergedRemark = String(row.account_remark || '').trim() || String(deletedRow.account_remark || '').trim();
+            const mergedDesc = String(deletedRow.desc || '').trim() || String(row.desc || '').trim();
+
             await run(db, `
                 UPDATE user_game_account
-                SET is_deleted = 1, modify_date = ?
+                SET account_remark = ?, channel_status = ?, channel_prd_info = ?,
+                    purchase_price = ?, purchase_date = ?, modify_date = ?, desc = ?
                 WHERE id = ?
-            `, [nowText(), row.id]);
+            `, [
+                mergedRemark,
+                JSON.stringify(mergedStatus),
+                JSON.stringify(mergedPrdInfo),
+                mergedPurchasePrice,
+                mergedPurchaseDate,
+                nowText(),
+                mergedDesc,
+                Number(deletedRow.id)
+            ]);
+
+            await run(db, `
+                DELETE FROM user_game_account
+                WHERE id = ?
+            `, [Number(row.id)]);
             count += 1;
         }
         return count;
