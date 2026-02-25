@@ -59,6 +59,52 @@ function dbAll(db, sql, params = []) {
     });
 }
 
+async function listLatestEndedOrderSnapshotByUser(userId, accounts = []) {
+    const uid = Number(userId || 0);
+    if (!uid) return {};
+    const uniq = Array.from(new Set((Array.isArray(accounts) ? accounts : [])
+        .map((x) => String(x || '').trim())
+        .filter(Boolean)));
+    if (uniq.length === 0) return {};
+
+    await initOrderDb();
+    const db = openDatabase();
+    try {
+        const marks = uniq.map(() => '?').join(',');
+        const rows = await dbAll(db, `
+            SELECT o.game_account, o.order_no, o.end_time, o.id
+            FROM "order" o
+            JOIN (
+                SELECT game_account, MAX(datetime(end_time)) AS max_end_at
+                FROM "order"
+                WHERE user_id = ?
+                  AND is_deleted = 0
+                  AND TRIM(COALESCE(end_time, '')) <> ''
+                  AND game_account IN (${marks})
+                GROUP BY game_account
+            ) x
+              ON x.game_account = o.game_account
+             AND datetime(o.end_time) = x.max_end_at
+            WHERE o.user_id = ?
+              AND o.is_deleted = 0
+              AND o.game_account IN (${marks})
+            ORDER BY o.id DESC
+        `, [uid, ...uniq, uid, ...uniq]);
+        const out = {};
+        for (const row of rows) {
+            const acc = String((row && row.game_account) || '').trim();
+            if (!acc || out[acc]) continue;
+            out[acc] = {
+                order_no: String((row && row.order_no) || '').trim(),
+                end_time: String((row && row.end_time) || '').trim()
+            };
+        }
+        return out;
+    } finally {
+        db.close();
+    }
+}
+
 function toDateTimeText(d = new Date()) {
     const p = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
@@ -266,6 +312,7 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
 
     await initProdRiskEventDb();
     await initProdGuardTaskDb();
+    const latestOrderMap = await listLatestEndedOrderSnapshotByUser(uid, list.map((x) => x && x.account));
     let queued = 0;
     let activated = 0;
     const errors = [];
@@ -284,6 +331,7 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
                         zuhaowan: String((one && one.zuhaowan) || '').trim()
                     },
                     remark: String((one && one.remark) || '').trim(),
+                    latest_order: latestOrderMap[acc] || { order_no: '', end_time: '' },
                     hit_at: toDateTimeText()
                 },
                 desc: 'auto open by online_non_renting'
@@ -308,6 +356,7 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
                     blacklist_applied: 1,
                     forbidden_applied: 1,
                     last_online_tag: 'ON',
+                    forbidden_on_at: toDateTimeText(),
                     next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC,
                     last_error: ''
                 });
@@ -408,6 +457,7 @@ async function processOneSheepFixTask(task, authCache, logger) {
                 blacklist_applied: 1,
                 forbidden_applied: 1,
                 last_online_tag: 'ON',
+                forbidden_on_at: toDateTimeText(),
                 next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC,
                 last_error: ''
             });
@@ -436,6 +486,7 @@ async function processOneSheepFixTask(task, authCache, logger) {
         await updateGuardTaskStatus(task.id, {
             status: failed ? TASK_STATUS_FAILED : TASK_STATUS_WATCHING,
             retry_incr: 1,
+            probe_loop_incr: 1,
             last_error: `query_online_failed:${e.message}`,
             next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC
         });
@@ -446,6 +497,7 @@ async function processOneSheepFixTask(task, authCache, logger) {
         await updateGuardTaskStatus(task.id, {
             status: TASK_STATUS_WATCHING,
             last_online_tag: 'ON',
+            probe_loop_incr: 1,
             next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC,
             last_error: ''
         });
@@ -463,6 +515,7 @@ async function processOneSheepFixTask(task, authCache, logger) {
         await updateGuardTaskStatus(task.id, {
             status: failed ? TASK_STATUS_FAILED : TASK_STATUS_WATCHING,
             retry_incr: 1,
+            probe_loop_incr: 1,
             last_error: `forbidden_disable_failed:${e.message}`,
             next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC
         });
@@ -479,6 +532,7 @@ async function processOneSheepFixTask(task, authCache, logger) {
         await updateGuardTaskStatus(task.id, {
             status: TASK_STATUS_WATCHING,
             last_online_tag: 'OFF',
+            probe_loop_incr: 1,
             last_error: 'blacklist_remove_blocked',
             next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC
         });
@@ -490,6 +544,8 @@ async function processOneSheepFixTask(task, authCache, logger) {
         last_online_tag: 'OFF',
         forbidden_applied: 0,
         blacklist_applied: 0,
+        forbidden_off_at: toDateTimeText(),
+        probe_loop_incr: 1,
         last_error: '',
         finished_at: toDateTimeText()
     });

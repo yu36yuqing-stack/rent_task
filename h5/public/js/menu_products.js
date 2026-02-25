@@ -70,6 +70,13 @@
       return t.length >= 16 ? t.slice(5, 16) : t;
     }
 
+    function compactMainStatusReason(reasonText) {
+      const text = String(reasonText || '').trim();
+      if (!text) return '';
+      if (text === '冷却期下架') return '冷却中';
+      return text;
+    }
+
     async function copyAccount(text) {
       const val = String(text || '').trim();
       if (!val) return;
@@ -728,7 +735,7 @@
           const overallLabel = String(overall.label || '').trim();
           const anyNormalChannel = hasAnyNormalChannel(item);
           const statusText = item.blacklisted
-            ? `${item.blacklist_reason || '无原因'}${blacklistTime ? ` · ${blacklistTime}` : ''}`
+            ? `${compactMainStatusReason(item.blacklist_reason || '无原因')}${blacklistTime ? ` · ${blacklistTime}` : ''}`
             : (anyNormalChannel
               ? '状态正常'
               : (overallLabel && overallLabel !== '上架' && overallLabel !== '下架' && overallLabel !== '租赁中' && overallLabel !== '未知'
@@ -739,10 +746,10 @@
           node.innerHTML = `
             <div class="row">
               <p class="title">${item.display_name || item.role_name || item.game_account}</p>
-              <div style="display:flex;align-items:center;gap:6px;">
+              <div class="card-top-chips">
                 <span data-slot="online-chip">${buildOnlineChipHtml(account)}</span>
                 <span data-slot="forbidden-chip">${buildForbiddenChipHtml(account)}</span>
-                <span class="chip ${statusClass}">
+                <span class="chip ${statusClass} status-main-chip" title="${escapeAttr(statusText)}">
                   ${statusText}
                 </span>
               </div>

@@ -927,6 +927,9 @@ async function handleRiskCenterList(req, res, urlObj) {
         const task = taskMap.get(k) || null;
         const row = rowMap.get(acc) || null;
         const snapshot = safeJsonParse(ev.snapshot, {});
+        const latestOrder = snapshot && snapshot.latest_order && typeof snapshot.latest_order === 'object'
+            ? snapshot.latest_order
+            : {};
         return {
             id: ev.id,
             risk_type: riskTypeText,
@@ -937,6 +940,8 @@ async function handleRiskCenterList(req, res, urlObj) {
             game_account: acc,
             display_name: row ? resolveDisplayNameByRow(row, acc) : acc,
             snapshot,
+            latest_order_no: String(latestOrder.order_no || '').trim(),
+            latest_order_end_time: String(latestOrder.end_time || '').trim(),
             task: task ? {
                 id: Number(task.id || 0),
                 task_type: String(task.task_type || '').trim(),
@@ -945,6 +950,9 @@ async function handleRiskCenterList(req, res, urlObj) {
                 last_online_tag: String(task.last_online_tag || '').trim(),
                 retry_count: Number(task.retry_count || 0),
                 max_retry: Number(task.max_retry || 0),
+                probe_loop_count: Number(task.probe_loop_count || 0),
+                forbidden_on_at: String(task.forbidden_on_at || '').trim(),
+                forbidden_off_at: String(task.forbidden_off_at || '').trim(),
                 last_error: String(task.last_error || '').trim(),
                 modify_date: String(task.modify_date || '').trim()
             } : null,

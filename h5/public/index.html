@@ -138,9 +138,28 @@
         <button class="drawer-item" data-menu="products" data-label="商品列表">商品列表</button>
         <button class="drawer-item" data-menu="orders" data-label="订单列表">订单列表</button>
         <button class="drawer-item" data-menu="stats" data-label="统计看板">统计看板</button>
+        <button class="drawer-item" data-menu="risk" data-label="风控中心">风控中心</button>
         <button class="drawer-item" data-menu="auth" data-label="授权管理">授权管理</button>
       </div>
     </aside>
+
+    <section id="riskView" class="hidden orders-view">
+      <div class="orders-tabs-row">
+        <div id="riskStatusTabs" class="orders-tabs">
+          <button class="orders-tab active" data-status="all">全部</button>
+          <button class="orders-tab" data-status="open">处理中</button>
+          <button class="orders-tab" data-status="resolved">已恢复</button>
+          <button class="orders-tab" data-status="ignored">已忽略</button>
+        </div>
+        <button id="riskRefreshBtn" class="btn btn-ghost">手工刷新</button>
+      </div>
+      <div id="riskListContainer"></div>
+      <div class="pager">
+        <button id="riskPrevPage" class="btn btn-ghost">上一页</button>
+        <span id="riskPageInfo" class="page-info">第 1 / 1 页</span>
+        <button id="riskNextPage" class="btn btn-ghost">下一页</button>
+      </div>
+    </section>
   </div>
 
   <div id="reasonOverlay" class="overlay hidden">
@@ -310,6 +329,7 @@
   <script defer src="/js/app_core.js"></script>
   <script defer src="/js/menu_products.js"></script>
   <script defer src="/js/menu_orders.js"></script>
+  <script defer src="/js/menu_risk.js"></script>
   <script defer src="/js/menu_stats.js"></script>
 </body>
 </html>

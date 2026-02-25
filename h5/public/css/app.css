@@ -33,6 +33,12 @@
       padding: 14px 14px 26px;
     }
 
+    .container {
+      max-width: 580px;
+      margin: 0 auto;
+      padding: 0 14px 26px;
+    }
+
     .hero {
       position: relative;
       overflow: hidden;
@@ -618,6 +624,15 @@
       gap: 10px;
     }
 
+    .card-top-chips {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-width: 0;
+      flex: 1;
+      justify-content: flex-end;
+    }
+
     .title {
       margin: 0;
       font-size: 16px;
@@ -696,12 +711,20 @@
       display: inline-flex;
       align-items: center;
       border-radius: 999px;
-      padding: 4px 9px;
+      padding: 3px 7px;
       border: 1px solid #d7e0ea;
       background: #f7fbff;
       color: #33445a;
-      font-size: 11px;
+      font-size: 10px;
       white-space: nowrap;
+    }
+
+    .status-main-chip {
+      max-width: 170px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: inline-block;
+      vertical-align: middle;
     }
 
     .chip-black {
@@ -1198,6 +1221,18 @@
       gap: 12px;
     }
 
+    #riskView.orders-view {
+      gap: 8px;
+    }
+
+    #riskView .order-card {
+      margin-bottom: 8px;
+    }
+
+    #riskView .pager {
+      margin-top: 8px;
+    }
+
     .products-tabs-row {
       display: flex;
       align-items: center;
@@ -1298,6 +1333,15 @@
     }
 
     #orderSyncNowBtn {
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 12px;
+      padding: 8px 10px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    #riskRefreshBtn {
       font-size: 11px;
       font-weight: 700;
       border-radius: 12px;
@@ -1434,6 +1478,27 @@
       background: #eef9f3;
       border-color: #bfe5d1;
       color: #1f6a47;
+    }
+
+    .order-chip.risk-failed {
+      background: #fff4f6;
+      border-color: #f1c8cf;
+      color: #b5423b;
+    }
+
+    .risk-card-top-chips {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .risk-card-bottom {
+      margin-top: 8px;
+      min-height: 28px;
+      display: flex;
+      align-items: center;
     }
 
     .order-complaint-view {

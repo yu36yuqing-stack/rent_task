@@ -42,6 +42,13 @@ function all(db, sql, params = []) {
     });
 }
 
+async function ensureColumn(db, table, column, ddl) {
+    const rows = await all(db, `PRAGMA table_info("${table}")`);
+    const has = rows.some((r) => String(r.name || '').trim() === String(column || '').trim());
+    if (has) return;
+    await run(db, `ALTER TABLE "${table}" ADD COLUMN ${ddl}`);
+}
+
 async function initProdGuardTaskDb() {
     const db = openDatabase();
     try {
@@ -60,7 +67,10 @@ async function initProdGuardTaskDb() {
                 forbidden_applied INTEGER NOT NULL DEFAULT 0,
                 retry_count INTEGER NOT NULL DEFAULT 0,
                 max_retry INTEGER NOT NULL DEFAULT 5,
+                probe_loop_count INTEGER NOT NULL DEFAULT 0,
                 last_error TEXT NOT NULL DEFAULT '',
+                forbidden_on_at TEXT NOT NULL DEFAULT '',
+                forbidden_off_at TEXT NOT NULL DEFAULT '',
                 finished_at TEXT NOT NULL DEFAULT '',
                 create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -80,6 +90,9 @@ async function initProdGuardTaskDb() {
             CREATE INDEX IF NOT EXISTS idx_prod_guard_task_user
             ON prod_guard_task(user_id, modify_date, is_deleted)
         `);
+        await ensureColumn(db, 'prod_guard_task', 'probe_loop_count', 'probe_loop_count INTEGER NOT NULL DEFAULT 0');
+        await ensureColumn(db, 'prod_guard_task', 'forbidden_on_at', 'forbidden_on_at TEXT NOT NULL DEFAULT \'\'');
+        await ensureColumn(db, 'prod_guard_task', 'forbidden_off_at', 'forbidden_off_at TEXT NOT NULL DEFAULT \'\'');
     } finally {
         db.close();
     }
@@ -114,8 +127,9 @@ async function upsertGuardTask(input = {}, options = {}) {
             const ret = await run(db, `
                 INSERT INTO prod_guard_task
                 (user_id, game_account, risk_type, task_type, status, event_id, next_check_at, last_online_tag,
-                 blacklist_applied, forbidden_applied, retry_count, max_retry, last_error, finished_at, create_date, modify_date, is_deleted, desc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, 0, 0, ?, '', '', ?, ?, 0, ?)
+                 blacklist_applied, forbidden_applied, retry_count, max_retry, probe_loop_count,
+                 last_error, forbidden_on_at, forbidden_off_at, finished_at, create_date, modify_date, is_deleted, desc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, 0, 0, ?, 0, '', '', '', '', ?, ?, 0, ?)
             `, [uid, acc, riskType, taskType, status, eventId, nextCheckAt, maxRetry, now, now, desc]);
             return { id: Number(ret.lastID || 0), inserted: true };
         }
@@ -156,7 +170,8 @@ async function listDueGuardTasks(options = {}) {
             SELECT
               id, user_id, game_account, risk_type, task_type, status, event_id,
               next_check_at, last_online_tag, blacklist_applied, forbidden_applied,
-              retry_count, max_retry, last_error, finished_at, create_date, modify_date, desc
+              retry_count, max_retry, probe_loop_count, last_error, forbidden_on_at, forbidden_off_at,
+              finished_at, create_date, modify_date, desc
             FROM prod_guard_task
             WHERE is_deleted = 0
               AND status IN (?, ?)
@@ -178,7 +193,10 @@ async function listDueGuardTasks(options = {}) {
             forbidden_applied: Number(r.forbidden_applied || 0),
             retry_count: Number(r.retry_count || 0),
             max_retry: Number(r.max_retry || 5),
+            probe_loop_count: Number(r.probe_loop_count || 0),
             last_error: String(r.last_error || '').trim(),
+            forbidden_on_at: String(r.forbidden_on_at || '').trim(),
+            forbidden_off_at: String(r.forbidden_off_at || '').trim(),
             finished_at: String(r.finished_at || '').trim(),
             create_date: String(r.create_date || '').trim(),
             modify_date: String(r.modify_date || '').trim(),
@@ -200,7 +218,10 @@ async function updateGuardTaskStatus(taskId, patch = {}) {
     const blacklistApplied = patch.blacklist_applied === undefined ? null : (Number(patch.blacklist_applied) > 0 ? 1 : 0);
     const forbiddenApplied = patch.forbidden_applied === undefined ? null : (Number(patch.forbidden_applied) > 0 ? 1 : 0);
     const retryIncr = Math.max(0, Number(patch.retry_incr || 0));
+    const probeLoopIncr = Math.max(0, Number(patch.probe_loop_incr || 0));
     const lastError = patch.last_error === undefined ? null : String(patch.last_error || '').trim();
+    const forbiddenOnAt = patch.forbidden_on_at === undefined ? null : String(patch.forbidden_on_at || '').trim();
+    const forbiddenOffAt = patch.forbidden_off_at === undefined ? null : String(patch.forbidden_off_at || '').trim();
     const desc = patch.desc === undefined ? null : String(patch.desc || '').trim();
     const finishedAt = patch.finished_at === undefined
         ? (status === TASK_STATUS_DONE || status === TASK_STATUS_FAILED ? now : null)
@@ -214,7 +235,10 @@ async function updateGuardTaskStatus(taskId, patch = {}) {
     if (blacklistApplied !== null) { sets.push('blacklist_applied = ?'); params.push(blacklistApplied); }
     if (forbiddenApplied !== null) { sets.push('forbidden_applied = ?'); params.push(forbiddenApplied); }
     if (retryIncr > 0) { sets.push('retry_count = retry_count + ?'); params.push(retryIncr); }
+    if (probeLoopIncr > 0) { sets.push('probe_loop_count = probe_loop_count + ?'); params.push(probeLoopIncr); }
     if (lastError !== null) { sets.push('last_error = ?'); params.push(lastError); }
+    if (forbiddenOnAt !== null) { sets.push('forbidden_on_at = ?'); params.push(forbiddenOnAt); }
+    if (forbiddenOffAt !== null) { sets.push('forbidden_off_at = ?'); params.push(forbiddenOffAt); }
     if (finishedAt !== null) { sets.push('finished_at = ?'); params.push(finishedAt); }
     if (desc !== null && desc) { sets.push('desc = ?'); params.push(desc); }
     params.push(id);
@@ -262,8 +286,8 @@ async function listGuardTasksByUser(userId, options = {}) {
         const rows = await all(db, `
             SELECT
               id, user_id, game_account, risk_type, task_type, status, event_id, next_check_at,
-              last_online_tag, blacklist_applied, forbidden_applied, retry_count, max_retry,
-              last_error, finished_at, create_date, modify_date, desc
+              last_online_tag, blacklist_applied, forbidden_applied, retry_count, max_retry, probe_loop_count,
+              last_error, forbidden_on_at, forbidden_off_at, finished_at, create_date, modify_date, desc
             FROM prod_guard_task
             WHERE ${whereSql}
             ORDER BY datetime(modify_date) DESC, id DESC
@@ -285,7 +309,10 @@ async function listGuardTasksByUser(userId, options = {}) {
                 forbidden_applied: Number(r.forbidden_applied || 0),
                 retry_count: Number(r.retry_count || 0),
                 max_retry: Number(r.max_retry || 0),
+                probe_loop_count: Number(r.probe_loop_count || 0),
                 last_error: String(r.last_error || '').trim(),
+                forbidden_on_at: String(r.forbidden_on_at || '').trim(),
+                forbidden_off_at: String(r.forbidden_off_at || '').trim(),
                 finished_at: String(r.finished_at || '').trim(),
                 create_date: String(r.create_date || '').trim(),
                 modify_date: String(r.modify_date || '').trim(),

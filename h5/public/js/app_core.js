@@ -136,6 +136,15 @@
         missing_purchase_accounts: [],
         configured_account_count: 0
       },
+      riskCenter: {
+        status: 'all',
+        risk_type: '',
+        page: 1,
+        pageSize: 20,
+        total: 0,
+        list: [],
+        loading: false
+      },
       authManage: {
         channels: []
       },
@@ -195,6 +204,7 @@
     function menuTitleByKey(key) {
       const k = String(key || '').trim();
       if (k === 'orders') return '订单列表';
+      if (k === 'risk') return '风控中心';
       if (k === 'stats') return '统计看板';
       if (k === 'auth') return '授权管理';
       return '商品列表';
@@ -204,7 +214,7 @@
       try {
         const url = new URL(window.location.href);
         const m = String(url.searchParams.get('menu') || '').trim().toLowerCase();
-        if (m === 'orders' || m === 'stats' || m === 'auth' || m === 'products') return m;
+        if (m === 'orders' || m === 'risk' || m === 'stats' || m === 'auth' || m === 'products') return m;
       } catch (_) {}
       return 'products';
     }
@@ -237,6 +247,7 @@
       loginView: document.getElementById('loginView'),
       listView: document.getElementById('listView'),
       orderView: document.getElementById('orderView'),
+      riskView: document.getElementById('riskView'),
       orderComplaintView: document.getElementById('orderComplaintView'),
       statsView: document.getElementById('statsView'),
       authView: document.getElementById('authView'),
@@ -267,6 +278,12 @@
       orderQuickFilters: document.getElementById('orderQuickFilters'),
       orderGameHint: document.getElementById('orderGameHint'),
       orderListContainer: document.getElementById('orderListContainer'),
+      riskStatusTabs: document.getElementById('riskStatusTabs'),
+      riskRefreshBtn: document.getElementById('riskRefreshBtn'),
+      riskListContainer: document.getElementById('riskListContainer'),
+      riskPrevPage: document.getElementById('riskPrevPage'),
+      riskNextPage: document.getElementById('riskNextPage'),
+      riskPageInfo: document.getElementById('riskPageInfo'),
       orderComplaintBackBtn: document.getElementById('orderComplaintBackBtn'),
       orderComplaintContainer: document.getElementById('orderComplaintContainer'),
       orderPrevPage: document.getElementById('orderPrevPage'),
@@ -747,6 +764,25 @@
       };
     }
 
+    async function loadRiskCenter() {
+      const r = state.riskCenter || {};
+      const page = Math.max(1, Number(r.page || 1));
+      const pageSize = Math.min(100, Math.max(1, Number(r.pageSize || 20)));
+      const status = String(r.status || 'all').trim().toLowerCase();
+      const statusQuery = status === 'all' ? '' : `&status=${encodeURIComponent(status)}`;
+      const riskType = String(r.risk_type || '').trim();
+      const riskTypeQuery = riskType ? `&risk_type=${encodeURIComponent(riskType)}` : '';
+      const data = await request(`/api/risk-center/events?page=${page}&page_size=${pageSize}${statusQuery}${riskTypeQuery}`);
+      state.riskCenter = {
+        ...state.riskCenter,
+        page: Number(data.page || page),
+        pageSize: Number(data.page_size || pageSize),
+        total: Number(data.total || 0),
+        list: Array.isArray(data.list) ? data.list : [],
+        loading: false
+      };
+    }
+
     async function loadAuthManage() {
       const data = await request('/api/auth/platforms');
       const channels = Array.isArray(data.data) ? data.data : [];
@@ -832,10 +868,12 @@
       const showProducts = loggedIn && state.currentMenu === 'products';
       const showOrders = loggedIn && state.currentMenu === 'orders';
       const showOrderComplaint = showOrders && Boolean(state.orders && state.orders.complaint_detail && state.orders.complaint_detail.open);
+      const showRisk = loggedIn && state.currentMenu === 'risk';
       const showStats = loggedIn && state.currentMenu === 'stats';
       const showAuth = loggedIn && state.currentMenu === 'auth';
       els.listView.classList.toggle('hidden', !showProducts);
       els.orderView.classList.toggle('hidden', !showOrders || showOrderComplaint);
+      if (els.riskView) els.riskView.classList.toggle('hidden', !showRisk);
       if (els.orderComplaintView) els.orderComplaintView.classList.toggle('hidden', !showOrderComplaint);
       els.statsView.classList.toggle('hidden', !showStats);
       els.authView.classList.toggle('hidden', !showAuth);
@@ -867,6 +905,7 @@
         if (showProducts) renderList();
         if (showOrders && showOrderComplaint) renderOrderComplaintView();
         if (showOrders && !showOrderComplaint) renderOrdersView();
+        if (showRisk) renderRiskCenterView();
         if (showStats) renderStatsView();
         if (showAuth) renderAuthView();
         renderDrawer();
@@ -956,6 +995,15 @@
         },
         missing_purchase_accounts: [],
         configured_account_count: 0
+      };
+      state.riskCenter = {
+        status: 'all',
+        risk_type: '',
+        page: 1,
+        pageSize: 20,
+        total: 0,
+        list: [],
+        loading: false
       };
       state.authManage = { channels: [] };
       state.authEditor = {
@@ -1073,6 +1121,44 @@
       await loadOrders();
       renderOrdersView();
     });
+
+    if (els.riskPrevPage) {
+      els.riskPrevPage.addEventListener('click', async () => {
+        if (state.riskCenter.page <= 1) return;
+        state.riskCenter.page -= 1;
+        await loadRiskCenter();
+        renderRiskCenterView();
+      });
+    }
+
+    if (els.riskNextPage) {
+      els.riskNextPage.addEventListener('click', async () => {
+        const totalPages = Math.max(1, Math.ceil(Number(state.riskCenter.total || 0) / Number(state.riskCenter.pageSize || 20)));
+        if (state.riskCenter.page >= totalPages) return;
+        state.riskCenter.page += 1;
+        await loadRiskCenter();
+        renderRiskCenterView();
+      });
+    }
+
+    if (els.riskRefreshBtn) {
+      els.riskRefreshBtn.addEventListener('click', async () => {
+        if (state.riskCenter.loading) return;
+        state.riskCenter.loading = true;
+        renderRiskCenterView();
+        try {
+          state.riskCenter.page = 1;
+          await loadRiskCenter();
+          renderRiskCenterView();
+          showToast('风控数据已刷新');
+        } catch (e) {
+          showToast(e.message || '风控刷新失败');
+        } finally {
+          state.riskCenter.loading = false;
+          renderRiskCenterView();
+        }
+      });
+    }
 
     if (els.orderSyncNowBtn) {
       els.orderSyncNowBtn.addEventListener('click', async () => {
@@ -1234,6 +1320,18 @@
           })();
           return;
         }
+        if (key === 'risk') {
+          render();
+          (async () => {
+            try {
+              await loadRiskCenter();
+              render();
+            } catch (e) {
+              showToast(e.message || '风控中心加载失败');
+            }
+          })();
+          return;
+        }
         if (key === 'stats') {
           render();
           (async () => {
@@ -1335,6 +1433,7 @@
           await loadOrderOffThresholdRule();
           await loadList();
           await loadOrders();
+          await loadRiskCenter();
           await loadStatsBoard();
         } catch {
           clearAuthState();
