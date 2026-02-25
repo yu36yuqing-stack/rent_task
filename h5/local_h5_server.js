@@ -27,7 +27,6 @@ const {
     listRolling24hPaidOrderCountByAccounts,
     listRentingOrderWindowByAccounts
 } = require('../database/order_db');
-const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const {
     initUserSessionDb,
     createRefreshSession,
@@ -41,13 +40,26 @@ const {
 } = require('../database/user_rule_db');
 const { createAccessToken, createOpaqueRefreshToken } = require('../user/auth_token');
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
-const { queryAccountOnlineStatus, setForbiddenPlay, queryForbiddenPlay } = require('../uuzuhao/uuzuhao_api');
+const {
+    queryOnlineStatusCached,
+    queryForbiddenStatusCached,
+    setForbiddenPlayWithSnapshot
+} = require('../product/prod_probe_cache_service');
 const { syncUserAccountsByAuth } = require('../product/product');
+const {
+    initProdRiskEventDb,
+    listRiskEventsByUser
+} = require('../database/prod_risk_event_db');
+const {
+    initProdGuardTaskDb,
+    listGuardTasksByUser
+} = require('../database/prod_guard_task_db');
 const {
     buildPlatformStatusNorm,
     pickOverallStatusNorm,
     isRestrictedLikeStatus
 } = require('../product/prod_channel_status');
+const { startProdRiskTaskWorker } = require('../product/prod_status_guard');
 const { resolveDisplayNameByRow } = require('../product/display_name');
 const { listOrdersForUser, syncOrdersByUser } = require('../order/order');
 const { tryAcquireLock, releaseLock } = require('../database/lock_db');
@@ -72,6 +84,7 @@ const ORDER_SYNC_LOCK_LEASE_SEC = Math.max(60, Number(process.env.ORDER_SYNC_LOC
 const STATS_REFRESH_LOCK_WAIT_MS = Math.max(0, Number(process.env.STATS_REFRESH_LOCK_WAIT_MS || 120000));
 const STATS_REFRESH_LOCK_POLL_MS = Math.max(200, Number(process.env.STATS_REFRESH_LOCK_POLL_MS || 800));
 const COOLDOWN_BLACKLIST_REASON = '冷却期下架';
+const PROBE_CACHE_TTL_SEC = Math.max(1, Number(process.env.PROBE_CACHE_TTL_SEC || 60));
 const authBff = createAuthBff({ requireAuth, readJsonBody, json });
 const orderBff = createOrderBff({ requireAuth, json });
 function normalizeOrderOffThreshold(v, fallback = 3) {
@@ -155,6 +168,16 @@ function normalizePage(v, fallback) {
     const n = Number(v);
     if (!Number.isFinite(n)) return fallback;
     return Math.max(1, Math.floor(n));
+}
+
+function safeJsonParse(text, fallback = null) {
+    const raw = String(text || '').trim();
+    if (!raw) return fallback;
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return fallback;
+    }
 }
 
 function parseCooldownUntilSecFromDesc(descText) {
@@ -400,6 +423,17 @@ async function handleProducts(req, res, urlObj) {
         const modeReason = bl
             ? String(bl.reason || '').trim()
             : (restrictList.join('；') || String(overallStatusNorm.reason || '').trim());
+        const onlineSnapshot = x.online_probe_snapshot && typeof x.online_probe_snapshot === 'object'
+            ? x.online_probe_snapshot
+            : {};
+        const forbiddenSnapshot = x.forbidden_probe_snapshot && typeof x.forbidden_probe_snapshot === 'object'
+            ? x.forbidden_probe_snapshot
+            : {};
+        const onlineLabelRaw = String(onlineSnapshot.label || '').trim();
+        const onlineTag = onlineLabelRaw === '在线' || onlineLabelRaw === '离线'
+            ? onlineLabelRaw
+            : '';
+        const forbiddenLabelRaw = String(forbiddenSnapshot.label || '').trim();
         return {
             id: x.id,
             game_name: x.game_name,
@@ -415,6 +449,10 @@ async function handleProducts(req, res, urlObj) {
             renting_order_start_time: String(((rentingWindowMap[acc] || {}).start_time) || '').trim(),
             renting_order_end_time: String(((rentingWindowMap[acc] || {}).end_time) || '').trim(),
             renting_order_count: Number(((rentingWindowMap[acc] || {}).count) || 0),
+            online_tag: onlineTag,
+            online_query_time: String(onlineSnapshot.query_time || '').trim(),
+            forbidden_status: forbiddenLabelRaw,
+            forbidden_query_time: String(forbiddenSnapshot.query_time || '').trim(),
             blacklisted: Boolean(bl),
             blacklist_reason: bl ? bl.reason : '',
             blacklist_create_date: bl ? bl.create_date : '',
@@ -709,20 +747,6 @@ async function handleBlacklistRemove(req, res) {
     });
 }
 
-async function resolveUuzuhaoAuthByUser(userId) {
-    const rows = await listUserPlatformAuth(userId, { with_payload: true });
-    const hit = rows.find((r) => String(r.platform || '') === 'uuzuhao' && String(r.auth_status || '') === 'valid');
-    if (!hit) throw httpError(422, '缺少可用的 uuzuhao 授权');
-
-    const payload = hit && typeof hit.auth_payload === 'object' ? hit.auth_payload : {};
-    const appKey = String(payload.app_key || '').trim();
-    const appSecret = String(payload.app_secret || '').trim();
-    if (!appKey || !appSecret) {
-        throw httpError(422, 'uuzuhao 授权缺少 app_key/app_secret');
-    }
-    return payload;
-}
-
 async function handleProductOnlineQuery(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
@@ -730,10 +754,13 @@ async function handleProductOnlineQuery(req, res) {
     const gameName = String(body.game_name || 'WZRY').trim() || 'WZRY';
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
 
-    const auth = await resolveUuzuhaoAuthByUser(user.id);
     let result;
     try {
-        result = await queryAccountOnlineStatus(gameAccount, gameName, { auth });
+        result = await queryOnlineStatusCached(user.id, gameAccount, {
+            game_name: gameName,
+            ttl_sec: PROBE_CACHE_TTL_SEC,
+            desc: 'update by h5 online query'
+        });
     } catch (e) {
         const msg = String(e && e.message ? e.message : e || '').trim();
         if (/uuzuhao .*未配置|不支持的 game_name|accountId 不能为空/i.test(msg)) {
@@ -744,12 +771,16 @@ async function handleProductOnlineQuery(req, res) {
         }
         throw e;
     }
+    const queryTime = String(result.query_time || '').trim();
+    console.log(`[ProbeCache][online] user_id=${user.id} account=${gameAccount} hit=${Boolean(result.cached)} online=${Boolean(result.online)} query_time=${queryTime} ttl_sec=${PROBE_CACHE_TTL_SEC}`);
     return json(res, 200, {
         ok: true,
+        cached: Boolean(result.cached),
         data: {
             game_account: gameAccount,
             game_name: result.game_name,
-            online: Boolean(result.online)
+            online: Boolean(result.online),
+            query_time: queryTime
         }
     });
 }
@@ -767,10 +798,12 @@ async function handleProductForbiddenPlay(req, res) {
     }
 
     const enabled = (enabledRaw === true) || String(enabledRaw).trim().toLowerCase() === 'true';
-    const auth = await resolveUuzuhaoAuthByUser(user.id);
     let result;
     try {
-        result = await setForbiddenPlay(gameAccount, enabled, { auth, game_name: gameName, type: 2 });
+        result = await setForbiddenPlayWithSnapshot(user.id, gameAccount, enabled, {
+            game_name: gameName,
+            desc: 'update by h5 forbidden play'
+        });
     } catch (e) {
         const msg = String(e && e.message ? e.message : e || '').trim();
         if (/uuzuhao .*未配置|不支持的 game_name|accountId 不能为空|enabled 仅支持/i.test(msg)) {
@@ -782,12 +815,14 @@ async function handleProductForbiddenPlay(req, res) {
         throw e;
     }
 
+    const queryTime = String(result.query_time || '').trim();
     return json(res, 200, {
         ok: true,
         data: {
             game_account: gameAccount,
             game_name: result.game_name,
-            enabled: Boolean(result.enabled)
+            enabled: Boolean(result.enabled),
+            query_time: queryTime
         }
     });
 }
@@ -799,10 +834,13 @@ async function handleProductForbiddenQuery(req, res) {
     const gameName = String(body.game_name || 'WZRY').trim() || 'WZRY';
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
 
-    const auth = await resolveUuzuhaoAuthByUser(user.id);
     let result;
     try {
-        result = await queryForbiddenPlay(gameAccount, { auth, game_name: gameName });
+        result = await queryForbiddenStatusCached(user.id, gameAccount, {
+            game_name: gameName,
+            ttl_sec: PROBE_CACHE_TTL_SEC,
+            desc: 'update by h5 forbidden query'
+        });
     } catch (e) {
         const msg = String(e && e.message ? e.message : e || '').trim();
         if (/uuzuhao .*未配置|不支持的 game_name|accountId 不能为空|type 仅支持/i.test(msg)) {
@@ -813,14 +851,18 @@ async function handleProductForbiddenQuery(req, res) {
         }
         throw e;
     }
+    const queryTime = String(result.query_time || '').trim();
+    console.log(`[ProbeCache][forbidden] user_id=${user.id} account=${gameAccount} hit=${Boolean(result.cached)} enabled=${Boolean(result.enabled)} query_time=${queryTime} ttl_sec=${PROBE_CACHE_TTL_SEC}`);
 
     return json(res, 200, {
         ok: true,
+        cached: Boolean(result.cached),
         data: {
             game_account: gameAccount,
             game_name: result.game_name,
             enabled: Boolean(result.enabled),
-            type: Number(result.type || 1)
+            type: Number(result.type || 1),
+            query_time: queryTime
         }
     });
 }
@@ -855,6 +897,70 @@ async function handleProductPurchaseConfig(req, res) {
     });
 }
 
+async function handleRiskCenterList(req, res, urlObj) {
+    const user = await requireAuth(req);
+    const page = normalizePage(urlObj.searchParams.get('page'), 1);
+    const pageSize = Math.min(100, normalizePage(urlObj.searchParams.get('page_size'), 20));
+    const status = String(urlObj.searchParams.get('status') || '').trim();
+    const riskType = String(urlObj.searchParams.get('risk_type') || '').trim();
+
+    const [eventResult, taskResult, allRows] = await Promise.all([
+        listRiskEventsByUser(user.id, { page, page_size: pageSize, status, risk_type: riskType }),
+        listGuardTasksByUser(user.id, { page, page_size: pageSize, status, risk_type: riskType }),
+        listAllAccountsByUser(user.id)
+    ]);
+
+    const rowMap = new Map(
+        (allRows.list || [])
+            .map((x) => [String((x && x.game_account) || '').trim(), x])
+            .filter(([acc]) => Boolean(acc))
+    );
+    const taskMap = new Map();
+    for (const task of (taskResult.list || [])) {
+        const k = `${String(task.game_account || '').trim()}::${String(task.risk_type || '').trim()}`;
+        if (!k.startsWith('::') && !taskMap.has(k)) taskMap.set(k, task);
+    }
+    const list = (eventResult.list || []).map((ev) => {
+        const acc = String(ev.game_account || '').trim();
+        const riskTypeText = String(ev.risk_type || '').trim();
+        const k = `${acc}::${riskTypeText}`;
+        const task = taskMap.get(k) || null;
+        const row = rowMap.get(acc) || null;
+        const snapshot = safeJsonParse(ev.snapshot, {});
+        return {
+            id: ev.id,
+            risk_type: riskTypeText,
+            risk_level: ev.risk_level,
+            event_status: ev.status,
+            hit_at: ev.hit_at,
+            resolved_at: ev.resolved_at,
+            game_account: acc,
+            display_name: row ? resolveDisplayNameByRow(row, acc) : acc,
+            snapshot,
+            task: task ? {
+                id: Number(task.id || 0),
+                task_type: String(task.task_type || '').trim(),
+                status: String(task.status || '').trim(),
+                next_check_at: Number(task.next_check_at || 0),
+                last_online_tag: String(task.last_online_tag || '').trim(),
+                retry_count: Number(task.retry_count || 0),
+                max_retry: Number(task.max_retry || 0),
+                last_error: String(task.last_error || '').trim(),
+                modify_date: String(task.modify_date || '').trim()
+            } : null,
+            modify_date: ev.modify_date
+        };
+    });
+
+    return json(res, 200, {
+        ok: true,
+        page,
+        page_size: pageSize,
+        total: Number(eventResult.total || 0),
+        list
+    });
+}
+
 function tryServeStatic(urlObj, res) {
     const reqPath = urlObj.pathname === '/' ? '/index.html' : urlObj.pathname;
     const fullPath = path.resolve(PUBLIC_DIR, `.${reqPath}`);
@@ -881,8 +987,11 @@ async function bootstrap() {
     await initOrderDb();
     await initUserSessionDb();
     await initUserRuleDb();
+    await initProdRiskEventDb();
+    await initProdGuardTaskDb();
     await authBff.init();
     await orderBff.init();
+    startProdRiskTaskWorker({ logger: console });
 
     const server = http.createServer(async (req, res) => {
         const urlObj = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -903,6 +1012,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/play') return await handleProductForbiddenPlay(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/query') return await handleProductForbiddenQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/purchase-config') return await handleProductPurchaseConfig(req, res);
+            if (req.method === 'GET' && urlObj.pathname === '/api/risk-center/events') return await handleRiskCenterList(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/add') return await handleBlacklistAdd(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/remove') return await handleBlacklistRemove(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/auth/platforms') return await authBff.handleGetPlatformAuthList(req, res, urlObj);

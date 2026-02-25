@@ -112,34 +112,42 @@
       }
     }
 
-    async function queryOnline(item) {
+    async function queryStatus(item) {
       const account = String(item && item.game_account || '').trim();
       if (!account) return;
-      // 每次主动查询先清空历史结果，避免旧结果误导为最新状态。
-      if (state.onlineStatusMap && Object.prototype.hasOwnProperty.call(state.onlineStatusMap, account)) {
-        delete state.onlineStatusMap[account];
-      }
-      const hitBeforeQuery = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
-      if (hitBeforeQuery && Object.prototype.hasOwnProperty.call(hitBeforeQuery, 'online_tag')) {
-        hitBeforeQuery.online_tag = '';
-      }
       state.onlineLoadingMap[account] = true;
+      state.forbiddenLoadingMap[account] = true;
       renderOnlinePart(account);
+      renderForbiddenPart(account);
       try {
-        const res = await request('/api/products/online', {
-          method: 'POST',
-          body: JSON.stringify({ game_account: account, game_name: 'WZRY' })
-        });
-        const online = Boolean(res && res.data && res.data.online);
+        const [onlineRes, forbiddenRes] = await Promise.all([
+          request('/api/products/online', {
+            method: 'POST',
+            body: JSON.stringify({ game_account: account, game_name: 'WZRY' })
+          }),
+          request('/api/products/forbidden/query', {
+            method: 'POST',
+            body: JSON.stringify({ game_account: account, game_name: 'WZRY' })
+          })
+        ]);
+        const online = Boolean(onlineRes && onlineRes.data && onlineRes.data.online);
         const tag = online ? '在线' : '离线';
-        state.onlineStatusMap[account] = tag;
+        const forbiddenEnabled = Boolean(forbiddenRes && forbiddenRes.data && forbiddenRes.data.enabled);
         const hit = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
-        if (hit) hit.online_tag = tag;
+        state.onlineStatusMap[account] = tag;
+        if (hit) {
+          hit.online_tag = tag;
+          hit.online_query_time = String((onlineRes && onlineRes.data && onlineRes.data.query_time) || '').trim();
+          hit.forbidden_status = forbiddenEnabled ? '禁玩中' : '未禁玩';
+          hit.forbidden_query_time = String((forbiddenRes && forbiddenRes.data && forbiddenRes.data.query_time) || '').trim();
+        }
       } catch (e) {
-        alert(e.message || '在线查询失败');
+        alert(e.message || '状态查询失败');
       } finally {
         state.onlineLoadingMap[account] = false;
+        state.forbiddenLoadingMap[account] = false;
         renderOnlinePart(account);
+        renderForbiddenPart(account);
         renderMoreOpsSheet();
       }
     }
@@ -152,7 +160,20 @@
       const onlineText = mapText || rowText;
       if (!onlineText) return '';
       const onlineClass = onlineText === '在线' ? 'chip-online' : 'chip-offline';
-      return `<span class="chip ${onlineClass}">${onlineText}</span>`;
+      const queryTime = String((hit && hit.online_query_time) || '').trim();
+      const title = queryTime ? ` title="查询时间：${escapeAttr(queryTime)}"` : '';
+      return `<span class="chip ${onlineClass}"${title}>${onlineText}</span>`;
+    }
+
+    function buildForbiddenChipHtml(account) {
+      const acc = String(account || '').trim();
+      const hit = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === acc);
+      const txt = String((hit && hit.forbidden_status) || '').trim();
+      if (!txt) return '';
+      const queryTime = String((hit && hit.forbidden_query_time) || '').trim();
+      const title = queryTime ? ` title="查询时间：${escapeAttr(queryTime)}"` : '';
+      const cls = txt === '禁玩中' ? 'chip-black' : 'chip-offline';
+      return `<span class="chip ${cls}"${title}>${txt}</span>`;
     }
 
     function buildPurchaseBriefHtml(item) {
@@ -255,12 +276,16 @@
       if (chipSlot) {
         chipSlot.innerHTML = buildOnlineChipHtml(acc);
       }
+      const forbiddenSlot = card.querySelector('[data-slot="forbidden-chip"]');
+      if (forbiddenSlot) {
+        forbiddenSlot.innerHTML = buildForbiddenChipHtml(acc);
+      }
 
       const btn = card.querySelector('[data-op="online-query"]');
       if (btn) {
-        const querying = Boolean(state.onlineLoadingMap[acc]);
+        const querying = Boolean(state.onlineLoadingMap[acc] || state.forbiddenLoadingMap[acc]);
         btn.disabled = querying;
-        btn.textContent = '在线查询';
+        btn.textContent = querying ? '查询中...' : '状态查询';
       }
     }
 
@@ -284,21 +309,15 @@
       if (!opened) return;
       const name = String(state.forbiddenSheet.role_name || state.forbiddenSheet.account || '').trim();
       els.forbiddenSheetTitle.textContent = `处理禁玩 · ${name || '当前账号'}`;
-      const queryText = String(state.forbiddenSheet.query_text || '').trim() || '未查询';
-      const queryStatus = String(state.forbiddenSheet.query_status || '').trim();
-      els.forbiddenSheetQueryResult.className = `sheet-query-result ${queryStatus}`;
-      els.forbiddenSheetQueryResult.textContent = queryText;
       const resultText = String(state.forbiddenSheet.result_text || '').trim();
       const resultType = String(state.forbiddenSheet.result_type || '').trim();
       els.forbiddenSheetResult.className = `sheet-result ${resultType}`;
       els.forbiddenSheetResult.textContent = resultText;
       const loading = Boolean(state.forbiddenSheet.loading);
       const queryLoading = Boolean(state.forbiddenSheet.query_loading);
-      els.sheetQueryForbidden.disabled = loading || queryLoading;
       els.sheetEnableForbidden.disabled = loading || queryLoading;
       els.sheetDisableForbidden.disabled = loading || queryLoading;
       els.sheetCancelForbidden.disabled = loading || queryLoading;
-      els.sheetQueryForbidden.textContent = queryLoading ? '查询中...' : '查询禁玩';
     }
 
     function renderMoreOpsSheet() {
@@ -348,8 +367,10 @@
         result_type: '',
         loading: false,
         query_loading: false,
-        query_status: '',
-        query_text: ''
+        query_status: String(item && item.forbidden_status || '').trim() === '禁玩中' ? 'on'
+          : (String(item && item.forbidden_status || '').trim() === '未禁玩' ? 'off' : ''),
+        query_text: String(item && item.forbidden_status || '').trim()
+          || (String(item && item.forbidden_query_time || '').trim() ? `最近查询：${String(item.forbidden_query_time || '').trim()}` : '')
       };
       renderForbiddenSheet();
     }
@@ -528,10 +549,18 @@
           body: JSON.stringify({ game_account: account, game_name: 'WZRY', enabled: Boolean(enabled) })
         });
         const on = Boolean(out && out.data && out.data.enabled);
+        const queryTime = String((out && out.data && out.data.query_time) || '').trim();
         state.forbiddenSheet.result_text = on ? '禁玩已开启' : '禁玩已解除';
         state.forbiddenSheet.result_type = 'ok';
         state.forbiddenSheet.query_status = on ? 'on' : 'off';
-        state.forbiddenSheet.query_text = on ? '禁玩中' : '未禁玩';
+        state.forbiddenSheet.query_text = queryTime
+          ? `${on ? '禁玩中' : '未禁玩'} · ${queryTime.slice(5, 16)}`
+          : (on ? '禁玩中' : '未禁玩');
+        const hit = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
+        if (hit) {
+          hit.forbidden_status = on ? '禁玩中' : '未禁玩';
+          hit.forbidden_query_time = queryTime;
+        }
       } catch (e) {
         state.forbiddenSheet.result_text = String(e && e.message ? e.message : '禁玩操作失败');
         state.forbiddenSheet.result_type = 'err';
@@ -559,10 +588,18 @@
           body: JSON.stringify({ game_account: account, game_name: 'WZRY' })
         });
         const on = Boolean(out && out.data && out.data.enabled);
+        const queryTime = String((out && out.data && out.data.query_time) || '').trim();
         state.forbiddenSheet.query_status = on ? 'on' : 'off';
-        state.forbiddenSheet.query_text = on ? '禁玩中' : '未禁玩';
+        state.forbiddenSheet.query_text = queryTime
+          ? `${on ? '禁玩中' : '未禁玩'} · ${queryTime.slice(5, 16)}`
+          : (on ? '禁玩中' : '未禁玩');
         state.forbiddenSheet.result_text = '';
         state.forbiddenSheet.result_type = '';
+        const hit = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
+        if (hit) {
+          hit.forbidden_status = on ? '禁玩中' : '未禁玩';
+          hit.forbidden_query_time = queryTime;
+        }
       } catch (e) {
         state.forbiddenSheet.query_status = 'err';
         state.forbiddenSheet.query_text = '查询失败';
@@ -681,7 +718,7 @@
             return `<span class="plat ${cls}"${title}>${text}</span>`;
           }).join('');
           const account = String(item.game_account || '').trim();
-          const querying = Boolean(state.onlineLoadingMap[account]);
+          const querying = Boolean(state.onlineLoadingMap[account] || state.forbiddenLoadingMap[account]);
           const forbiddenLoading = Boolean(state.forbiddenLoadingMap[account]);
           const blacklistDisplayDate = String(item.blacklist_display_date || item.blacklist_create_date || '').trim();
           const blacklistTime = formatBlacklistTimeForCard(blacklistDisplayDate);
@@ -704,6 +741,7 @@
               <p class="title">${item.display_name || item.role_name || item.game_account}</p>
               <div style="display:flex;align-items:center;gap:6px;">
                 <span data-slot="online-chip">${buildOnlineChipHtml(account)}</span>
+                <span data-slot="forbidden-chip">${buildForbiddenChipHtml(account)}</span>
                 <span class="chip ${statusClass}">
                   ${statusText}
                 </span>
@@ -726,7 +764,7 @@
             </div>
             <div class="ops">
               <button class="btn btn-chip btn-chip-ok" data-op="online-query" ${querying ? 'disabled' : ''}>
-                在线查询
+                状态查询
               </button>
               <button class="btn btn-chip ${item.blacklisted ? 'btn-chip-danger' : 'btn-chip-ok'}" data-op="blacklist-toggle">
                 ${item.blacklisted ? '移出黑名单' : '加入黑名单'}
@@ -740,7 +778,7 @@
             const v = e.currentTarget.getAttribute('data-copy') || '';
             copyAccount(v);
           });
-          node.querySelector('[data-op=\"online-query\"]').addEventListener('click', () => queryOnline(item));
+          node.querySelector('[data-op=\"online-query\"]').addEventListener('click', () => queryStatus(item));
           node.querySelector('[data-op=\"blacklist-toggle\"]').addEventListener('click', () => toggleBlacklist(item));
           node.querySelector('[data-op=\"more-ops\"]').addEventListener('click', () => openMoreOpsSheet(item));
           state.cardNodeMap[account] = node;

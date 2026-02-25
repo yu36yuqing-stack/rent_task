@@ -1,17 +1,53 @@
-const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { openDatabase } = require('../database/sqlite_client');
 const { initOrderDb } = require('../database/order_db');
-const { queryAccountOnlineStatus } = require('../uuzuhao/uuzuhao_api');
+const { upsertUserBlacklistEntry } = require('../database/user_blacklist_db');
+const {
+    initProdRiskEventDb,
+    upsertOpenRiskEvent,
+    resolveOpenRiskEvent
+} = require('../database/prod_risk_event_db');
+const {
+    TASK_STATUS_PENDING,
+    TASK_STATUS_WATCHING,
+    TASK_STATUS_DONE,
+    TASK_STATUS_FAILED,
+    initProdGuardTaskDb,
+    upsertGuardTask,
+    listDueGuardTasks,
+    updateGuardTaskStatus
+} = require('../database/prod_guard_task_db');
+const { tryAcquireLock, releaseLock } = require('../database/lock_db');
+const {
+    resolveUuzuhaoAuthByUser,
+    queryOnlineStatusCached,
+    setForbiddenPlayWithSnapshot
+} = require('./prod_probe_cache_service');
 const { sendDingdingMessage } = require('../report/dingding/ding_notify');
+const { deleteBlacklistWithGuard, REASON_ONLINE } = require('../blacklist/blacklist_release_guard');
 
-const PLATFORM_YYZ = 'uuzuhao';
 const ONLINE_PROBE_WINDOW_SEC = 90;
 const ONLINE_PROBE_INTERVAL_SEC = Math.max(60, Number(process.env.ONLINE_PROBE_INTERVAL_SEC || 600));
 const ONLINE_PROBE_FORCE = ['1', 'true', 'yes', 'on'].includes(String(process.env.ONLINE_PROBE_FORCE || 'false').toLowerCase());
 const RECENT_ORDER_END_SUPPRESS_SEC = Math.max(60, Number(process.env.ONLINE_ALERT_RECENT_END_SUPPRESS_SEC || 600));
 
+const RISK_TYPE_ONLINE_NON_RENTING = 'online_non_renting';
+const TASK_TYPE_SHEEP_FIX = 'sheep_fix';
+const SHEEP_FIX_ENABLE = !['0', 'false', 'no', 'off'].includes(String(process.env.SHEEP_FIX_ENABLE || 'true').toLowerCase());
+const SHEEP_FIX_SCAN_INTERVAL_SEC = Math.max(60, Number(process.env.SHEEP_FIX_SCAN_INTERVAL_SEC || 120));
+const SHEEP_FIX_MAX_RETRY = Math.max(1, Number(process.env.SHEEP_FIX_MAX_RETRY || 5));
+const SHEEP_FIX_WORKER_LOCK_KEY = String(process.env.SHEEP_FIX_WORKER_LOCK_KEY || 'prod_guard_sheep_fix_worker');
+const SHEEP_FIX_WORKER_LOCK_LEASE_SEC = Math.max(60, Number(process.env.SHEEP_FIX_WORKER_LOCK_LEASE_SEC || 240));
+const SHEEP_FIX_TASK_BOOTSTRAP_DELAY_SEC = 5;
+
+let sheepFixWorkerTimer = null;
+let sheepFixWorkerRunning = false;
+
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function nowSec() {
+    return Math.floor(Date.now() / 1000);
 }
 
 function dbAll(db, sql, params = []) {
@@ -32,28 +68,6 @@ function shouldProbeOnlineNow(now = new Date()) {
     const sec = (now.getMinutes() * 60) + now.getSeconds();
     const offset = sec % ONLINE_PROBE_INTERVAL_SEC;
     return offset <= ONLINE_PROBE_WINDOW_SEC || offset >= (ONLINE_PROBE_INTERVAL_SEC - ONLINE_PROBE_WINDOW_SEC);
-}
-
-function isAuthUsable(row = {}) {
-    if (!row || typeof row !== 'object') return false;
-    if (String(row.auth_status || '') !== 'valid') return false;
-    const exp = String(row.expire_at || '').trim();
-    if (!exp) return true;
-    const t = Date.parse(exp);
-    if (Number.isNaN(t)) return true;
-    return t > Date.now();
-}
-
-async function resolveUuzuhaoAuthByUser(userId) {
-    const rows = await listUserPlatformAuth(userId, { with_payload: true });
-    const hit = rows.find((r) => String(r.platform || '') === PLATFORM_YYZ && isAuthUsable(r));
-    const auth = hit && hit.auth_payload && typeof hit.auth_payload === 'object'
-        ? hit.auth_payload
-        : null;
-    if (!auth) return null;
-    const appKey = String(auth.app_key || '').trim();
-    const appSecret = String(auth.app_secret || '').trim();
-    return appKey && appSecret ? auth : null;
 }
 
 function isRentingStatus(v) {
@@ -165,7 +179,12 @@ async function probeProdOnlineStatus(user, accounts = [], options = {}) {
 
     const list = Array.isArray(accounts) ? accounts : [];
     if (list.length === 0) return { ok: true, skipped: true, reason: 'empty_accounts' };
-    const auth = await resolveUuzuhaoAuthByUser(user && user.id);
+    let auth = null;
+    try {
+        auth = await resolveUuzuhaoAuthByUser(user && user.id);
+    } catch {
+        auth = null;
+    }
     if (!auth) return { ok: true, skipped: true, reason: 'uuzuhao_auth_missing' };
 
     const probeRows = buildProbeRows(list);
@@ -173,7 +192,11 @@ async function probeProdOnlineStatus(user, accounts = [], options = {}) {
 
     for (const row of probeRows) {
         try {
-            const r = await queryAccountOnlineStatus(row.account, 'WZRY', { auth });
+            const r = await queryOnlineStatusCached(user && user.id, row.account, {
+                game_name: 'WZRY',
+                auth,
+                desc: 'update by prod_status_guard probe'
+            });
             row.online_tag = r.online ? 'ON' : 'OFF';
         } catch (e) {
             row.online_tag = '';
@@ -198,11 +221,120 @@ async function probeProdOnlineStatus(user, accounts = [], options = {}) {
     };
 }
 
+async function applyInitialControlForAccount(userId, account, auth, logger) {
+    const uid = Number(userId || 0);
+    const acc = String(account || '').trim();
+    if (!uid || !acc) return { ok: false, error: 'invalid_input' };
+    try {
+        await upsertUserBlacklistEntry(uid, {
+            game_account: acc,
+            reason: REASON_ONLINE
+        }, {
+            source: 'prod_guard',
+            operator: 'risk_auto',
+            desc: JSON.stringify({ type: RISK_TYPE_ONLINE_NON_RENTING, step: 'blacklist_add' })
+        });
+    } catch (e) {
+        return { ok: false, error: `blacklist_add_failed:${e.message}` };
+    }
+    try {
+        await setForbiddenPlayWithSnapshot(uid, acc, true, {
+            auth,
+            game_name: 'WZRY',
+            desc: 'update by prod_status_guard init control'
+        });
+    } catch (e) {
+        return { ok: false, error: `forbidden_enable_failed:${e.message}` };
+    }
+    return { ok: true };
+}
+
+async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {}) {
+    const logger = options.logger && typeof options.logger.log === 'function' ? options.logger : console;
+    if (!SHEEP_FIX_ENABLE) return { ok: true, skipped: true, reason: 'sheep_fix_disabled', queued: 0 };
+    const uid = Number((user && user.id) || 0);
+    if (!uid) return { ok: false, skipped: true, reason: 'invalid_user', queued: 0 };
+    const list = Array.isArray(badAccounts) ? badAccounts : [];
+    if (list.length === 0) return { ok: true, skipped: true, reason: 'empty_accounts', queued: 0 };
+    let auth = null;
+    try {
+        auth = await resolveUuzuhaoAuthByUser(uid);
+    } catch {
+        auth = null;
+    }
+    if (!auth) return { ok: true, skipped: true, reason: 'uuzuhao_auth_missing', queued: 0 };
+
+    await initProdRiskEventDb();
+    await initProdGuardTaskDb();
+    let queued = 0;
+    let activated = 0;
+    const errors = [];
+    for (const one of list) {
+        const acc = String((one && one.account) || '').trim();
+        if (!acc) continue;
+        try {
+            const event = await upsertOpenRiskEvent(uid, acc, RISK_TYPE_ONLINE_NON_RENTING, {
+                risk_level: 'high',
+                snapshot: {
+                    source: 'prod_status_guard',
+                    online_tag: String((one && one.online_tag) || '').trim().toUpperCase(),
+                    channel_status: {
+                        youpin: String((one && one.youpin) || '').trim(),
+                        uhaozu: String((one && one.uhaozu) || '').trim(),
+                        zuhaowan: String((one && one.zuhaowan) || '').trim()
+                    },
+                    remark: String((one && one.remark) || '').trim(),
+                    hit_at: toDateTimeText()
+                },
+                desc: 'auto open by online_non_renting'
+            });
+            const task = await upsertGuardTask({
+                user_id: uid,
+                game_account: acc,
+                risk_type: RISK_TYPE_ONLINE_NON_RENTING,
+                task_type: TASK_TYPE_SHEEP_FIX,
+                status: TASK_STATUS_PENDING,
+                event_id: Number(event.id || 0),
+                next_check_at: nowSec() + SHEEP_FIX_TASK_BOOTSTRAP_DELAY_SEC,
+                max_retry: SHEEP_FIX_MAX_RETRY
+            }, {
+                desc: 'auto enqueue by prod_status_guard'
+            });
+            queued += 1;
+            const initRet = await applyInitialControlForAccount(uid, acc, auth, logger);
+            if (initRet.ok) {
+                await updateGuardTaskStatus(task.id, {
+                    status: TASK_STATUS_WATCHING,
+                    blacklist_applied: 1,
+                    forbidden_applied: 1,
+                    last_online_tag: 'ON',
+                    next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC,
+                    last_error: ''
+                });
+                activated += 1;
+            } else {
+                await updateGuardTaskStatus(task.id, {
+                    status: TASK_STATUS_PENDING,
+                    retry_incr: 1,
+                    last_error: String(initRet.error || 'init_control_failed'),
+                    next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC
+                });
+                errors.push(`${acc}:${String(initRet.error || 'init_control_failed')}`);
+            }
+        } catch (e) {
+            errors.push(`${acc}:${e.message}`);
+        }
+    }
+    if (errors.length > 0) {
+        logger.warn(`[ProdStatusGuard] risk_enqueue_partial_failed user_id=${uid} errs=${errors.join(' | ')}`);
+    }
+    return { ok: errors.length === 0, skipped: false, queued, activated, errors };
+}
+
 async function alertOnlineConflictIfNeeded(user, probeRows = [], options = {}) {
     const dingCfg = user && user.notify_config && user.notify_config.dingding && typeof user.notify_config.dingding === 'object'
         ? user.notify_config.dingding
         : {};
-    if (!dingCfg.webhook) return { ok: true, skipped: true, reason: 'dingding_not_configured' };
     const rows = Array.isArray(probeRows) ? probeRows : [];
     if (rows.length === 0) return { ok: true, skipped: true, reason: 'empty_probe_rows' };
 
@@ -223,13 +355,213 @@ async function alertOnlineConflictIfNeeded(user, probeRows = [], options = {}) {
         };
     }
 
-    const text = buildOnlineButNotRentingAlertText(user, badAccounts);
-    await sendDingdingMessage(text, {
-        webhook: dingCfg.webhook,
-        secret: dingCfg.secret || '',
-        at_all: true
+    const enqueueRet = await enqueueOnlineNonRentingRisk(user, badAccounts, options);
+
+    if (dingCfg.webhook) {
+        const text = buildOnlineButNotRentingAlertText(user, badAccounts);
+        await sendDingdingMessage(text, {
+            webhook: dingCfg.webhook,
+            secret: dingCfg.secret || '',
+            at_all: true
+        });
+    }
+    return {
+        ok: true,
+        skipped: false,
+        alerted: badAccounts.length,
+        risk_enqueued: enqueueRet
+    };
+}
+
+function shouldMarkTaskFailed(task = {}, nextRetry = 1) {
+    const retry = Number(task.retry_count || 0) + Math.max(0, Number(nextRetry || 0));
+    const maxRetry = Math.max(1, Number(task.max_retry || SHEEP_FIX_MAX_RETRY));
+    return retry >= maxRetry;
+}
+
+async function processOneSheepFixTask(task, authCache, logger) {
+    const uid = Number(task.user_id || 0);
+    const acc = String(task.game_account || '').trim();
+    if (!uid || !acc) return;
+
+    let auth = authCache.get(uid);
+    if (auth === undefined) {
+        auth = await resolveUuzuhaoAuthByUser(uid);
+        authCache.set(uid, auth || null);
+    }
+    if (!auth) {
+        const failed = shouldMarkTaskFailed(task, 1);
+        await updateGuardTaskStatus(task.id, {
+            status: failed ? TASK_STATUS_FAILED : TASK_STATUS_PENDING,
+            retry_incr: 1,
+            last_error: 'uuzuhao_auth_missing',
+            next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC
+        });
+        return;
+    }
+
+    if (String(task.status || '') === TASK_STATUS_PENDING) {
+        const initRet = await applyInitialControlForAccount(uid, acc, auth, logger);
+        if (initRet.ok) {
+            await updateGuardTaskStatus(task.id, {
+                status: TASK_STATUS_WATCHING,
+                blacklist_applied: 1,
+                forbidden_applied: 1,
+                last_online_tag: 'ON',
+                next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC,
+                last_error: ''
+            });
+            return;
+        }
+        const failed = shouldMarkTaskFailed(task, 1);
+        await updateGuardTaskStatus(task.id, {
+            status: failed ? TASK_STATUS_FAILED : TASK_STATUS_PENDING,
+            retry_incr: 1,
+            last_error: String(initRet.error || 'init_control_failed'),
+            next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC
+        });
+        return;
+    }
+
+    let online = false;
+    try {
+        const probe = await queryOnlineStatusCached(uid, acc, {
+            game_name: 'WZRY',
+            auth,
+            desc: 'update by prod_status_guard worker probe'
+        });
+        online = Boolean(probe && probe.online);
+    } catch (e) {
+        const failed = shouldMarkTaskFailed(task, 1);
+        await updateGuardTaskStatus(task.id, {
+            status: failed ? TASK_STATUS_FAILED : TASK_STATUS_WATCHING,
+            retry_incr: 1,
+            last_error: `query_online_failed:${e.message}`,
+            next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC
+        });
+        return;
+    }
+
+    if (online) {
+        await updateGuardTaskStatus(task.id, {
+            status: TASK_STATUS_WATCHING,
+            last_online_tag: 'ON',
+            next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC,
+            last_error: ''
+        });
+        return;
+    }
+
+    try {
+        await setForbiddenPlayWithSnapshot(uid, acc, false, {
+            auth,
+            game_name: 'WZRY',
+            desc: 'update by prod_status_guard worker release'
+        });
+    } catch (e) {
+        const failed = shouldMarkTaskFailed(task, 1);
+        await updateGuardTaskStatus(task.id, {
+            status: failed ? TASK_STATUS_FAILED : TASK_STATUS_WATCHING,
+            retry_incr: 1,
+            last_error: `forbidden_disable_failed:${e.message}`,
+            next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC
+        });
+        return;
+    }
+
+    const delRet = await deleteBlacklistWithGuard(uid, acc, {
+        source: 'prod_guard',
+        operator: 'risk_auto',
+        desc: 'auto release by sheep_fix offline',
+        reason_expected: REASON_ONLINE
     });
-    return { ok: true, skipped: false, alerted: badAccounts.length };
+    if (!delRet || !delRet.removed) {
+        await updateGuardTaskStatus(task.id, {
+            status: TASK_STATUS_WATCHING,
+            last_online_tag: 'OFF',
+            last_error: 'blacklist_remove_blocked',
+            next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC
+        });
+        return;
+    }
+
+    await updateGuardTaskStatus(task.id, {
+        status: TASK_STATUS_DONE,
+        last_online_tag: 'OFF',
+        forbidden_applied: 0,
+        blacklist_applied: 0,
+        last_error: '',
+        finished_at: toDateTimeText()
+    });
+    await resolveOpenRiskEvent(uid, acc, RISK_TYPE_ONLINE_NON_RENTING, {
+        status: 'resolved',
+        desc: 'auto resolved by sheep_fix worker'
+    });
+}
+
+async function runSheepFixWorkerOnce(options = {}) {
+    if (!SHEEP_FIX_ENABLE) return { ok: true, skipped: true, reason: 'sheep_fix_disabled' };
+    const logger = options.logger && typeof options.logger.log === 'function' ? options.logger : console;
+    await initProdRiskEventDb();
+    await initProdGuardTaskDb();
+
+    const lock = await tryAcquireLock(SHEEP_FIX_WORKER_LOCK_KEY, SHEEP_FIX_WORKER_LOCK_LEASE_SEC, `pid=${process.pid}`);
+    if (!lock || !lock.acquired) {
+        return { ok: true, skipped: true, reason: 'lock_not_acquired', lease_until: Number((lock && lock.lease_until) || 0) };
+    }
+    try {
+        const tasks = await listDueGuardTasks({ limit: Number(options.limit || 80), due_sec: nowSec() });
+        const authCache = new Map();
+        let done = 0;
+        for (const task of tasks) {
+            try {
+                await processOneSheepFixTask(task, authCache, logger);
+                done += 1;
+            } catch (e) {
+                logger.error(`[ProdStatusGuard] worker task_failed id=${task.id} err=${e.message}`);
+            }
+        }
+        return { ok: true, skipped: false, scanned: tasks.length, processed: done };
+    } finally {
+        await releaseLock(SHEEP_FIX_WORKER_LOCK_KEY, `release by pid=${process.pid}`);
+    }
+}
+
+function startProdRiskTaskWorker(options = {}) {
+    const logger = options.logger && typeof options.logger.log === 'function' ? options.logger : console;
+    if (!SHEEP_FIX_ENABLE) {
+        logger.log('[ProdStatusGuard] sheep fix worker disabled by config');
+        return { started: false, reason: 'disabled' };
+    }
+    if (sheepFixWorkerTimer) {
+        return { started: true, reason: 'already_started', interval_sec: SHEEP_FIX_SCAN_INTERVAL_SEC };
+    }
+    const run = async () => {
+        if (sheepFixWorkerRunning) return;
+        sheepFixWorkerRunning = true;
+        try {
+            const ret = await runSheepFixWorkerOnce({ logger });
+            if (!ret.skipped && Number(ret.processed || 0) > 0) {
+                logger.log(`[ProdStatusGuard] sheep worker processed=${ret.processed} scanned=${ret.scanned}`);
+            }
+        } catch (e) {
+            logger.error(`[ProdStatusGuard] sheep worker error=${e.message}`);
+        } finally {
+            sheepFixWorkerRunning = false;
+        }
+    };
+    sheepFixWorkerTimer = setInterval(run, SHEEP_FIX_SCAN_INTERVAL_SEC * 1000);
+    void run();
+    logger.log(`[ProdStatusGuard] sheep worker started interval_sec=${SHEEP_FIX_SCAN_INTERVAL_SEC}`);
+    return { started: true, reason: 'started', interval_sec: SHEEP_FIX_SCAN_INTERVAL_SEC };
+}
+
+function stopProdRiskTaskWorker() {
+    if (sheepFixWorkerTimer) {
+        clearInterval(sheepFixWorkerTimer);
+        sheepFixWorkerTimer = null;
+    }
+    sheepFixWorkerRunning = false;
 }
 
 async function runProdStatusGuard(user, accounts = [], options = {}) {
@@ -249,7 +581,7 @@ function triggerProdStatusGuard(user, accounts = [], options = {}) {
         .then(() => runProdStatusGuard(user, rows, options))
         .then((ret) => {
             if (ret && ret.skipped) return;
-            logger.warn(`[ProdStatusGuard] user_id=${userId} alerted=${Number((ret && ret.alerted) || 0)}`);
+            logger.warn(`[ProdStatusGuard] user_id=${userId} alerted=${Number((ret && ret.alerted) || 0)} queued=${Number((((ret || {}).risk_enqueued || {}).queued) || 0)}`);
         })
         .catch((e) => {
             logger.error(`[ProdStatusGuard] user_id=${userId} error=${e && e.message ? e.message : e}`);
@@ -257,9 +589,15 @@ function triggerProdStatusGuard(user, accounts = [], options = {}) {
 }
 
 module.exports = {
+    RISK_TYPE_ONLINE_NON_RENTING,
+    TASK_TYPE_SHEEP_FIX,
+    SHEEP_FIX_SCAN_INTERVAL_SEC,
     shouldProbeOnlineNow,
     probeProdOnlineStatus,
     alertOnlineConflictIfNeeded,
     runProdStatusGuard,
-    triggerProdStatusGuard
+    triggerProdStatusGuard,
+    runSheepFixWorkerOnce,
+    startProdRiskTaskWorker,
+    stopProdRiskTaskWorker
 };

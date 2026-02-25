@@ -1097,10 +1097,18 @@
     els.reasonOverlay.addEventListener('click', (e) => {
       if (e.target === els.reasonOverlay) hideReason();
     });
-    els.sheetQueryForbidden.addEventListener('click', () => queryForbidden());
-    els.sheetEnableForbidden.addEventListener('click', () => submitForbidden(true));
-    els.sheetDisableForbidden.addEventListener('click', () => submitForbidden(false));
-    els.sheetCancelForbidden.addEventListener('click', () => closeForbiddenSheet());
+    if (els.sheetQueryForbidden) {
+      els.sheetQueryForbidden.addEventListener('click', () => queryForbidden());
+    }
+    if (els.sheetEnableForbidden) {
+      els.sheetEnableForbidden.addEventListener('click', () => submitForbidden(true));
+    }
+    if (els.sheetDisableForbidden) {
+      els.sheetDisableForbidden.addEventListener('click', () => submitForbidden(false));
+    }
+    if (els.sheetCancelForbidden) {
+      els.sheetCancelForbidden.addEventListener('click', () => closeForbiddenSheet());
+    }
     els.forbiddenSheet.addEventListener('click', (e) => {
       if (e.target === els.forbiddenSheet) closeForbiddenSheet();
     });
