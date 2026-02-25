@@ -528,17 +528,23 @@ async function processOneSheepFixTask(task, authCache, logger) {
         desc: 'auto release by sheep_fix offline',
         reason_expected: REASON_ONLINE
     });
-    if (!delRet || !delRet.removed) {
+    if (!delRet || delRet.blocked || !delRet.done) {
+        const errCode = delRet && delRet.blocked
+            ? `blacklist_remove_blocked:${String(delRet.blocked_reason || '')}`
+            : `blacklist_remove_pending:${String((delRet && delRet.remove_blocked_reason) || '') || 'unknown'}`;
         await updateGuardTaskStatus(task.id, {
             status: TASK_STATUS_WATCHING,
             last_online_tag: 'OFF',
             probe_loop_incr: 1,
-            last_error: 'blacklist_remove_blocked',
+            last_error: errCode,
             next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC
         });
         return;
     }
 
+    const doneDesc = delRet && delRet.entry_absent
+        ? 'auto resolved by sheep_fix worker (blacklist already absent)'
+        : 'auto resolved by sheep_fix worker';
     await updateGuardTaskStatus(task.id, {
         status: TASK_STATUS_DONE,
         last_online_tag: 'OFF',
@@ -547,11 +553,12 @@ async function processOneSheepFixTask(task, authCache, logger) {
         forbidden_off_at: toDateTimeText(),
         probe_loop_incr: 1,
         last_error: '',
-        finished_at: toDateTimeText()
+        finished_at: toDateTimeText(),
+        desc: doneDesc
     });
     await resolveOpenRiskEvent(uid, acc, RISK_TYPE_ONLINE_NON_RENTING, {
         status: 'resolved',
-        desc: 'auto resolved by sheep_fix worker'
+        desc: doneDesc
     });
 }
 

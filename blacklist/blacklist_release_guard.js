@@ -1,6 +1,7 @@
 const {
     upsertUserBlacklistEntry,
-    hardDeleteUserBlacklistEntry
+    hardDeleteUserBlacklistEntry,
+    listUserBlacklistByUserWithMeta
 } = require('../database/user_blacklist_db');
 const {
     queryOnlineStatusCached,
@@ -79,8 +80,19 @@ async function deleteBlacklistWithGuard(userId, gameAccount, options = {}) {
         desc,
         reason_expected: options.reason_expected
     });
+    let entryAbsent = false;
+    let removeBlockedReason = '';
+    if (!removed) {
+        const allEntries = await listUserBlacklistByUserWithMeta(uid);
+        const exists = (Array.isArray(allEntries) ? allEntries : []).some((x) => String((x && x.game_account) || '').trim() === acc);
+        entryAbsent = !exists;
+        removeBlockedReason = entryAbsent ? '' : 'entry_exists_but_not_removed';
+    }
     return {
         removed: Boolean(removed),
+        entry_absent: Boolean(entryAbsent),
+        done: Boolean(removed) || Boolean(entryAbsent),
+        remove_blocked_reason: removeBlockedReason,
         blocked: false,
         blocked_reason: '',
         online,
