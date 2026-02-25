@@ -1359,6 +1359,26 @@
       margin-bottom: 12px;
     }
 
+    .product-card {
+      margin-top: 10px;
+      margin-bottom: 0;
+      padding: 12px;
+      box-shadow: 0 4px 12px rgba(24, 40, 63, 0.06);
+    }
+
+    .product-card-top {
+      margin-bottom: 0;
+    }
+
+    .product-card-role {
+      margin: 0;
+      max-width: 72%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 650;
+    }
+
     .order-card-top {
       display: flex;
       align-items: center;

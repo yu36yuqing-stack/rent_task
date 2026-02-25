@@ -713,7 +713,7 @@
       } else {
         state.list.forEach((item, idx) => {
           const node = document.createElement('div');
-          node.className = 'list-item';
+          node.className = 'order-card product-card';
           const plat = platformBadges(item).map((x) => {
             const text = String((x && x.text) || '').trim();
             const code = String((x && x.code) || '').trim();
@@ -744,8 +744,8 @@
           const statusClass = statusText === '状态正常' ? '' : 'chip-black';
           node.style.animationDelay = `${Math.min(idx * 35, 220)}ms`;
           node.innerHTML = `
-            <div class="row">
-              <p class="title">${item.display_name || item.role_name || item.game_account}</p>
+            <div class="order-card-top product-card-top">
+              <p class="order-card-role product-card-role">${item.display_name || item.role_name || item.game_account}</p>
               <div class="card-top-chips">
                 <span data-slot="online-chip">${buildOnlineChipHtml(account)}</span>
                 <span data-slot="forbidden-chip">${buildForbiddenChipHtml(account)}</span>

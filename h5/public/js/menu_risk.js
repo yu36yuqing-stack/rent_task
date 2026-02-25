@@ -105,7 +105,7 @@
               </div>
               <div class="order-card-line">账号：${escapeHtml(account || '-')} · 类型：${escapeHtml(riskTypeLabel(item.risk_type))}</div>
               <div class="order-card-line">发现事件：${escapeHtml(hitAt || '-')}</div>
-              <div class="order-card-line">最近订单结束：${escapeHtml(latestOrderEndTime || '-')} ${latestOrderNo ? `（No.${escapeHtml(latestOrderNo)}）` : ''}</div>
+              <div class="order-card-line">最近订单结束：${escapeHtml(latestOrderEndTime || '-')}</div>
               <div class="order-card-line">开始禁玩：${escapeHtml(forbiddenOnAt || '-')}</div>
               <div class="order-card-line">解除禁玩：${escapeHtml(forbiddenOffAt || '-')}</div>
               <div class="risk-card-bottom">
