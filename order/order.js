@@ -218,10 +218,12 @@ async function listOrdersForUser(userId, options = {}) {
         'user_id = ?',
         'is_deleted = 0',
         "COALESCE(game_name, '') = ?",
-        'end_time >= ?',
-        'end_time < ?'
+        "TRIM(COALESCE(start_time, '')) <> ''",
+        "TRIM(COALESCE(end_time, '')) <> ''",
+        'start_time < ?',
+        'end_time >= ?'
     ];
-    const params = [uid, cfg.gameName, rangeStart, rangeEnd];
+    const params = [uid, cfg.gameName, rangeEnd, rangeStart];
 
     if (cfg.statusFilter === 'progress') {
         where.push("COALESCE(order_status, '') IN ('租赁中', '出租中')");
@@ -252,18 +254,22 @@ async function listOrdersForUser(userId, options = {}) {
             WHERE user_id = ?
               AND is_deleted = 0
               AND COALESCE(game_name, '') = ?
+              AND TRIM(COALESCE(start_time, '')) <> ''
+              AND TRIM(COALESCE(end_time, '')) <> ''
+              AND start_time < ?
               AND end_time >= ?
-              AND end_time < ?
-        `, [uid, cfg.gameName, rangeStart, rangeEnd]);
+        `, [uid, cfg.gameName, rangeEnd, rangeStart]);
         const todayRow = await dbGet(db, `
             SELECT COUNT(*) AS today_total
             FROM "order"
             WHERE user_id = ?
               AND is_deleted = 0
               AND COALESCE(game_name, '') = ?
+              AND TRIM(COALESCE(start_time, '')) <> ''
+              AND TRIM(COALESCE(end_time, '')) <> ''
+              AND start_time < ?
               AND end_time >= ?
-              AND end_time < ?
-        `, [uid, cfg.gameName, todayStart, todayEnd]);
+        `, [uid, cfg.gameName, todayEnd, todayStart]);
         const offset = (cfg.page - 1) * cfg.pageSize;
         const listRaw = await dbAll(db, `
             SELECT
