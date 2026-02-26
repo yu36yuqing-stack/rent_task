@@ -4,6 +4,52 @@
       return `${s} ~ ${e}`;
     }
 
+    function normalizeRentWayText(rawWay) {
+      const t = String(rawWay || '').trim();
+      if (!t) return '时租';
+      if (t.includes('包天') || t.includes('天租') || t.includes('日租')) return '包天';
+      if (t.includes('包夜') || t.includes('夜租')) return '包夜';
+      return '时租';
+    }
+
+    function toPositiveNumber(v) {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+
+    function formatOrderRentPackage(item) {
+      const channel = String((item && item.channel) || '').trim().toLowerCase();
+      const way = normalizeRentWayText(item && item.ren_way);
+      const rentHour = toPositiveNumber(item && item.rent_hour);
+      const start = parseDateTimeText(item && item.start_time);
+      const end = parseDateTimeText(item && item.end_time);
+      const durationHour = (start && end)
+        ? Math.max(0, Math.round((end.getTime() - start.getTime()) / 3600000))
+        : 0;
+      // 兜底：部分历史单 ren_way 可能不准，优先用订单起止时长识别套餐。
+      if (durationHour >= 20 && durationHour <= 28) {
+        return `${Math.max(1, Math.round(durationHour / 24))}天`;
+      }
+      if (durationHour >= 8 && durationHour <= 12 && way === '包夜') {
+        return `${Math.max(1, Math.round(durationHour / 10))}晚`;
+      }
+      if (way === '包天') {
+        if (channel === 'zuhaowang') {
+          // 租号王包天常见返回 1/2/3（按天），不是按小时。
+          const days = rentHour || Math.round(durationHour / 24) || 1;
+          return `${days}天`;
+        }
+        const days = Math.max(1, Math.round((rentHour || durationHour) / 24));
+        return `${days}天`;
+      }
+      if (way === '包夜') {
+        // 统一对外展示“晚”；uhaozu 常见 10 小时/晚。
+        const nights = Math.max(1, Math.round((rentHour || durationHour) / 10));
+        return `${nights}晚`;
+      }
+      return `${Math.max(1, Math.round(rentHour || durationHour || 1))}小时`;
+    }
+
     function parseDateTimeText(v) {
       const s = String(v || '').trim();
       if (!s) return null;
@@ -390,7 +436,7 @@
             </div>
             <div class="order-card-line">${formatOrderTimeRange(item)}</div>
             <div class="order-card-line">渠道：${item.channel || '-'} · 账号：${item.game_account || '-'}</div>
-            <div class="order-card-line">时长：${Number(item.rent_hour || 0)}小时 · 订单金额：¥${Number(item.order_amount || 0).toFixed(2)}</div>
+            <div class="order-card-line">时长：${formatOrderRentPackage(item)} · 订单金额：¥${Number(item.order_amount || 0).toFixed(2)}</div>
             <div class="order-bottom">
               <div class="order-bottom-left">
                 ${buildOrderCountdownHtml(item)}

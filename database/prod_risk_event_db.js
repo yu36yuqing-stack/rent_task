@@ -112,11 +112,10 @@ async function upsertOpenRiskEvent(userId, gameAccount, riskType, options = {}) 
             UPDATE prod_risk_event
             SET risk_level = ?,
                 snapshot = ?,
-                hit_at = ?,
                 modify_date = ?,
                 desc = ?
             WHERE id = ?
-        `, [level, snapshot, now, now, desc, Number(old.id || 0)]);
+        `, [level, snapshot, now, desc, Number(old.id || 0)]);
         return { id: Number(old.id || 0), inserted: false };
     } finally {
         db.close();

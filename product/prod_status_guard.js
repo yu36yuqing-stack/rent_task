@@ -351,15 +351,16 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
             queued += 1;
             const initRet = await applyInitialControlForAccount(uid, acc, auth, logger);
             if (initRet.ok) {
-                await updateGuardTaskStatus(task.id, {
+                const patch = {
                     status: TASK_STATUS_WATCHING,
                     blacklist_applied: 1,
                     forbidden_applied: 1,
                     last_online_tag: 'ON',
-                    forbidden_on_at: toDateTimeText(),
                     next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC,
                     last_error: ''
-                });
+                };
+                if (task.inserted) patch.forbidden_on_at = toDateTimeText();
+                await updateGuardTaskStatus(task.id, patch);
                 activated += 1;
             } else {
                 await updateGuardTaskStatus(task.id, {
@@ -452,15 +453,16 @@ async function processOneSheepFixTask(task, authCache, logger) {
     if (String(task.status || '') === TASK_STATUS_PENDING) {
         const initRet = await applyInitialControlForAccount(uid, acc, auth, logger);
         if (initRet.ok) {
-            await updateGuardTaskStatus(task.id, {
+            const patch = {
                 status: TASK_STATUS_WATCHING,
                 blacklist_applied: 1,
                 forbidden_applied: 1,
                 last_online_tag: 'ON',
-                forbidden_on_at: toDateTimeText(),
                 next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC,
                 last_error: ''
-            });
+            };
+            if (!String(task.forbidden_on_at || '').trim()) patch.forbidden_on_at = toDateTimeText();
+            await updateGuardTaskStatus(task.id, patch);
             return;
         }
         const failed = shouldMarkTaskFailed(task, 1);
