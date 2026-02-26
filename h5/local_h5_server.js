@@ -385,8 +385,15 @@ async function handleProducts(req, res, urlObj) {
         const platform = String((row && row.platform) || detail.platform || '').trim();
         const hit = accountRowMap.get(acc);
         const channelStatus = hit && typeof hit.channel_status === 'object' ? hit.channel_status : {};
+        const channelPrdInfo = hit && typeof hit.channel_prd_info === 'object' ? hit.channel_prd_info : {};
         const statusText = String((channelStatus && channelStatus[platform]) || '').trim();
-        const shouldClear = Boolean(platform) && ['上架', '租赁中', '出租中'].includes(statusText);
+        const uuzuhaoReason = String((((channelPrdInfo || {}).uuzuhao || {}).reason) || '').trim();
+        const isUuzuhaoSellerOff = platform === 'uuzuhao'
+            && statusText === '下架'
+            && (uuzuhaoReason === '商家下架' || uuzuhaoReason.includes('卖家下架'));
+        const shouldClear = Boolean(platform) && (
+            ['上架', '租赁中', '出租中'].includes(statusText) || isUuzuhaoSellerOff
+        );
         if (shouldClear) {
             await removePlatformRestrict(user.id, acc, platform, `auto clear by products status=${statusText}`).catch(() => {});
             continue;
