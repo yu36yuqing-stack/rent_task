@@ -4,7 +4,7 @@ const { upsertUserBlacklistEntry } = require('../database/user_blacklist_db');
 const {
     initProdRiskEventDb,
     upsertOpenRiskEvent,
-    resolveOpenRiskEvent
+    resolveRiskEventById
 } = require('../database/prod_risk_event_db');
 const {
     TASK_STATUS_PENDING,
@@ -14,6 +14,7 @@ const {
     initProdGuardTaskDb,
     upsertGuardTask,
     listDueGuardTasks,
+    getGuardTaskByEventId,
     updateGuardTaskStatus
 } = require('../database/prod_guard_task_db');
 const { tryAcquireLock, releaseLock } = require('../database/lock_db');
@@ -315,6 +316,7 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
     const latestOrderMap = await listLatestEndedOrderSnapshotByUser(uid, list.map((x) => x && x.account));
     let queued = 0;
     let activated = 0;
+    let reused = 0;
     const errors = [];
     for (const one of list) {
         const acc = String((one && one.account) || '').trim();
@@ -336,6 +338,15 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
                 },
                 desc: 'auto open by online_non_renting'
             });
+            // 同账号同风险在 open 周期内只允许一条事件 + 一条活动任务。
+            // 若 open 事件已存在且任务仍在 pending/watching，本轮仅更新事件快照，不重复入队。
+            if (!event.inserted) {
+                const existTask = await getGuardTaskByEventId(event.id);
+                if (existTask && (existTask.status === TASK_STATUS_PENDING || existTask.status === TASK_STATUS_WATCHING)) {
+                    reused += 1;
+                    continue;
+                }
+            }
             const task = await upsertGuardTask({
                 user_id: uid,
                 game_account: acc,
@@ -357,9 +368,9 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
                     forbidden_applied: 1,
                     last_online_tag: 'ON',
                     next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC,
+                    forbidden_on_at: toDateTimeText(),
                     last_error: ''
                 };
-                if (task.inserted) patch.forbidden_on_at = toDateTimeText();
                 await updateGuardTaskStatus(task.id, patch);
                 activated += 1;
             } else {
@@ -378,7 +389,7 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
     if (errors.length > 0) {
         logger.warn(`[ProdStatusGuard] risk_enqueue_partial_failed user_id=${uid} errs=${errors.join(' | ')}`);
     }
-    return { ok: errors.length === 0, skipped: false, queued, activated, errors };
+    return { ok: errors.length === 0, skipped: false, queued, activated, reused, errors };
 }
 
 async function alertOnlineConflictIfNeeded(user, probeRows = [], options = {}) {
@@ -558,10 +569,48 @@ async function processOneSheepFixTask(task, authCache, logger) {
         finished_at: toDateTimeText(),
         desc: doneDesc
     });
-    await resolveOpenRiskEvent(uid, acc, RISK_TYPE_ONLINE_NON_RENTING, {
-        status: 'resolved',
-        desc: doneDesc
-    });
+    if (Number(task.event_id || 0) > 0) {
+        await resolveRiskEventById(Number(task.event_id || 0), {
+            status: 'resolved',
+            desc: doneDesc
+        });
+    }
+}
+
+async function resolveStaleOpenEventsByFinishedTasks(limit = 80, logger = console) {
+    const db = openDatabase();
+    try {
+        const rows = await dbAll(db, `
+            SELECT
+              t.event_id, t.status AS task_status, t.finished_at, t.forbidden_off_at, t.modify_date, t.desc
+            FROM prod_guard_task t
+            JOIN prod_risk_event e ON e.id = t.event_id
+            WHERE t.is_deleted = 0
+              AND e.is_deleted = 0
+              AND t.event_id > 0
+              AND e.status = 'open'
+              AND t.status IN (?, ?)
+            ORDER BY t.id DESC
+            LIMIT ?
+        `, [TASK_STATUS_DONE, TASK_STATUS_FAILED, Math.max(1, Math.min(500, Number(limit || 80)))]);
+        let fixed = 0;
+        for (const row of rows) {
+            const eventId = Number((row && row.event_id) || 0);
+            if (!eventId) continue;
+            const taskStatus = String((row && row.task_status) || '').trim();
+            const ok = await resolveRiskEventById(eventId, {
+                status: taskStatus === TASK_STATUS_DONE ? 'resolved' : 'ignored',
+                desc: 'auto reconciled by sheep_fix worker'
+            });
+            if (ok) fixed += 1;
+        }
+        if (fixed > 0 && logger && typeof logger.log === 'function') {
+            logger.log(`[ProdStatusGuard] reconciled stale open events=${fixed}`);
+        }
+        return fixed;
+    } finally {
+        db.close();
+    }
 }
 
 async function runSheepFixWorkerOnce(options = {}) {
@@ -586,7 +635,8 @@ async function runSheepFixWorkerOnce(options = {}) {
                 logger.error(`[ProdStatusGuard] worker task_failed id=${task.id} err=${e.message}`);
             }
         }
-        return { ok: true, skipped: false, scanned: tasks.length, processed: done };
+        const reconciled = await resolveStaleOpenEventsByFinishedTasks(120, logger);
+        return { ok: true, skipped: false, scanned: tasks.length, processed: done, reconciled };
     } finally {
         await releaseLock(SHEEP_FIX_WORKER_LOCK_KEY, `release by pid=${process.pid}`);
     }

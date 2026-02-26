@@ -78,9 +78,33 @@ async function initProdGuardTaskDb() {
                 desc TEXT NOT NULL DEFAULT ''
             )
         `);
+        // 历史约束：同账号同任务类型只能有一条，会导致跨事件复用同一任务。
+        // 新约束：同一事件只能有一条任务，事件结束后新事件创建新任务。
+        await run(db, `DROP INDEX IF EXISTS uq_prod_guard_task_alive`);
+        // 迁移兜底：若历史存在相同 event_id 多条任务，软删旧记录保留最新一条。
         await run(db, `
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_prod_guard_task_alive
-            ON prod_guard_task(user_id, game_account, task_type, is_deleted)
+            UPDATE prod_guard_task
+            SET is_deleted = 1,
+                modify_date = CURRENT_TIMESTAMP,
+                desc = CASE
+                    WHEN TRIM(COALESCE(desc, '')) = '' THEN 'auto dedup before event-unique index'
+                    ELSE desc || ';auto dedup before event-unique index'
+                END
+            WHERE id IN (
+                SELECT t1.id
+                FROM prod_guard_task t1
+                JOIN prod_guard_task t2
+                  ON t1.event_id = t2.event_id
+                 AND t1.event_id > 0
+                 AND t1.is_deleted = 0
+                 AND t2.is_deleted = 0
+                 AND t1.id < t2.id
+            )
+        `);
+        await run(db, `
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_prod_guard_task_event_alive
+            ON prod_guard_task(event_id, is_deleted)
+            WHERE event_id > 0
         `);
         await run(db, `
             CREATE INDEX IF NOT EXISTS idx_prod_guard_task_due
@@ -117,12 +141,14 @@ async function upsertGuardTask(input = {}, options = {}) {
 
     const db = openDatabase();
     try {
-        const old = await get(db, `
-            SELECT id, retry_count
-            FROM prod_guard_task
-            WHERE user_id = ? AND game_account = ? AND task_type = ? AND is_deleted = 0
-            LIMIT 1
-        `, [uid, acc, taskType]);
+        const old = eventId > 0
+            ? await get(db, `
+                SELECT id, retry_count
+                FROM prod_guard_task
+                WHERE event_id = ? AND is_deleted = 0
+                LIMIT 1
+            `, [eventId])
+            : null;
         if (!old) {
             const ret = await run(db, `
                 INSERT INTO prod_guard_task
@@ -202,6 +228,52 @@ async function listDueGuardTasks(options = {}) {
             modify_date: String(r.modify_date || '').trim(),
             desc: String(r.desc || '').trim()
         }));
+    } finally {
+        db.close();
+    }
+}
+
+async function getGuardTaskByEventId(eventId) {
+    await initProdGuardTaskDb();
+    const id = Number(eventId || 0);
+    if (!id) return null;
+    const db = openDatabase();
+    try {
+        const r = await get(db, `
+            SELECT
+              id, user_id, game_account, risk_type, task_type, status, event_id,
+              next_check_at, last_online_tag, blacklist_applied, forbidden_applied,
+              retry_count, max_retry, probe_loop_count, last_error, forbidden_on_at, forbidden_off_at,
+              finished_at, create_date, modify_date, desc
+            FROM prod_guard_task
+            WHERE event_id = ?
+              AND is_deleted = 0
+            LIMIT 1
+        `, [id]);
+        if (!r) return null;
+        return {
+            id: Number(r.id || 0),
+            user_id: Number(r.user_id || 0),
+            game_account: String(r.game_account || '').trim(),
+            risk_type: String(r.risk_type || '').trim(),
+            task_type: String(r.task_type || '').trim(),
+            status: String(r.status || '').trim(),
+            event_id: Number(r.event_id || 0),
+            next_check_at: Number(r.next_check_at || 0),
+            last_online_tag: String(r.last_online_tag || '').trim(),
+            blacklist_applied: Number(r.blacklist_applied || 0),
+            forbidden_applied: Number(r.forbidden_applied || 0),
+            retry_count: Number(r.retry_count || 0),
+            max_retry: Number(r.max_retry || 0),
+            probe_loop_count: Number(r.probe_loop_count || 0),
+            last_error: String(r.last_error || '').trim(),
+            forbidden_on_at: String(r.forbidden_on_at || '').trim(),
+            forbidden_off_at: String(r.forbidden_off_at || '').trim(),
+            finished_at: String(r.finished_at || '').trim(),
+            create_date: String(r.create_date || '').trim(),
+            modify_date: String(r.modify_date || '').trim(),
+            desc: String(r.desc || '').trim()
+        };
     } finally {
         db.close();
     }
@@ -332,6 +404,7 @@ module.exports = {
     initProdGuardTaskDb,
     upsertGuardTask,
     listDueGuardTasks,
+    getGuardTaskByEventId,
     updateGuardTaskStatus,
     listGuardTasksByUser
 };

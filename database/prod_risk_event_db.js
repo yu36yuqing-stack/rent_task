@@ -57,9 +57,37 @@ async function initProdRiskEventDb() {
                 desc TEXT NOT NULL DEFAULT ''
             )
         `);
+        // 历史约束会限制同账号同风险类型只能有一条 resolved/ignored 记录，
+        // 新模型要求“每次事件独立”，仅限制 open 态唯一。
+        await run(db, `DROP INDEX IF EXISTS uq_prod_risk_event_alive`);
+        // 迁移兜底：清理历史重复 open，保留最新一条，避免唯一索引创建失败。
         await run(db, `
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_prod_risk_event_alive
-            ON prod_risk_event(user_id, game_account, risk_type, status, is_deleted)
+            UPDATE prod_risk_event
+            SET status = 'ignored',
+                resolved_at = CASE WHEN TRIM(COALESCE(resolved_at, '')) = '' THEN modify_date ELSE resolved_at END,
+                modify_date = CURRENT_TIMESTAMP,
+                desc = CASE
+                    WHEN TRIM(COALESCE(desc, '')) = '' THEN 'auto dedup before open-unique index'
+                    ELSE desc || ';auto dedup before open-unique index'
+                END
+            WHERE id IN (
+                SELECT p1.id
+                FROM prod_risk_event p1
+                JOIN prod_risk_event p2
+                  ON p1.user_id = p2.user_id
+                 AND p1.game_account = p2.game_account
+                 AND p1.risk_type = p2.risk_type
+                 AND p1.status = 'open'
+                 AND p2.status = 'open'
+                 AND p1.is_deleted = 0
+                 AND p2.is_deleted = 0
+                 AND p1.id < p2.id
+            )
+        `);
+        await run(db, `
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_prod_risk_event_open_alive
+            ON prod_risk_event(user_id, game_account, risk_type)
+            WHERE is_deleted = 0 AND status = 'open'
         `);
         await run(db, `
             CREATE INDEX IF NOT EXISTS idx_prod_risk_event_user_alive
@@ -151,6 +179,31 @@ async function resolveOpenRiskEvent(userId, gameAccount, riskType, options = {})
     }
 }
 
+async function resolveRiskEventById(eventId, options = {}) {
+    await initProdRiskEventDb();
+    const id = Number(eventId || 0);
+    if (!id) return false;
+    const now = nowText();
+    const status = String(options.status || STATUS_RESOLVED).trim() || STATUS_RESOLVED;
+    const desc = String(options.desc || '').trim();
+    const db = openDatabase();
+    try {
+        const ret = await run(db, `
+            UPDATE prod_risk_event
+            SET status = ?,
+                resolved_at = ?,
+                modify_date = ?,
+                desc = CASE WHEN ? <> '' THEN ? ELSE desc END
+            WHERE id = ?
+              AND is_deleted = 0
+              AND status = ?
+        `, [status, now, now, desc, desc, id, STATUS_OPEN]);
+        return Number(ret.changes || 0) > 0;
+    } finally {
+        db.close();
+    }
+}
+
 async function listRiskEventsByUser(userId, options = {}) {
     await initProdRiskEventDb();
     const uid = Number(userId || 0);
@@ -217,5 +270,6 @@ module.exports = {
     initProdRiskEventDb,
     upsertOpenRiskEvent,
     resolveOpenRiskEvent,
+    resolveRiskEventById,
     listRiskEventsByUser
 };

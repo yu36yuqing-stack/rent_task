@@ -906,7 +906,7 @@ async function handleRiskCenterList(req, res, urlObj) {
 
     const [eventResult, taskResult, allRows] = await Promise.all([
         listRiskEventsByUser(user.id, { page, page_size: pageSize, status, risk_type: riskType }),
-        listGuardTasksByUser(user.id, { page, page_size: pageSize, status, risk_type: riskType }),
+        listGuardTasksByUser(user.id, { page: 1, page_size: 500, risk_type: riskType }),
         listAllAccountsByUser(user.id)
     ]);
 
@@ -915,16 +915,19 @@ async function handleRiskCenterList(req, res, urlObj) {
             .map((x) => [String((x && x.game_account) || '').trim(), x])
             .filter(([acc]) => Boolean(acc))
     );
-    const taskMap = new Map();
+    const taskMapByEvent = new Map();
+    const taskMapByAccountRisk = new Map();
     for (const task of (taskResult.list || [])) {
+        const eventId = Number(task.event_id || 0);
+        if (eventId > 0 && !taskMapByEvent.has(eventId)) taskMapByEvent.set(eventId, task);
         const k = `${String(task.game_account || '').trim()}::${String(task.risk_type || '').trim()}`;
-        if (!k.startsWith('::') && !taskMap.has(k)) taskMap.set(k, task);
+        if (!k.startsWith('::') && !taskMapByAccountRisk.has(k)) taskMapByAccountRisk.set(k, task);
     }
     const list = (eventResult.list || []).map((ev) => {
         const acc = String(ev.game_account || '').trim();
         const riskTypeText = String(ev.risk_type || '').trim();
         const k = `${acc}::${riskTypeText}`;
-        const task = taskMap.get(k) || null;
+        const task = taskMapByEvent.get(Number(ev.id || 0)) || taskMapByAccountRisk.get(k) || null;
         const row = rowMap.get(acc) || null;
         const snapshot = safeJsonParse(ev.snapshot, {});
         const latestOrder = snapshot && snapshot.latest_order && typeof snapshot.latest_order === 'object'
