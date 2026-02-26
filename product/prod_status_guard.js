@@ -29,7 +29,7 @@ const { deleteBlacklistWithGuard, REASON_ONLINE } = require('../blacklist/blackl
 const ONLINE_PROBE_WINDOW_SEC = 90;
 const ONLINE_PROBE_INTERVAL_SEC = Math.max(60, Number(process.env.ONLINE_PROBE_INTERVAL_SEC || 600));
 const ONLINE_PROBE_FORCE = ['1', 'true', 'yes', 'on'].includes(String(process.env.ONLINE_PROBE_FORCE || 'false').toLowerCase());
-const RECENT_ORDER_END_SUPPRESS_SEC = Math.max(60, Number(process.env.ONLINE_ALERT_RECENT_END_SUPPRESS_SEC || 600));
+const RECENT_ORDER_END_SUPPRESS_SEC = Math.max(60, Number(process.env.ONLINE_ALERT_RECENT_END_SUPPRESS_SEC || 1200));
 
 const RISK_TYPE_ONLINE_NON_RENTING = 'online_non_renting';
 const TASK_TYPE_SHEEP_FIX = 'sheep_fix';
