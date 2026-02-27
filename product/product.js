@@ -56,7 +56,10 @@ function buildPlatformPrdInfo(platform, row = {}) {
             prd_id: String(row.id || ''),
             remark: String(row.remark || ''),
             role_name: String(raw.roleName || ''),
-            reason: String(row.reason || '').trim()
+            reason: String(row.reason || '').trim(),
+            sale_status: raw.saleStatus === undefined ? null : Number(raw.saleStatus),
+            product_status: raw.productStatus === undefined ? null : Number(raw.productStatus),
+            tab_key: String(raw._tabKey || '').trim().toUpperCase()
         };
     }
     return {};

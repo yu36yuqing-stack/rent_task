@@ -225,6 +225,7 @@ function isAccountNormalByAuthorizedPlatforms(acc, authorizedPlatforms = []) {
 
 function toReportAccountFromUserGameRow(row, blacklistSet = new Set(), blacklistReasonMap = {}) {
     const status = row && typeof row.channel_status === 'object' ? row.channel_status : {};
+    const prdInfo = row && typeof row.channel_prd_info === 'object' ? row.channel_prd_info : {};
     const account = String(row.game_account || '').trim();
     const blacklisted = blacklistSet.has(account);
     const reason = String((blacklistReasonMap && blacklistReasonMap[account]) || '').trim() || '黑名单';
@@ -234,6 +235,7 @@ function toReportAccountFromUserGameRow(row, blacklistSet = new Set(), blacklist
         youpin: String(status.uuzuhao || ''),
         uhaozu: String(status.uhaozu || ''),
         zuhaowan: String(status.zuhaowang || ''),
+        channel_prd_info: prdInfo,
         uhaozu_debug: '',
         is_blacklisted: blacklisted,
         suffix: blacklisted ? ` 🔸已按${reason}规则下架` : '',

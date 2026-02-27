@@ -329,7 +329,7 @@ async function getOrderComplaintDetailByUser(userId, options = {}) {
 
 function shouldTriggerOrderSyncNow(options = {}) {
     const now = options.now instanceof Date ? options.now : new Date();
-    const intervalMin = Math.max(1, Number(options.interval_min || 10));
+    const intervalMin = Math.max(1, Number(options.interval_min || 5));
     const windowSec = Math.max(0, Number(options.window_sec || 90));
     const force = Boolean(options.force);
     if (force) return true;
@@ -343,7 +343,7 @@ function shouldTriggerOrderSyncNow(options = {}) {
 function startOrderSyncWorkerIfNeeded(options = {}) {
     const enabled = Boolean(options.enabled);
     const force = Boolean(options.force);
-    const intervalMin = Math.max(1, Number(options.interval_min || 10));
+    const intervalMin = Math.max(1, Number(options.interval_min || 5));
     const windowSec = Math.max(0, Number(options.window_sec || 90));
     const taskDir = String(options.task_dir || path.join(__dirname, '..'));
     const runRecord = options.run_record && typeof options.run_record === 'object' ? options.run_record : null;

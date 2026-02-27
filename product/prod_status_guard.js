@@ -1,5 +1,6 @@
 const { openDatabase } = require('../database/sqlite_client');
 const { initOrderDb } = require('../database/order_db');
+const { initUserGameAccountDb } = require('../database/user_game_account_db');
 const { upsertUserBlacklistEntry } = require('../database/user_blacklist_db');
 const { getActiveUserById } = require('../database/user_db');
 const {
@@ -59,6 +60,18 @@ function dbAll(db, sql, params = []) {
             resolve(rows || []);
         });
     });
+}
+
+function parseJsonObjectSafe(v) {
+    if (!v) return {};
+    if (typeof v === 'object' && !Array.isArray(v)) return v;
+    try {
+        const parsed = JSON.parse(String(v));
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+        return {};
+    } catch {
+        return {};
+    }
 }
 
 async function listLatestEndedOrderSnapshotByUser(userId, accounts = []) {
@@ -123,16 +136,135 @@ function isRentingStatus(v) {
     return s === '租赁中' || s === '出租中';
 }
 
-function collectOnlineButNotRenting(accounts = []) {
+function collectOnlineAccounts(accounts = []) {
     const list = Array.isArray(accounts) ? accounts : [];
     return list.filter((acc) => {
-        const y = String((acc && acc.youpin) || '').trim();
-        const u = String((acc && acc.uhaozu) || '').trim();
-        const z = String((acc && acc.zuhaowan) || '').trim();
         const online = String((acc && acc.online_tag) || '').trim().toUpperCase();
-        const anyRent = isRentingStatus(y) || isRentingStatus(u) || isRentingStatus(z);
-        return online === 'ON' && !anyRent;
+        return online === 'ON';
     });
+}
+
+function buildProductRentingGuardDetail(account = {}) {
+    const info = account && account.channel_prd_info && typeof account.channel_prd_info === 'object'
+        ? account.channel_prd_info
+        : {};
+    const yyz = info.uuzuhao && typeof info.uuzuhao === 'object' ? info.uuzuhao : {};
+    const uhz = info.uhaozu && typeof info.uhaozu === 'object' ? info.uhaozu : {};
+    const zhw = info.zuhaowang && typeof info.zuhaowang === 'object' ? info.zuhaowang : {};
+
+    const yyzTab = String(yyz.tab_key || yyz.tabKey || '').trim().toUpperCase();
+    const yyzSale = Number(yyz.sale_status === undefined ? yyz.saleStatus : yyz.sale_status);
+    const uhzGoods = Number(uhz.goods_status === undefined ? uhz.goodsStatus : uhz.goods_status);
+    const uhzRent = Number(uhz.rent_status === undefined ? uhz.rentStatus : uhz.rent_status);
+    const zhwRaw = Number(zhw.raw_status === undefined ? zhw.rawStatus : zhw.raw_status);
+
+    const byRaw = {
+        uuzuhao: (yyzTab === 'RENT') || (yyzSale === 2000),
+        uhaozu: uhzGoods === 3 && uhzRent === 0,
+        zuhaowang: zhwRaw === 2
+    };
+    const byText = {
+        uuzuhao: isRentingStatus(account && account.youpin),
+        uhaozu: isRentingStatus(account && account.uhaozu),
+        zuhaowang: isRentingStatus(account && account.zuhaowan)
+    };
+    const anyRaw = Boolean(byRaw.uuzuhao || byRaw.uhaozu || byRaw.zuhaowang);
+    const anyText = Boolean(byText.uuzuhao || byText.uhaozu || byText.zuhaowang);
+    return {
+        renting: anyRaw || (!anyRaw && anyText),
+        by_raw: byRaw,
+        by_text: byText
+    };
+}
+
+function isProductRenting(account = {}) {
+    return Boolean(buildProductRentingGuardDetail(account).renting);
+}
+
+async function listActiveOrderSnapshotByUser(userId, accounts = []) {
+    const uid = Number(userId || 0);
+    if (!uid) return {};
+    const uniq = Array.from(new Set((Array.isArray(accounts) ? accounts : [])
+        .map((x) => String(x || '').trim())
+        .filter(Boolean)));
+    if (uniq.length === 0) return {};
+
+    await initOrderDb();
+    const db = openDatabase();
+    try {
+        const nowText = toDateTimeText(new Date());
+        const marks = uniq.map(() => '?').join(',');
+        const rows = await dbAll(db, `
+            SELECT game_account, order_no, order_status, start_time, end_time, id
+            FROM "order"
+            WHERE user_id = ?
+              AND is_deleted = 0
+              AND game_account IN (${marks})
+              AND (
+                (
+                  TRIM(COALESCE(start_time, '')) <> ''
+                  AND TRIM(COALESCE(end_time, '')) <> ''
+                  AND start_time <= ?
+                  AND end_time > ?
+                )
+                OR COALESCE(order_status, '') IN ('租赁中', '出租中')
+              )
+            ORDER BY datetime(end_time) DESC, id DESC
+        `, [uid, ...uniq, nowText, nowText]);
+        const out = {};
+        for (const row of rows) {
+            const acc = String((row && row.game_account) || '').trim();
+            if (!acc || out[acc]) continue;
+            out[acc] = {
+                order_no: String((row && row.order_no) || '').trim(),
+                order_status: String((row && row.order_status) || '').trim(),
+                start_time: String((row && row.start_time) || '').trim(),
+                end_time: String((row && row.end_time) || '').trim()
+            };
+        }
+        return out;
+    } finally {
+        db.close();
+    }
+}
+
+async function listProductRentingSignalsByUser(userId, accounts = []) {
+    const uid = Number(userId || 0);
+    if (!uid) return {};
+    const uniq = Array.from(new Set((Array.isArray(accounts) ? accounts : [])
+        .map((x) => String(x || '').trim())
+        .filter(Boolean)));
+    if (uniq.length === 0) return {};
+
+    await initUserGameAccountDb();
+    const db = openDatabase();
+    try {
+        const marks = uniq.map(() => '?').join(',');
+        const rows = await dbAll(db, `
+            SELECT game_account, channel_status, channel_prd_info
+            FROM user_game_account
+            WHERE user_id = ?
+              AND is_deleted = 0
+              AND game_account IN (${marks})
+        `, [uid, ...uniq]);
+        const out = {};
+        for (const row of rows) {
+            const acc = String((row && row.game_account) || '').trim();
+            if (!acc || out[acc]) continue;
+            const status = parseJsonObjectSafe(row && row.channel_status);
+            const prd = parseJsonObjectSafe(row && row.channel_prd_info);
+            out[acc] = buildProductRentingGuardDetail({
+                account: acc,
+                channel_prd_info: prd,
+                youpin: String(status.uuzuhao || '').trim(),
+                uhaozu: String(status.uhaozu || '').trim(),
+                zuhaowan: String(status.zuhaowang || '').trim()
+            });
+        }
+        return out;
+    } finally {
+        db.close();
+    }
 }
 
 function buildOnlineButNotRentingAlertText(user, badAccounts = []) {
@@ -355,6 +487,10 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
                         uhaozu: String((one && one.uhaozu) || '').trim(),
                         zuhaowan: String((one && one.zuhaowan) || '').trim()
                     },
+                    product_renting: Boolean(one && one.product_renting),
+                    product_renting_detail: one && one.product_renting_detail ? one.product_renting_detail : {},
+                    active_order_present: Boolean(one && one.active_order_present),
+                    active_order: one && one.active_order ? one.active_order : {},
                     remark: String((one && one.remark) || '').trim(),
                     latest_order: latestOrderMap[acc] || { order_no: '', end_time: '' },
                     hit_at: toDateTimeText()
@@ -422,8 +558,43 @@ async function alertOnlineConflictIfNeeded(user, probeRows = [], options = {}) {
     const rows = Array.isArray(probeRows) ? probeRows : [];
     if (rows.length === 0) return { ok: true, skipped: true, reason: 'empty_probe_rows' };
 
-    const badAccountsRaw = collectOnlineButNotRenting(rows);
-    if (badAccountsRaw.length === 0) return { ok: true, skipped: true, reason: 'no_conflict' };
+    const onlineAccounts = collectOnlineAccounts(rows);
+    if (onlineAccounts.length === 0) return { ok: true, skipped: true, reason: 'no_conflict' };
+    const uid = Number((user && user.id) || 0);
+    const activeOrderMap = await listActiveOrderSnapshotByUser(uid, onlineAccounts.map((x) => x.account));
+    const guardedSkip = [];
+    const badAccountsRaw = [];
+    for (const one of onlineAccounts) {
+        const acc = String((one && one.account) || '').trim();
+        if (!acc) continue;
+        const productRentingDetail = buildProductRentingGuardDetail(one);
+        const productRenting = Boolean(productRentingDetail.renting);
+        const activeOrder = activeOrderMap[acc] || null;
+        const activeOrderPresent = Boolean(activeOrder);
+        if (productRenting || activeOrderPresent) {
+            guardedSkip.push({
+                account: acc,
+                product_renting: productRenting,
+                active_order_present: activeOrderPresent
+            });
+            continue;
+        }
+        badAccountsRaw.push({
+            ...one,
+            product_renting: productRenting,
+            product_renting_detail: productRentingDetail,
+            active_order_present: activeOrderPresent,
+            active_order: activeOrder || {}
+        });
+    }
+    if (badAccountsRaw.length === 0) {
+        return {
+            ok: true,
+            skipped: true,
+            reason: 'guarded_by_product_renting_or_active_order',
+            guarded_skip_count: guardedSkip.length
+        };
+    }
     const recentEnded = await listRecentlyEndedAccountsByUser(
         user && user.id,
         badAccountsRaw.map((x) => x.account),
@@ -435,7 +606,8 @@ async function alertOnlineConflictIfNeeded(user, probeRows = [], options = {}) {
             ok: true,
             skipped: true,
             reason: 'recent_order_ended_within_suppress_window',
-            suppressed: badAccountsRaw.length
+            suppressed: badAccountsRaw.length,
+            guarded_skip_count: guardedSkip.length
         };
     }
 
@@ -456,6 +628,7 @@ async function alertOnlineConflictIfNeeded(user, probeRows = [], options = {}) {
         ok: true,
         skipped: false,
         alerted: badAccounts.length,
+        guarded_skip_count: guardedSkip.length,
         prod_guard_enabled: prodGuardEnabled,
         risk_enqueued: enqueueRet
     };
@@ -474,6 +647,28 @@ async function processOneSheepFixTask(task, authCache, userSwitchCache, logger) 
     const prodGuardEnabled = await resolveProdGuardEnabledByUserId(uid, userSwitchCache);
     if (!prodGuardEnabled) {
         const doneDesc = 'skip_by_user_switch_prod_guard_disabled';
+        await updateGuardTaskStatus(task.id, {
+            status: TASK_STATUS_DONE,
+            last_error: '',
+            finished_at: toDateTimeText(),
+            desc: doneDesc
+        });
+        if (Number(task.event_id || 0) > 0) {
+            await resolveRiskEventById(Number(task.event_id || 0), {
+                status: 'ignored',
+                desc: doneDesc
+            });
+        }
+        return;
+    }
+    const activeOrders = await listActiveOrderSnapshotByUser(uid, [acc]);
+    const activeOrder = activeOrders[acc] || null;
+    const productRentingSignals = await listProductRentingSignalsByUser(uid, [acc]);
+    const productRenting = Boolean(productRentingSignals[acc] && productRentingSignals[acc].renting);
+    if (activeOrder || productRenting) {
+        const doneDesc = activeOrder && productRenting
+            ? 'skip_by_active_order_and_product_renting_guard'
+            : (activeOrder ? 'skip_by_active_order_guard' : 'skip_by_product_renting_guard');
         await updateGuardTaskStatus(task.id, {
             status: TASK_STATUS_DONE,
             last_error: '',
