@@ -1,6 +1,7 @@
 const { openDatabase } = require('../database/sqlite_client');
 const { initOrderDb } = require('../database/order_db');
 const { upsertUserBlacklistEntry } = require('../database/user_blacklist_db');
+const { getActiveUserById } = require('../database/user_db');
 const {
     initProdRiskEventDb,
     upsertOpenRiskEvent,
@@ -217,6 +218,27 @@ function summarizeProbeRows(probeRows = []) {
     };
 }
 
+function isProdGuardEnabledByUser(user) {
+    const sw = user && user.switch && typeof user.switch === 'object' ? user.switch : {};
+    if (sw.prod_guard_enabled === undefined) return true;
+    return Boolean(sw.prod_guard_enabled);
+}
+
+async function resolveProdGuardEnabledByUserId(userId, userCache = new Map()) {
+    const uid = Number(userId || 0);
+    if (!uid) return true;
+    if (userCache.has(uid)) return Boolean(userCache.get(uid));
+    let enabled = true;
+    try {
+        const user = await getActiveUserById(uid);
+        enabled = isProdGuardEnabledByUser(user);
+    } catch {
+        enabled = true;
+    }
+    userCache.set(uid, enabled);
+    return enabled;
+}
+
 async function probeProdOnlineStatus(user, accounts = [], options = {}) {
     const logger = options.logger && typeof options.logger.log === 'function' ? options.logger : console;
     const forceProbe = Boolean(options.force_probe);
@@ -299,6 +321,7 @@ async function applyInitialControlForAccount(userId, account, auth, logger) {
 async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {}) {
     const logger = options.logger && typeof options.logger.log === 'function' ? options.logger : console;
     if (!SHEEP_FIX_ENABLE) return { ok: true, skipped: true, reason: 'sheep_fix_disabled', queued: 0 };
+    if (!isProdGuardEnabledByUser(user)) return { ok: true, skipped: true, reason: 'prod_guard_disabled_by_user_switch', queued: 0 };
     const uid = Number((user && user.id) || 0);
     if (!uid) return { ok: false, skipped: true, reason: 'invalid_user', queued: 0 };
     const list = Array.isArray(badAccounts) ? badAccounts : [];
@@ -416,7 +439,10 @@ async function alertOnlineConflictIfNeeded(user, probeRows = [], options = {}) {
         };
     }
 
-    const enqueueRet = await enqueueOnlineNonRentingRisk(user, badAccounts, options);
+    const prodGuardEnabled = isProdGuardEnabledByUser(user);
+    const enqueueRet = prodGuardEnabled
+        ? await enqueueOnlineNonRentingRisk(user, badAccounts, options)
+        : { ok: true, skipped: true, reason: 'prod_guard_disabled_by_user_switch', queued: 0, activated: 0, reused: 0, errors: [] };
 
     if (dingCfg.webhook) {
         const text = buildOnlineButNotRentingAlertText(user, badAccounts);
@@ -430,6 +456,7 @@ async function alertOnlineConflictIfNeeded(user, probeRows = [], options = {}) {
         ok: true,
         skipped: false,
         alerted: badAccounts.length,
+        prod_guard_enabled: prodGuardEnabled,
         risk_enqueued: enqueueRet
     };
 }
@@ -440,10 +467,27 @@ function shouldMarkTaskFailed(task = {}, nextRetry = 1) {
     return retry >= maxRetry;
 }
 
-async function processOneSheepFixTask(task, authCache, logger) {
+async function processOneSheepFixTask(task, authCache, userSwitchCache, logger) {
     const uid = Number(task.user_id || 0);
     const acc = String(task.game_account || '').trim();
     if (!uid || !acc) return;
+    const prodGuardEnabled = await resolveProdGuardEnabledByUserId(uid, userSwitchCache);
+    if (!prodGuardEnabled) {
+        const doneDesc = 'skip_by_user_switch_prod_guard_disabled';
+        await updateGuardTaskStatus(task.id, {
+            status: TASK_STATUS_DONE,
+            last_error: '',
+            finished_at: toDateTimeText(),
+            desc: doneDesc
+        });
+        if (Number(task.event_id || 0) > 0) {
+            await resolveRiskEventById(Number(task.event_id || 0), {
+                status: 'ignored',
+                desc: doneDesc
+            });
+        }
+        return;
+    }
 
     let auth = authCache.get(uid);
     if (auth === undefined) {
@@ -626,10 +670,11 @@ async function runSheepFixWorkerOnce(options = {}) {
     try {
         const tasks = await listDueGuardTasks({ limit: Number(options.limit || 80), due_sec: nowSec() });
         const authCache = new Map();
+        const userSwitchCache = new Map();
         let done = 0;
         for (const task of tasks) {
             try {
-                await processOneSheepFixTask(task, authCache, logger);
+                await processOneSheepFixTask(task, authCache, userSwitchCache, logger);
                 done += 1;
             } catch (e) {
                 logger.error(`[ProdStatusGuard] worker task_failed id=${task.id} err=${e.message}`);
@@ -696,7 +741,7 @@ function triggerProdStatusGuard(user, accounts = [], options = {}) {
         .then(() => runProdStatusGuard(user, rows, options))
         .then((ret) => {
             if (ret && ret.skipped) return;
-            logger.warn(`[ProdStatusGuard] user_id=${userId} alerted=${Number((ret && ret.alerted) || 0)} queued=${Number((((ret || {}).risk_enqueued || {}).queued) || 0)}`);
+            logger.warn(`[ProdStatusGuard] user_id=${userId} alerted=${Number((ret && ret.alerted) || 0)} queued=${Number((((ret || {}).risk_enqueued || {}).queued) || 0)} prod_guard_enabled=${ret && ret.prod_guard_enabled !== undefined ? Boolean(ret.prod_guard_enabled) : true}`);
         })
         .catch((e) => {
             logger.error(`[ProdStatusGuard] user_id=${userId} error=${e && e.message ? e.message : e}`);

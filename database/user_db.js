@@ -10,7 +10,8 @@ const USER_STATUS_DISABLED = 'disabled';
 const ALLOWED_USER_TYPES = new Set([USER_TYPE_ADMIN, USER_TYPE_INTERNAL, USER_TYPE_EXTERNAL]);
 const ALLOWED_STATUS = new Set([USER_STATUS_ENABLED, USER_STATUS_DISABLED]);
 const DEFAULT_USER_SWITCH = Object.freeze({
-    order_3_off: true
+    order_3_off: true,
+    prod_guard_enabled: true
 });
 
 function nowText() {
@@ -99,7 +100,8 @@ function normalizeUserSwitch(input) {
     return JSON.stringify({
         ...DEFAULT_USER_SWITCH,
         ...raw,
-        order_3_off: raw.order_3_off === undefined ? true : Boolean(raw.order_3_off)
+        order_3_off: raw.order_3_off === undefined ? true : Boolean(raw.order_3_off),
+        prod_guard_enabled: raw.prod_guard_enabled === undefined ? true : Boolean(raw.prod_guard_enabled)
     });
 }
 
@@ -127,7 +129,8 @@ function rowToPublicUser(row = {}) {
             return {
                 ...DEFAULT_USER_SWITCH,
                 ...parsed,
-                order_3_off: parsed.order_3_off === undefined ? true : Boolean(parsed.order_3_off)
+                order_3_off: parsed.order_3_off === undefined ? true : Boolean(parsed.order_3_off),
+                prod_guard_enabled: parsed.prod_guard_enabled === undefined ? true : Boolean(parsed.prod_guard_enabled)
             };
         } catch {
             return { ...DEFAULT_USER_SWITCH };
