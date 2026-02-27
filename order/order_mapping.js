@@ -10,7 +10,7 @@ const UUZUHAO_ORDER_FIELD_MAPPING = {
     role_name: { from: '(lookup by productId -> user_game_account.account_remark, fallback remarkName)' },
     order_status: { from: 'map(orderStatus)' },
     create_date: { from: 'createTime -> yyyy-MM-dd HH:mm:ss' },
-    order_amount: { from: 'rentPrice * rentHour' },
+    order_amount: { from: 'receivableAmount (fallback rentPrice * rentHour)' },
     rent_hour: { from: 'rentHour' },
     ren_way: { from: '(fixed) 时租' },
     rec_amount: { from: 'settlementAmount' },
@@ -139,6 +139,9 @@ function mapUuzuhaoOrderToUserOrder(raw = {}, options = {}) {
     const roleName = String(options.role_name || raw.remarkName || '').trim();
     const rentPrice = toNumberSafe(raw.rentPrice, 0);
     const rentHour = toNumberSafe(raw.rentHour, 0);
+    const receivableAmount = toNumberSafe(raw.receivableAmount, 0);
+    const computedAmount = roundTo2(rentPrice * rentHour);
+    const orderAmount = receivableAmount > 0 ? roundTo2(receivableAmount) : computedAmount;
     return {
         channel: CHANNEL_UUZUHAO,
         order_no: String(raw.purchaseOrderNo || '').trim(),
@@ -148,7 +151,7 @@ function mapUuzuhaoOrderToUserOrder(raw = {}, options = {}) {
         role_name: roleName,
         order_status: mapOrderStatusToZh(raw.orderStatus),
         create_date: toNumberSafe(raw.createTime, 0),
-        order_amount: roundTo2(rentPrice * rentHour),
+        order_amount: orderAmount,
         rent_hour: rentHour,
         ren_way: '时租',
         rec_amount: toNumberSafe(raw.settlementAmount, 0),
