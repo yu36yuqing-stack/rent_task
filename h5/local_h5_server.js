@@ -979,11 +979,20 @@ async function handleRiskCenterList(req, res, urlObj) {
     });
 }
 
-function tryServeStatic(urlObj, res) {
+function tryServeStatic(req, urlObj, res) {
     const reqPath = urlObj.pathname === '/' ? '/index.html' : urlObj.pathname;
     const fullPath = path.resolve(PUBLIC_DIR, `.${reqPath}`);
     if (!fullPath.startsWith(PUBLIC_DIR)) return false;
     if (!fs.existsSync(fullPath) || fs.statSync(fullPath).isDirectory()) return false;
+
+    const stat = fs.statSync(fullPath);
+    const etag = `W/\"${stat.size}-${Number(stat.mtimeMs || 0)}\"`;
+    const ifNoneMatch = String(req.headers['if-none-match'] || '').trim();
+    if (ifNoneMatch && ifNoneMatch === etag) {
+        res.writeHead(304, { ETag: etag });
+        res.end();
+        return true;
+    }
 
     const ext = path.extname(fullPath).toLowerCase();
     const contentType = ext === '.html'
@@ -992,8 +1001,35 @@ function tryServeStatic(urlObj, res) {
         ? 'application/javascript; charset=utf-8'
         : ext === '.css'
         ? 'text/css; charset=utf-8'
+        : ext === '.png'
+        ? 'image/png'
+        : ext === '.jpg' || ext === '.jpeg'
+        ? 'image/jpeg'
+        : ext === '.webp'
+        ? 'image/webp'
+        : ext === '.svg'
+        ? 'image/svg+xml'
+        : ext === '.ico'
+        ? 'image/x-icon'
         : 'application/octet-stream';
-    text(res, 200, fs.readFileSync(fullPath), contentType);
+    const isHtml = ext === '.html';
+    const isGameIcon = reqPath.startsWith('/assets/game_icons/');
+    const cacheControl = isHtml
+        ? 'no-cache'
+        : isGameIcon
+        ? 'public, max-age=31536000, immutable'
+        : 'public, max-age=86400';
+    res.writeHead(200, {
+        'Content-Type': contentType,
+        'Cache-Control': cacheControl,
+        ETag: etag,
+        'Last-Modified': stat.mtime.toUTCString()
+    });
+    if (req.method === 'HEAD') {
+        res.end();
+        return true;
+    }
+    res.end(fs.readFileSync(fullPath));
     return true;
 }
 
@@ -1037,7 +1073,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/auth/platforms/upsert') return await authBff.handleUpsertPlatformAuth(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/ping') return json(res, 200, { ok: true, ts: Date.now() });
 
-            if (req.method === 'GET' && tryServeStatic(urlObj, res)) return;
+            if ((req.method === 'GET' || req.method === 'HEAD') && tryServeStatic(req, urlObj, res)) return;
             return json(res, 404, { ok: false, message: 'Not Found' });
         } catch (e) {
             const statusCode = Number(e && e.statusCode) || 500;

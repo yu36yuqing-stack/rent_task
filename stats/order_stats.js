@@ -345,14 +345,15 @@ async function refreshOrderStatsDailyByUser(userId, options = {}) {
     for (let i = 0; i < days; i += 1) {
         const day = addDays(baseDate, -i);
         const statDate = toDateText(day);
-        const activeConfigured = configured.filter((x) => String(x.purchase_date || '').slice(0, 10) <= statDate);
-        const dayCostBase = toMoney2(activeConfigured.reduce((sum, x) => sum + toMoney2(x.purchase_price || 0), 0));
         const rawRows = await queryDailyRowsFromOrder(uid, statDate, gameName, configured);
         const normalized = normalizeDailyRowsFromOrders(rawRows, configMap);
         await replaceOrderStatsRowsForDay(uid, statDate, gameName, normalized, desc);
-        await upsertCostSnapshotForDay(uid, statDate, gameName, dayCostBase, activeConfigured.length, desc);
         touched.push({ stat_date: statDate, rows: normalized.length });
     }
+    const todayStatDate = toDateText(baseDate);
+    const todayConfigured = configured.filter((x) => String(x.purchase_date || '').slice(0, 10) <= todayStatDate);
+    const todayCostBase = toMoney2(todayConfigured.reduce((sum, x) => sum + toMoney2(x.purchase_price || 0), 0));
+    await upsertCostSnapshotForDay(uid, todayStatDate, gameName, todayCostBase, todayConfigured.length, desc);
 
     return {
         user_id: uid,
