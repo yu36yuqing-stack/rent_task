@@ -121,6 +121,7 @@
         }
       },
       statsBoard: {
+        game_name: 'WZRY',
         period: 'today',
         range: { start_date: '', end_date: '' },
         summary: null,
@@ -290,6 +291,7 @@
       orderPrevPage: document.getElementById('orderPrevPage'),
       orderNextPage: document.getElementById('orderNextPage'),
       orderPageInfo: document.getElementById('orderPageInfo'),
+      statsGameTabs: document.getElementById('statsGameTabs'),
       statsPeriods: document.getElementById('statsPeriods'),
       statsRangeText: document.getElementById('statsRangeText'),
       statsRefreshBtn: document.getElementById('statsRefreshBtn'),
@@ -746,8 +748,10 @@
     async function loadStatsBoard() {
       const s = state.statsBoard || {};
       const period = String(s.period || 'today').trim();
-      const data = await request(`/api/stats/dashboard?period=${encodeURIComponent(period)}&game_name=WZRY`);
+      const gameName = String(s.game_name || 'WZRY').trim() || 'WZRY';
+      const data = await request(`/api/stats/dashboard?period=${encodeURIComponent(period)}&game_name=${encodeURIComponent(gameName)}`);
       state.statsBoard = {
+        game_name: String(data.game_name || gameName).trim() || gameName,
         period: String(data.period || period),
         range: data.range || { start_date: '', end_date: '' },
         summary: data.summary || null,
@@ -983,6 +987,7 @@
       state.cardNodeMap = {};
       state.pullRefresh = { dragging: false, ready: false, loading: false, startY: 0, distance: 0 };
       state.statsBoard = {
+        game_name: 'WZRY',
         period: 'today',
         range: { start_date: '', end_date: '' },
         summary: null,
@@ -1258,9 +1263,10 @@
     els.statsRefreshBtn.addEventListener('click', async () => {
       try {
         const days = calcRefreshDaysByStatsPeriod(state.statsBoard.period);
+        const gameName = String((state.statsBoard && state.statsBoard.game_name) || 'WZRY').trim() || 'WZRY';
         await request('/api/stats/refresh', {
           method: 'POST',
-          body: JSON.stringify({ days, game_name: 'WZRY' })
+          body: JSON.stringify({ days, game_name: gameName })
         });
         await loadStatsBoard();
         if (typeof loadStatsCalendar === 'function') {

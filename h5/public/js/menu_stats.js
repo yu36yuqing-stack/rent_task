@@ -34,7 +34,8 @@
       const month = /^\d{4}-\d{2}$/.test(String(monthText || '').trim())
         ? String(monthText).trim()
         : (state.statsBoard.calendar && state.statsBoard.calendar.month) || currentMonthText();
-      const data = await request(`/api/stats/calendar?month=${encodeURIComponent(month)}&game_name=WZRY`);
+      const gameName = String((state.statsBoard && state.statsBoard.game_name) || 'WZRY').trim() || 'WZRY';
+      const data = await request(`/api/stats/calendar?month=${encodeURIComponent(month)}&game_name=${encodeURIComponent(gameName)}`);
       state.statsBoard.calendar = {
         month: String(data.month || month),
         start_date: String(data.start_date || ''),
@@ -86,6 +87,11 @@
 
     function renderStatsView() {
       const s = state.statsBoard || {};
+      const games = [
+        { k: 'WZRY', t: '王者荣耀', icon: '/assets/game_icons/wzry.webp' },
+        { k: '和平精英', t: '和平精英', icon: '/assets/game_icons/hpjy.png' },
+        { k: 'CFM', t: 'CFM枪战王者', icon: '/assets/game_icons/cfm.png' }
+      ];
       const periods = [
         { k: 'today', t: '当日' },
         { k: 'yesterday', t: '昨日' },
@@ -99,6 +105,14 @@
       const orderBase = Number(summary.order_cnt_total || 0);
       const avgRec = orderBase > 0 ? Number(summary.amount_rec_sum || 0) / orderBase : 0;
 
+      if (els.statsGameTabs) {
+        els.statsGameTabs.innerHTML = games.map((x) => `
+          <button class="stats-game-tab ${String(s.game_name || 'WZRY') === x.k ? 'active' : ''}" data-stats-game="${x.k}">
+            <span class="game-avatar"><img src="${x.icon}" alt="${x.t}" loading="lazy" decoding="async"></span>
+            <span class="stats-game-tab-text">${x.t}</span>
+          </button>
+        `).join('');
+      }
       els.statsPeriods.innerHTML = periods.map((x) => `
         <button class="stats-period-btn ${s.period === x.k ? 'active' : ''}" data-stats-period="${x.k}">${x.t}</button>
       `).join('');
@@ -125,8 +139,8 @@
           <p class="stats-kpi-value">${(Number(summary.cancel_rate || 0) * 100).toFixed(1)}%</p>
         </div>
         <div class="stats-kpi-card">
-          <p class="stats-kpi-key">采购本金</p>
-          <p class="stats-kpi-value">¥${Number(profitability.purchase_base || 0).toFixed(2)}</p>
+          <p class="stats-kpi-key">期间成本分母</p>
+          <p class="stats-kpi-value">¥${Number(profitability.cost_base_value || 0).toFixed(2)}</p>
         </div>
         <div class="stats-kpi-card">
           <p class="stats-kpi-key">年化收益率</p>
@@ -190,5 +204,17 @@
           renderStatsView();
         });
       });
+      if (els.statsGameTabs) {
+        Array.from(els.statsGameTabs.querySelectorAll('[data-stats-game]')).forEach((n) => {
+          n.addEventListener('click', async () => {
+            const k = String(n.getAttribute('data-stats-game') || 'WZRY').trim();
+            if (k === String(state.statsBoard.game_name || 'WZRY')) return;
+            state.statsBoard.game_name = k;
+            await loadStatsBoard();
+            await loadStatsCalendar((state.statsBoard.calendar && state.statsBoard.calendar.month) || '');
+            renderStatsView();
+          });
+        });
+      }
       renderStatsMissingOverlay();
     }

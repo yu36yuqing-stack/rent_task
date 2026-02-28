@@ -35,6 +35,8 @@
   - `.orders-tabs-row`
   - `.orders-tabs` + `.orders-tab`
   - `.orders-quick` + `.orders-quick-item`
+  - `#statsGameTabs.stats-game-tabs` + `.stats-game-tab`（统计页按游戏切换 Tab）
+  - `#statsPeriods.stats-periods` + `.stats-period-btn`（统计周期切换）
 - Card
   - `.order-card` `.order-card-top` `.order-card-role` `.order-card-line`
 - Status Chip / Tag
@@ -75,4 +77,3 @@
 1. 更新 `h5/public/css/app.css`（组件定义）
 2. 更新 `h5/COMPONENT_GUIDE.md`（组件清单或规范）
 3. 说明“复用了哪些类、为何新增变体”
-

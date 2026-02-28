@@ -10,6 +10,11 @@ const {
     listOrderStatsRows
 } = require('../database/order_stats_daily_db');
 const {
+    initOrderStatsCostDailyDb,
+    upsertCostSnapshotForDay,
+    listCostSnapshotsByUser
+} = require('../database/order_stats_cost_daily_db');
+const {
     initOrderStatsJobStateDb,
     getLastRunDate,
     setLastRunDate
@@ -37,22 +42,29 @@ function addDays(d, n) {
     return out;
 }
 
+function eachDateTextInclusive(startDateText, endDateText) {
+    const [sy, sm, sd] = String(startDateText || '').split('-').map((x) => Number(x || 0));
+    const [ey, em, ed] = String(endDateText || '').split('-').map((x) => Number(x || 0));
+    const s = new Date(sy, (sm || 1) - 1, sd || 1);
+    const e = new Date(ey, (em || 1) - 1, ed || 1);
+    if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || s.getTime() > e.getTime()) return [];
+    const out = [];
+    for (let d = new Date(s); d.getTime() <= e.getTime(); d = addDays(d, 1)) {
+        out.push(toDateText(d));
+    }
+    return out;
+}
+
 function startOfDay(d) {
     const out = new Date(d);
     out.setHours(0, 0, 0, 0);
     return out;
 }
 
-function getBusinessDateByNow(now = new Date()) {
-    const day = startOfDay(now);
-    if (now.getHours() < 6) return addDays(day, -1);
-    return day;
-}
-
-function getBusinessDayStartByDateText(dateText) {
+function getNaturalDayStartByDateText(dateText) {
     const [y, m, d] = String(dateText || '').split('-').map((x) => Number(x || 0));
     const out = new Date(y, (m || 1) - 1, d || 1);
-    out.setHours(6, 0, 0, 0);
+    out.setHours(0, 0, 0, 0);
     return out;
 }
 
@@ -168,12 +180,11 @@ async function loadAccountConfigByUser(userId, gameName = DEFAULT_GAME_NAME) {
 
 function buildPeriodRange(period = 'today', now = new Date()) {
     const p = String(period || 'today').trim().toLowerCase();
-    const today = getBusinessDateByNow(now);
-    const completedEnd = addDays(today, -1);
-    const endBase = p === 'today' ? today : completedEnd;
+    const today = startOfDay(now);
+    const yesterday = addDays(today, -1);
+    const endBase = p === 'today' ? today : yesterday;
     if (p === 'yesterday') {
-        const d = endBase;
-        return { startDate: toDateText(d), endDate: toDateText(d), period: p };
+        return { startDate: toDateText(yesterday), endDate: toDateText(yesterday), period: p };
     }
     if (p === 'week') {
         const weekday = endBase.getDay() || 7;
@@ -261,7 +272,7 @@ async function queryDailyRowsFromOrder(userId, statDate, gameName, configuredAcc
     const accs = Array.from(new Set((configuredAccounts || []).map((a) => String(a.game_account || '').trim()).filter(Boolean)));
     if (accs.length === 0) return [];
 
-    const dayStart = getBusinessDayStartByDateText(day);
+    const dayStart = getNaturalDayStartByDateText(day);
     const dayEnd = addDays(dayStart, 1);
     const startText = toDateTimeText(dayStart);
     const endText = toDateTimeText(dayEnd);
@@ -317,12 +328,13 @@ async function queryDailyRowsFromOrder(userId, statDate, gameName, configuredAcc
 
 async function refreshOrderStatsDailyByUser(userId, options = {}) {
     await initOrderStatsDailyDb();
+    await initOrderStatsCostDailyDb();
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
     const days = Math.max(1, Number(options.days || DEFAULT_RECALC_DAYS));
     const gameName = String(options.game_name || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
     const now = options.now instanceof Date ? options.now : new Date();
-    const baseDate = getBusinessDateByNow(now);
+    const baseDate = startOfDay(now);
     const desc = String(options.desc || 'daily refresh by stats/order_stats').trim();
 
     const config = await loadAccountConfigByUser(uid, gameName);
@@ -333,9 +345,12 @@ async function refreshOrderStatsDailyByUser(userId, options = {}) {
     for (let i = 0; i < days; i += 1) {
         const day = addDays(baseDate, -i);
         const statDate = toDateText(day);
+        const activeConfigured = configured.filter((x) => String(x.purchase_date || '').slice(0, 10) <= statDate);
+        const dayCostBase = toMoney2(activeConfigured.reduce((sum, x) => sum + toMoney2(x.purchase_price || 0), 0));
         const rawRows = await queryDailyRowsFromOrder(uid, statDate, gameName, configured);
         const normalized = normalizeDailyRowsFromOrders(rawRows, configMap);
         await replaceOrderStatsRowsForDay(uid, statDate, gameName, normalized, desc);
+        await upsertCostSnapshotForDay(uid, statDate, gameName, dayCostBase, activeConfigured.length, desc);
         touched.push({ stat_date: statDate, rows: normalized.length });
     }
 
@@ -475,7 +490,18 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
 
     const summary = reduceRows(rows);
     const periodDays = dateDiffDaysInclusive(periodInfo.startDate, periodInfo.endDate);
-    const currentBizDate = toDateText(getBusinessDateByNow(now));
+    const periodDateList = eachDateTextInclusive(periodInfo.startDate, periodInfo.endDate);
+    const costRows = await listCostSnapshotsByUser(uid, periodInfo.startDate, periodInfo.endDate, gameName);
+    const costMap = new Map((costRows || []).map((x) => [String(x.stat_date || '').slice(0, 10), toMoney2(x.cost_base || 0)]));
+    const fallbackCostByDay = (dayText) => {
+        const day = String(dayText || '').slice(0, 10);
+        const active = (config.configured || []).filter((x) => String(x.purchase_date || '').slice(0, 10) <= day);
+        return toMoney2(active.reduce((sum, x) => sum + toMoney2(x.purchase_price || 0), 0));
+    };
+    const costSeries = periodDateList.map((d) => {
+        if (costMap.has(d)) return toMoney2(costMap.get(d));
+        return fallbackCostByDay(d);
+    });
     const byChannelMap = new Map();
     const byAccountMap = new Map();
     for (const row of rows) {
@@ -507,7 +533,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
             .find((x) => String(x.game_account || '').trim() === game_account) || {};
         const accountPurchaseBase = toMoney2(cfgOne.purchase_price || 0);
         const accountPurchaseDate = String(cfgOne.purchase_date || '').slice(0, 10);
-        const accountAnnualizedDays = annualizedDaysByPurchaseDate(periodInfo.startDate, currentBizDate, accountPurchaseDate);
+        const accountAnnualizedDays = annualizedDaysByPurchaseDate(periodInfo.startDate, periodInfo.endDate, accountPurchaseDate);
         const accountPeriodReturnRate = accountPurchaseBase > 0 ? (Number(s.amount_rec_sum || 0) / accountPurchaseBase) : 0;
         const accountAnnualizedRate = accountPurchaseBase > 0
             ? (accountPeriodReturnRate * (365 / Math.max(1, accountAnnualizedDays)))
@@ -532,13 +558,17 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     // 年化收益率统一采用单利口径：
     // 年化 = 区间收益率 * (365 / 区间天数)
     const purchaseBase = (config.configured || []).reduce((sum, x) => sum + toMoney2(x.purchase_price), 0);
-    const periodReturnRate = purchaseBase > 0 ? (summary.amount_rec_sum / purchaseBase) : 0;
+    const costBaseMode = periodInfo.period === 'today' ? 'today_snapshot' : 'period_avg';
+    const costBaseValue = costBaseMode === 'today_snapshot'
+        ? toMoney2(costSeries[costSeries.length - 1] || 0)
+        : toMoney2(costSeries.reduce((sum, x) => sum + Number(x || 0), 0) / Math.max(1, periodDays));
+    const periodReturnRate = costBaseValue > 0 ? (summary.amount_rec_sum / costBaseValue) : 0;
     const earliestPurchaseDate = (config.configured || [])
         .map((x) => String(x.purchase_date || '').slice(0, 10))
         .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
         .sort()[0] || '';
-    const overallAnnualizedDays = annualizedDaysByPurchaseDate(periodInfo.startDate, currentBizDate, earliestPurchaseDate);
-    const annualizedRate = purchaseBase > 0 ? (periodReturnRate * (365 / Math.max(1, overallAnnualizedDays))) : 0;
+    const overallAnnualizedDays = annualizedDaysByPurchaseDate(periodInfo.startDate, periodInfo.endDate, earliestPurchaseDate);
+    const annualizedRate = costBaseValue > 0 ? (periodReturnRate * (365 / Math.max(1, overallAnnualizedDays))) : 0;
 
     const orderBase = Math.max(1, summary.order_cnt_total);
     const summaryHitDaysByAccount = by_account.reduce((sum, x) => sum + Number(x.target3_hit_days || 0), 0);
@@ -566,6 +596,9 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         },
         profitability: {
             purchase_base: toMoney2(purchaseBase),
+            cost_base_mode: costBaseMode,
+            cost_base_value: toMoney2(costBaseValue),
+            cost_base_days: periodDays,
             period_days: periodDays,
             period_rec_amount: toMoney2(summary.amount_rec_sum),
             period_return_rate: Number(periodReturnRate.toFixed(6)),
@@ -581,7 +614,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
 function parseMonthText(monthText, now = new Date()) {
     const raw = String(monthText || '').trim();
     if (/^\d{4}-\d{2}$/.test(raw)) return raw;
-    const base = getBusinessDateByNow(now);
+    const base = startOfDay(now);
     return `${base.getFullYear()}-${pad2(base.getMonth() + 1)}`;
 }
 
