@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="和平精英">
+  <defs>
+    <linearGradient id="hpjy-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#90d0ff"/>
+      <stop offset="100%" stop-color="#2b6ea7"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#hpjy-bg)" stroke="#255c8b" stroke-width="2"/>
+  <circle cx="23" cy="25" r="9" fill="#f3fbff" opacity="0.95"/>
+  <circle cx="23" cy="25" r="4" fill="#68aee0"/>
+  <path d="M32 43 L47 19 L52 22 L37 46 Z" fill="#f3fbff" opacity="0.96"/>
+  <rect x="15" y="40" width="22" height="11" rx="5.5" fill="#173d5c" opacity="0.84"/>
+  <text x="26" y="48.4" text-anchor="middle" font-size="10" font-weight="700" fill="#d8f0ff" font-family="Arial, sans-serif">HP</text>
+</svg>

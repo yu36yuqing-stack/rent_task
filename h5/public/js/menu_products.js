@@ -77,6 +77,34 @@
       return text;
     }
 
+    function normalizeGameName(gameName, gameId) {
+      const n = String(gameName || '').trim();
+      const lower = n.toLowerCase();
+      if (n.includes('CFM') || n.includes('枪战王者') || n.includes('穿越火线') || lower === 'cfm') return 'CFM';
+      if (n === '和平精英' || n.toUpperCase() === 'HPJY') return '和平精英';
+      const gid = String(gameId || '').trim();
+      if (gid === '3') return 'CFM';
+      if (gid === '2') return '和平精英';
+      return 'WZRY';
+    }
+
+    function buildGameAvatarHtml(item) {
+      const normalized = normalizeGameName(item && item.game_name, item && item.game_id);
+      if (normalized === 'CFM') {
+        return `<span class="game-avatar game-avatar-cfm" title="CFM枪战王者" aria-label="CFM枪战王者">
+          <img src="/assets/game_icons/cfm.png" alt="CFM枪战王者" loading="lazy" decoding="async">
+        </span>`;
+      }
+      if (normalized === '和平精英') {
+        return `<span class="game-avatar game-avatar-hpjy" title="和平精英" aria-label="和平精英">
+          <img src="/assets/game_icons/hpjy.png" alt="和平精英" loading="lazy" decoding="async">
+        </span>`;
+      }
+      return `<span class="game-avatar game-avatar-wzry" title="王者荣耀" aria-label="王者荣耀">
+        <img src="/assets/game_icons/wzry.webp" alt="王者荣耀" loading="lazy" decoding="async">
+      </span>`;
+    }
+
     async function copyAccount(text) {
       const val = String(text || '').trim();
       if (!val) return;
@@ -752,7 +780,7 @@
           node.style.animationDelay = `${Math.min(idx * 35, 220)}ms`;
           node.innerHTML = `
             <div class="order-card-top product-card-top">
-              <p class="order-card-role product-card-role">${item.display_name || item.role_name || item.game_account}</p>
+              <p class="order-card-role product-card-role">${buildGameAvatarHtml(item)}<span class="product-role-text">${item.display_name || item.role_name || item.game_account}</span></p>
               <div class="card-top-chips">
                 <span data-slot="online-chip">${buildOnlineChipHtml(account)}</span>
                 <span data-slot="forbidden-chip">${buildForbiddenChipHtml(account)}</span>

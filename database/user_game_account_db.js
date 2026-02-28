@@ -399,8 +399,11 @@ async function upsertUserGameAccount(input = {}) {
     await initUserGameAccountDb();
     const userId = Number(input.user_id || 0);
     const gameAccount = String(input.game_account || '').trim();
-    const gameId = canonicalGameId(input.game_id, input.game_name);
-    const gameName = canonicalGameNameById(gameId, String(input.game_name || 'WZRY').trim() || 'WZRY');
+    const rawGameId = String(input.game_id || '').trim();
+    const rawGameName = String(input.game_name || '').trim();
+    const hasGameHint = Boolean(rawGameId || rawGameName);
+    const hintedGameId = canonicalGameId(rawGameId, rawGameName || 'WZRY');
+    const hintedGameName = canonicalGameNameById(hintedGameId, rawGameName || 'WZRY');
     const accountRemark = String(input.account_remark || '').trim();
     const purchasePriceRaw = Number(input.purchase_price);
     const hasPurchasePrice = Number.isFinite(purchasePriceRaw) && purchasePriceRaw >= 0;
@@ -417,19 +420,26 @@ async function upsertUserGameAccount(input = {}) {
     try {
         const row = await get(db, `
             SELECT * FROM user_game_account
-            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
+            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            ORDER BY id DESC
             LIMIT 1
-        `, [userId, gameId, gameAccount]);
+        `, [userId, gameAccount]);
 
         if (!row) {
             const deletedRow = await get(db, `
                 SELECT * FROM user_game_account
-                WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 1
+                WHERE user_id = ? AND game_account = ? AND is_deleted = 1
                 ORDER BY id DESC
                 LIMIT 1
-            `, [userId, gameId, gameAccount]);
+            `, [userId, gameAccount]);
 
             if (deletedRow) {
+                const finalGameId = hasGameHint
+                    ? hintedGameId
+                    : canonicalGameId(deletedRow.game_id, deletedRow.game_name);
+                const finalGameName = hasGameHint
+                    ? hintedGameName
+                    : canonicalGameNameById(deletedRow.game_id, deletedRow.game_name);
                 let deletedStatus = {};
                 let deletedPrdInfo = {};
                 try {
@@ -456,8 +466,8 @@ async function upsertUserGameAccount(input = {}) {
                         purchase_price = ?, purchase_date = ?, modify_date = ?, is_deleted = 0, desc = ?
                     WHERE id = ?
                 `, [
-                    gameId,
-                    gameName,
+                    finalGameId,
+                    finalGameName,
                     mergedRemark,
                     JSON.stringify(mergedStatus),
                     JSON.stringify(mergedPrdInfo),
@@ -470,6 +480,8 @@ async function upsertUserGameAccount(input = {}) {
                     Number(deletedRow.id)
                 ]);
             } else {
+                const finalGameId = hintedGameId;
+                const finalGameName = hintedGameName;
                 await run(db, `
                     INSERT INTO user_game_account
                     (user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, modify_date, is_deleted, desc)
@@ -478,8 +490,8 @@ async function upsertUserGameAccount(input = {}) {
                     userId,
                     gameAccount,
                     accountRemark,
-                    gameId,
-                    gameName,
+                    finalGameId,
+                    finalGameName,
                     JSON.stringify(nextStatus),
                     JSON.stringify(nextPrdInfo),
                     hasPurchasePrice ? purchasePriceRaw : 0,
@@ -489,6 +501,12 @@ async function upsertUserGameAccount(input = {}) {
                 ]);
             }
         } else {
+            const finalGameId = hasGameHint
+                ? hintedGameId
+                : canonicalGameId(row.game_id, row.game_name);
+            const finalGameName = hasGameHint
+                ? hintedGameName
+                : canonicalGameNameById(row.game_id, row.game_name);
             let currentStatus = {};
             let currentPrdInfo = {};
             try {
@@ -508,10 +526,12 @@ async function upsertUserGameAccount(input = {}) {
             const mergedPurchaseDate = hasPurchaseDate ? purchaseDateRaw : String(row.purchase_date || '').slice(0, 10);
             await run(db, `
                 UPDATE user_game_account
-                SET account_remark = ?, channel_status = ?, channel_prd_info = ?,
+                SET game_id = ?, game_name = ?, account_remark = ?, channel_status = ?, channel_prd_info = ?,
                     purchase_price = ?, purchase_date = ?, modify_date = ?, desc = ?
                 WHERE id = ?
             `, [
+                finalGameId,
+                finalGameName,
                 mergedRemark,
                 JSON.stringify(mergedStatus),
                 JSON.stringify(mergedPrdInfo),
@@ -525,9 +545,10 @@ async function upsertUserGameAccount(input = {}) {
 
         const updated = await get(db, `
             SELECT * FROM user_game_account
-            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
+            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            ORDER BY id DESC
             LIMIT 1
-        `, [userId, gameId, gameAccount]);
+        `, [userId, gameAccount]);
         return rowToAccount(updated);
     } finally {
         db.close();
