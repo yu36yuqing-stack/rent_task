@@ -1013,8 +1013,11 @@ function tryServeStatic(req, urlObj, res) {
         ? 'image/x-icon'
         : 'application/octet-stream';
     const isHtml = ext === '.html';
+    const isJsOrCss = ext === '.js' || ext === '.css';
     const isGameIcon = reqPath.startsWith('/assets/game_icons/');
     const cacheControl = isHtml
+        ? 'no-cache'
+        : isJsOrCss
         ? 'no-cache'
         : isGameIcon
         ? 'public, max-age=31536000, immutable'

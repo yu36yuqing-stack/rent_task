@@ -524,14 +524,18 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         ...reduceRows(arr)
     })).sort((a, b) => b.amount_rec_sum - a.amount_rec_sum);
 
-    const by_account = Array.from(byAccountMap.entries()).map(([game_account, arr]) => {
+    const configuredByAccount = new Map(
+        (config.configured || [])
+            .map((x) => [String(x.game_account || '').trim(), x])
+            .filter(([k]) => Boolean(k))
+    );
+    const by_account = Array.from(configuredByAccount.entries()).map(([game_account, cfgOne]) => {
+        const arr = byAccountMap.get(game_account) || [];
         const s = reduceRows(arr);
-        const roleName = String((arr[0] && arr[0].role_name) || '').trim();
+        const roleName = String((arr[0] && arr[0].role_name) || cfgOne.role_name || '').trim();
         const displayName = String(latestDisplayNameMap.get(game_account) || roleName || game_account).trim();
         const hitDays = arr.reduce((sum, r) => sum + (Number(r.order_cnt_effective || 0) >= 3 ? 1 : 0), 0);
         const orderBase = Math.max(1, Number(s.order_cnt_effective || 0));
-        const cfgOne = (config.configured || [])
-            .find((x) => String(x.game_account || '').trim() === game_account) || {};
         const accountPurchaseBase = toMoney2(cfgOne.purchase_price || 0);
         const accountPurchaseDate = String(cfgOne.purchase_date || '').slice(0, 10);
         const accountAnnualizedDays = annualizedDaysByPurchaseDate(periodInfo.startDate, periodInfo.endDate, accountPurchaseDate);
@@ -544,6 +548,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
             role_name: roleName || game_account,
             display_name: displayName,
             purchase_base: accountPurchaseBase,
+            purchase_date: accountPurchaseDate,
             avg_daily_order_cnt: Number((Number(s.order_cnt_effective || 0) / periodDays).toFixed(4)),
             avg_daily_rent_hour: Number((Number(s.rent_hour_sum || 0) / periodDays).toFixed(4)),
             avg_order_price: Number((Number(s.amount_order_sum || 0) / orderBase).toFixed(4)),

@@ -180,7 +180,7 @@
               <p class="stats-acc-name">${x.display_name || x.role_name || x.game_account || '-'}</p>
               <span class="stats-acc-money">¥${Number(x.amount_rec_sum || 0).toFixed(2)}</span>
             </div>
-            <p class="stats-acc-meta">账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)}</p>
+            <p class="stats-acc-meta">账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)} · 采购：${x.purchase_date || '-'}</p>
             <div class="stats-acc-grid">
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">账号成本</p><p class="stats-acc-chip-v">¥${Number(x.purchase_base || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">年化(单利)</p><p class="stats-acc-chip-v">${(Number(x.annualized_return_rate || 0) * 100).toFixed(2)}%</p></div>
