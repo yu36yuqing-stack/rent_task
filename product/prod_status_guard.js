@@ -438,8 +438,9 @@ async function applyInitialControlForAccount(userId, account, auth, logger) {
     } catch (e) {
         return { ok: false, error: `blacklist_add_failed:${e.message}` };
     }
+    let forbidRet = null;
     try {
-        await setForbiddenPlayWithSnapshot(uid, acc, true, {
+        forbidRet = await setForbiddenPlayWithSnapshot(uid, acc, true, {
             auth,
             game_name: 'WZRY',
             desc: 'update by prod_status_guard init control'
@@ -447,7 +448,10 @@ async function applyInitialControlForAccount(userId, account, auth, logger) {
     } catch (e) {
         return { ok: false, error: `forbidden_enable_failed:${e.message}` };
     }
-    return { ok: true };
+    return {
+        ok: true,
+        forbidden_applied: !Boolean(forbidRet && forbidRet.skipped)
+    };
 }
 
 async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {}) {
@@ -524,12 +528,12 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
                 const patch = {
                     status: TASK_STATUS_WATCHING,
                     blacklist_applied: 1,
-                    forbidden_applied: 1,
+                    forbidden_applied: initRet.forbidden_applied ? 1 : 0,
                     last_online_tag: 'ON',
                     next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC,
-                    forbidden_on_at: toDateTimeText(),
                     last_error: ''
                 };
+                if (initRet.forbidden_applied) patch.forbidden_on_at = toDateTimeText();
                 await updateGuardTaskStatus(task.id, patch);
                 activated += 1;
             } else {
@@ -706,12 +710,12 @@ async function processOneSheepFixTask(task, authCache, userSwitchCache, logger) 
             const patch = {
                 status: TASK_STATUS_WATCHING,
                 blacklist_applied: 1,
-                forbidden_applied: 1,
+                forbidden_applied: initRet.forbidden_applied ? 1 : 0,
                 last_online_tag: 'ON',
                 next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC,
                 last_error: ''
             };
-            if (!String(task.forbidden_on_at || '').trim()) patch.forbidden_on_at = toDateTimeText();
+            if (initRet.forbidden_applied && !String(task.forbidden_on_at || '').trim()) patch.forbidden_on_at = toDateTimeText();
             await updateGuardTaskStatus(task.id, patch);
             return;
         }

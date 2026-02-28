@@ -12,7 +12,10 @@ const PATH_ORDER_LIST = '/api/youpin/rent-connector/order/v1/list';
 const PATH_ORDER_DETAIL = '/api/youpin/rent-connector/order/v1/detail';
 
 const GAME_ID_BY_NAME = {
-    WZRY: 1
+    WZRY: 1,
+    王者荣耀: 1,
+    HPJY: 2,
+    和平精英: 2
 };
 
 function toSignValue(value) {
@@ -244,7 +247,7 @@ function resolveGameIdByName(gameName = 'WZRY') {
 
 // 查询账号游戏在线状态：
 // - accountId 对应项目里的 game_account
-// - game_name 目前支持 WZRY（映射 gameId=1）
+// - game_name 支持 WZRY/王者荣耀（gameId=1）与 HPJY/和平精英（gameId=2）
 // - 使用与商品接口一致的 appKey + sign 签名方式
 async function queryAccountOnlineStatus(accountId, gameName = 'WZRY', options = {}) {
     const auth = options.auth || {};

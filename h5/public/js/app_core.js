@@ -172,6 +172,7 @@
       forbiddenSheet: {
         open: false,
         account: '',
+        game_name: 'WZRY',
         role_name: '',
         result_text: '',
         result_type: '',
@@ -958,6 +959,7 @@
       state.forbiddenSheet = {
         open: false,
         account: '',
+        game_name: 'WZRY',
         role_name: '',
         result_text: '',
         result_type: '',

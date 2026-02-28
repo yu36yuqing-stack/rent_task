@@ -14,8 +14,8 @@ const PLATFORM_ZHW = 'zuhaowang';
 const PLATFORM_UHZ = 'uhaozu';
 const PLATFORM_YYZ = 'uuzuhao';
 
-function keyOf(gameName, gameAccount) {
-    return `${String(gameName || 'WZRY')}::${String(gameAccount || '')}`;
+function keyOf(gameId, gameAccount) {
+    return `${String(gameId || '1')}::${String(gameAccount || '')}`;
 }
 
 function normalizeGameName(raw) {
@@ -23,6 +23,29 @@ function normalizeGameName(raw) {
     if (!v) return 'WZRY';
     if (v === '王者荣耀' || v.toLowerCase() === 'wzry' || v === '王者') return 'WZRY';
     return v;
+}
+
+function mapChannelGameToStandard(platform, gameIdRaw, gameNameRaw) {
+    const gid = String(gameIdRaw || '').trim();
+    if (platform === PLATFORM_YYZ) {
+        if (gid === '2') return { game_id: '2', game_name: '和平精英' };
+        return { game_id: '1', game_name: 'WZRY' };
+    }
+    if (platform === PLATFORM_UHZ) {
+        if (gid === 'A2705') return { game_id: '1', game_name: 'WZRY' };
+        if (gid === 'A2706') return { game_id: '2', game_name: '和平精英' };
+        const gn = normalizeGameName(gameNameRaw || '');
+        if (gn === '和平精英') return { game_id: '2', game_name: '和平精英' };
+        return { game_id: '1', game_name: 'WZRY' };
+    }
+    if (platform === PLATFORM_ZHW) {
+        if (gid === '1104466820') return { game_id: '1', game_name: 'WZRY' };
+        if (gid === '1106467070') return { game_id: '2', game_name: '和平精英' };
+        const gn = normalizeGameName(gameNameRaw || '');
+        if (gn === '和平精英') return { game_id: '2', game_name: '和平精英' };
+        return { game_id: '1', game_name: 'WZRY' };
+    }
+    return { game_id: '1', game_name: 'WZRY' };
 }
 
 function buildPlatformPrdInfo(platform, row = {}) {
@@ -40,6 +63,7 @@ function buildPlatformPrdInfo(platform, row = {}) {
         const raw = row.raw && typeof row.raw === 'object' ? row.raw : {};
         return {
             prd_id: String(row.id || ''),
+            game_id: String(raw.gameId || ''),
             remark: String(row.remark || ''),
             role_name: String(raw.gameRoleName || ''),
             reason: String(row.reason || '').trim(),
@@ -54,6 +78,7 @@ function buildPlatformPrdInfo(platform, row = {}) {
         const raw = row.raw && typeof row.raw === 'object' ? row.raw : {};
         return {
             prd_id: String(row.id || ''),
+            game_id: String(raw.gameId || ''),
             remark: String(row.remark || ''),
             role_name: String(raw.roleName || ''),
             reason: String(row.reason || '').trim(),
@@ -85,8 +110,8 @@ async function pullPlatformDataByAuth(platform, authPayload = {}) {
             : authPayload;
         const list = await getGoodsList(nested);
         return list.map((x) => ({
+            ...mapChannelGameToStandard(PLATFORM_ZHW, x.gameId, x.gameName),
             game_account: String(x.account || '').trim(),
-            game_name: normalizeGameName(x.gameName || 'WZRY'),
             status: String(x.status || '未知'),
             prd_info: buildPlatformPrdInfo(PLATFORM_ZHW, x)
         })).filter((x) => x.game_account);
@@ -96,8 +121,8 @@ async function pullPlatformDataByAuth(platform, authPayload = {}) {
         const result = await collectUhaozuData(null, '', { auth: authPayload });
         const list = Array.isArray(result?.data) ? result.data : [];
         return list.map((x) => ({
+            ...mapChannelGameToStandard(PLATFORM_UHZ, x && x.raw && x.raw.gameId, x && x.raw && x.raw.gameName),
             game_account: String(x.account || '').trim(),
-            game_name: 'WZRY',
             status: String(x.status || '未知'),
             prd_info: buildPlatformPrdInfo(PLATFORM_UHZ, x)
         })).filter((x) => x.game_account);
@@ -107,8 +132,8 @@ async function pullPlatformDataByAuth(platform, authPayload = {}) {
         const result = await collectYoupinData(null, '', { auth: authPayload });
         const list = Array.isArray(result?.data) ? result.data : [];
         return list.map((x) => ({
+            ...mapChannelGameToStandard(PLATFORM_YYZ, x && x.raw && x.raw.gameId, x && x.raw && x.raw.gameName),
             game_account: String(x.account || '').trim(),
-            game_name: 'WZRY',
             status: String(x.status || '未知'),
             prd_info: buildPlatformPrdInfo(PLATFORM_YYZ, x),
             account_remark: String((x.raw && x.raw.roleName) || '')
@@ -158,9 +183,10 @@ async function syncUserAccountsByAuth(userId) {
             const pulledRows = await pullPlatformDataByAuth(platform, authPayload);
             pulled[platform] = pulledRows.length;
             for (const item of pulledRows) {
-                const k = keyOf(item.game_name, item.game_account);
+                const k = keyOf(item.game_id, item.game_account);
                 const cur = merged.get(k) || {
                     game_account: item.game_account,
+                    game_id: String(item.game_id || '1'),
                     game_name: item.game_name,
                     channel_status: {},
                     channel_prd_info: {},
@@ -184,6 +210,7 @@ async function syncUserAccountsByAuth(userId) {
         await upsertUserGameAccount({
             user_id: uid,
             game_account: item.game_account,
+            game_id: item.game_id,
             game_name: item.game_name,
             account_remark: item.account_remark,
             channel_status: item.channel_status,

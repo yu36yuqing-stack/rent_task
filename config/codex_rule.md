@@ -84,3 +84,17 @@
   2. 如确实无法满足，优先新增“变体类”，避免新增全新组件。
   3. 仅在必要时新增组件；新增后必须同步更新 `h5/COMPONENT_GUIDE.md`。
 - 页面专属样式必须带页面锚点（如 `#riskView ...`），避免污染全局样式。
+
+## Rule 8 - 通知研发规范
+
+后续所有 Telegram / 钉钉等通知开发，统一遵循“模板与发送解耦”规范：
+
+- 消息模板（文案拼装）统一放在 style 文件：
+  - 钉钉：`report/dingding/ding_style.js`
+  - Telegram：`report/telegram/*_style.js`
+- 发送器只负责发送，不承载业务文案拼装：
+  - 钉钉：`report/dingding/ding_notify.js`
+- 业务模块（如 `order/*`、`product/*`、`report/*`）只能：
+  1. 调用 style 方法生成消息文本；
+  2. 调用 notify 方法发送消息。
+- 禁止在业务文件内临时新增/散落通知模板函数，避免同类通知多份文案长期漂移。

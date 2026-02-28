@@ -10,6 +10,12 @@ function shortState(s) {
 
 const REPORT_VERSION = 'v1.0.6';
 
+function nowDateTimeText() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 function normalizeAuthorizedPlatforms(input) {
     const all = ['uuzuhao', 'uhaozu', 'zuhaowang'];
     const arr = Array.isArray(input) ? input : [];
@@ -88,6 +94,35 @@ function buildDingdingMessage(payload) {
     return lines.join('\n');
 }
 
+function buildComplaintFirstHitText(payload = {}) {
+    const userName = String(payload.user_name || payload.user_account || '').trim();
+    const userText = userName ? `${String(payload.user_id || '')}(${userName})` : String(payload.user_id || '');
+    const orderNo = String(payload.order_no || '').trim();
+    const channel = String(payload.channel || '').trim();
+    const gameAccount = String(payload.game_account || '').trim();
+    const roleName = String(payload.role_name || '').trim();
+    const complaintStatus = Number(payload.complaint_status || 0);
+    const complaintId = String(payload.complaint_id || '').trim();
+    const complaintTypeDesc = String(payload.complaint_type_desc || '').trim();
+    const complaintContext = String(payload.complaint_context || '').trim();
+    const complaintStart = String(payload.complaint_start_time || '').trim();
+    const lines = [
+        '⚠️ 新增投诉',
+        `时间: ${nowDateTimeText()}`,
+        `用户: ${userText || '-'}`,
+        `渠道: ${channel || '-'}`,
+        `订单号: ${orderNo || '-'}`,
+        `账号: ${gameAccount || '-'}${roleName ? ` (${roleName})` : ''}`,
+        `投诉状态: ${complaintStatus || '-'}`,
+        `投诉ID: ${complaintId || '-'}`,
+        `投诉类型: ${complaintTypeDesc || '-'}`,
+        `投诉时间: ${complaintStart || '-'}`
+    ];
+    if (complaintContext) lines.push(`投诉内容: ${complaintContext.slice(0, 80)}${complaintContext.length > 80 ? '...' : ''}`);
+    return lines.join('\n');
+}
+
 module.exports = {
-    buildDingdingMessage
+    buildDingdingMessage,
+    buildComplaintFirstHitText
 };

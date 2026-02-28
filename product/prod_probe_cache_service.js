@@ -1,5 +1,6 @@
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const {
+    getLatestUserGameAccountByUserAndAccount,
     getUserGameAccountProbeSnapshotsByUserAndAccount,
     updateUserGameAccountOnlineProbeSnapshot,
     updateUserGameAccountForbiddenProbeSnapshot
@@ -11,6 +12,7 @@ const {
 } = require('../uuzuhao/uuzuhao_api');
 
 const DEFAULT_PROBE_CACHE_TTL_SEC = Math.max(1, Number(process.env.PROBE_CACHE_TTL_SEC || 60));
+const FORBIDDEN_ONLY_GAME_ID_1 = String(process.env.FORBIDDEN_ONLY_GAME_ID_1 || '1').trim() !== '0';
 
 function nowText() {
     const d = new Date();
@@ -51,12 +53,30 @@ async function resolveUuzuhaoAuthByUser(userId) {
     return payload;
 }
 
+async function resolveAccountGameProfile(userId, gameAccount, fallbackGameName = 'WZRY') {
+    const uid = Number(userId || 0);
+    const acc = String(gameAccount || '').trim();
+    if (!uid || !acc) return { game_id: '1', game_name: fallbackGameName };
+    try {
+        const row = await getLatestUserGameAccountByUserAndAccount(uid, acc);
+        if (!row) return { game_id: '1', game_name: fallbackGameName };
+        return {
+            game_id: String(row.game_id || '1').trim() || '1',
+            game_name: String(row.game_name || fallbackGameName).trim() || fallbackGameName
+        };
+    } catch {
+        return { game_id: '1', game_name: fallbackGameName };
+    }
+}
+
 async function queryOnlineStatusCached(userId, gameAccount, options = {}) {
     const uid = Number(userId || 0);
     const acc = String(gameAccount || '').trim();
     const gameName = String(options.game_name || 'WZRY').trim() || 'WZRY';
     if (!uid) throw new Error('user_id 不合法');
     if (!acc) throw new Error('game_account 不能为空');
+    const profile = await resolveAccountGameProfile(uid, acc, gameName);
+    const finalGameName = String(profile.game_name || gameName).trim() || gameName;
     const ttlSec = Math.max(1, Number(options.ttl_sec || DEFAULT_PROBE_CACHE_TTL_SEC));
     const nowSec = Math.floor(Date.now() / 1000);
     const forceRefresh = Boolean(options.force_refresh);
@@ -71,7 +91,7 @@ async function queryOnlineStatusCached(userId, gameAccount, options = {}) {
         if (querySec > 0 && (nowSec - querySec) < ttlSec && typeof snap.online === 'boolean') {
             return {
                 game_account: acc,
-                game_name: gameName,
+                game_name: finalGameName,
                 online: Boolean(snap.online),
                 query_time: queryTime,
                 cached: true
@@ -82,7 +102,7 @@ async function queryOnlineStatusCached(userId, gameAccount, options = {}) {
     const auth = options.auth && typeof options.auth === 'object'
         ? options.auth
         : await resolveUuzuhaoAuthByUser(uid);
-    const result = await queryAccountOnlineStatus(acc, gameName, { auth });
+    const result = await queryAccountOnlineStatus(acc, finalGameName, { auth });
     const queryTime = nowText();
     await updateUserGameAccountOnlineProbeSnapshot(uid, acc, {
         online: Boolean(result && result.online),
@@ -90,7 +110,7 @@ async function queryOnlineStatusCached(userId, gameAccount, options = {}) {
     }, String(options.desc || 'update by probe cache service').trim());
     return {
         game_account: acc,
-        game_name: String((result && result.game_name) || gameName).trim() || gameName,
+        game_name: String((result && result.game_name) || finalGameName).trim() || finalGameName,
         online: Boolean(result && result.online),
         query_time: queryTime,
         cached: false
@@ -106,6 +126,25 @@ async function queryForbiddenStatusCached(userId, gameAccount, options = {}) {
     const ttlSec = Math.max(1, Number(options.ttl_sec || DEFAULT_PROBE_CACHE_TTL_SEC));
     const nowSec = Math.floor(Date.now() / 1000);
     const forceRefresh = Boolean(options.force_refresh);
+    const profile = await resolveAccountGameProfile(uid, acc, gameName);
+    const finalGameName = String(profile.game_name || gameName).trim() || gameName;
+    if (FORBIDDEN_ONLY_GAME_ID_1 && String(profile.game_id || '1') !== '1') {
+        const queryTime = nowText();
+        await updateUserGameAccountForbiddenProbeSnapshot(uid, acc, {
+            enabled: false,
+            query_time: queryTime
+        }, String(options.desc || 'skip forbidden query by game_id gate').trim());
+        return {
+            game_account: acc,
+            game_name: finalGameName,
+            enabled: false,
+            query_time: queryTime,
+            type: 1,
+            cached: false,
+            skipped: true,
+            skip_reason: `forbidden_not_supported_for_game_id_${String(profile.game_id)}`
+        };
+    }
 
     if (!forceRefresh) {
         const cached = await getUserGameAccountProbeSnapshotsByUserAndAccount(uid, acc);
@@ -117,7 +156,7 @@ async function queryForbiddenStatusCached(userId, gameAccount, options = {}) {
         if (querySec > 0 && (nowSec - querySec) < ttlSec && typeof snap.enabled === 'boolean') {
             return {
                 game_account: acc,
-                game_name: gameName,
+                game_name: finalGameName,
                 enabled: Boolean(snap.enabled),
                 query_time: queryTime,
                 type: 1,
@@ -129,7 +168,7 @@ async function queryForbiddenStatusCached(userId, gameAccount, options = {}) {
     const auth = options.auth && typeof options.auth === 'object'
         ? options.auth
         : await resolveUuzuhaoAuthByUser(uid);
-    const result = await queryForbiddenPlay(acc, { auth, game_name: gameName });
+    const result = await queryForbiddenPlay(acc, { auth, game_name: finalGameName });
     const queryTime = nowText();
     await updateUserGameAccountForbiddenProbeSnapshot(uid, acc, {
         enabled: Boolean(result && result.enabled),
@@ -137,7 +176,7 @@ async function queryForbiddenStatusCached(userId, gameAccount, options = {}) {
     }, String(options.desc || 'update by probe cache service').trim());
     return {
         game_account: acc,
-        game_name: String((result && result.game_name) || gameName).trim() || gameName,
+        game_name: String((result && result.game_name) || finalGameName).trim() || finalGameName,
         enabled: Boolean(result && result.enabled),
         query_time: queryTime,
         type: Number((result && result.type) || 1),
@@ -151,10 +190,28 @@ async function setForbiddenPlayWithSnapshot(userId, gameAccount, enabled, option
     const gameName = String(options.game_name || 'WZRY').trim() || 'WZRY';
     if (!uid) throw new Error('user_id 不合法');
     if (!acc) throw new Error('game_account 不能为空');
+    const profile = await resolveAccountGameProfile(uid, acc, gameName);
+    const finalGameName = String(profile.game_name || gameName).trim() || gameName;
+    if (FORBIDDEN_ONLY_GAME_ID_1 && String(profile.game_id || '1') !== '1') {
+        const queryTime = nowText();
+        await updateUserGameAccountForbiddenProbeSnapshot(uid, acc, {
+            enabled: false,
+            query_time: queryTime
+        }, String(options.desc || 'skip forbidden set by game_id gate').trim());
+        return {
+            game_account: acc,
+            game_name: finalGameName,
+            enabled: false,
+            query_time: queryTime,
+            type: 2,
+            skipped: true,
+            skip_reason: `forbidden_not_supported_for_game_id_${String(profile.game_id)}`
+        };
+    }
     const auth = options.auth && typeof options.auth === 'object'
         ? options.auth
         : await resolveUuzuhaoAuthByUser(uid);
-    const result = await setForbiddenPlay(acc, Boolean(enabled), { auth, game_name: gameName, type: 2 });
+    const result = await setForbiddenPlay(acc, Boolean(enabled), { auth, game_name: finalGameName, type: 2 });
     const queryTime = nowText();
     await updateUserGameAccountForbiddenProbeSnapshot(uid, acc, {
         enabled: Boolean(result && result.enabled),
@@ -162,7 +219,7 @@ async function setForbiddenPlayWithSnapshot(userId, gameAccount, enabled, option
     }, String(options.desc || 'update by probe set').trim());
     return {
         game_account: acc,
-        game_name: String((result && result.game_name) || gameName).trim() || gameName,
+        game_name: String((result && result.game_name) || finalGameName).trim() || finalGameName,
         enabled: Boolean(result && result.enabled),
         query_time: queryTime,
         type: Number((result && result.type) || 2)

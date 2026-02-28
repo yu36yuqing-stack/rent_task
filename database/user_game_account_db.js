@@ -5,7 +5,21 @@ const GAME_NAME_ALIASES = new Map([
     ['wzry', 'WZRY'],
     ['王者荣耀', 'WZRY'],
     ['王者', 'WZRY'],
-    ['王者荣耀手游', 'WZRY']
+    ['王者荣耀手游', 'WZRY'],
+    ['hpjy', '和平精英'],
+    ['和平', '和平精英'],
+    ['和平精英手游', '和平精英'],
+    ['pubg', '和平精英']
+]);
+const CANONICAL_GAME_ID_BY_NAME = new Map([
+    ['WZRY', '1'],
+    ['和平精英', '2']
+]);
+const CANONICAL_GAME_NAME_BY_ID = new Map([
+    ['1', 'WZRY'],
+    ['2', '和平精英'],
+    ['A2705', 'WZRY'],
+    ['1104466820', 'WZRY']
 ]);
 
 function nowText() {
@@ -58,6 +72,21 @@ function canonicalGameName(input) {
     if (GAME_NAME_ALIASES.has(raw)) return GAME_NAME_ALIASES.get(raw);
     if (GAME_NAME_ALIASES.has(low)) return GAME_NAME_ALIASES.get(low);
     return raw;
+}
+
+function canonicalGameId(inputId, inputName) {
+    const rawId = String(inputId || '').trim();
+    if (rawId && CANONICAL_GAME_NAME_BY_ID.has(rawId)) {
+        const name = CANONICAL_GAME_NAME_BY_ID.get(rawId);
+        return String(CANONICAL_GAME_ID_BY_NAME.get(name) || '1');
+    }
+    const name = canonicalGameName(inputName || 'WZRY');
+    return String(CANONICAL_GAME_ID_BY_NAME.get(name) || '1');
+}
+
+function canonicalGameNameById(inputId, inputName) {
+    const id = canonicalGameId(inputId, inputName);
+    return String(CANONICAL_GAME_NAME_BY_ID.get(id) || canonicalGameName(inputName || 'WZRY') || 'WZRY');
 }
 
 function normalizeStatusJson(input) {
@@ -137,7 +166,8 @@ function rowToAccount(row = {}) {
         user_id: Number(row.user_id || 0),
         game_account: String(row.game_account || ''),
         account_remark: String(row.account_remark || ''),
-        game_name: canonicalGameName(row.game_name || 'WZRY'),
+        game_id: canonicalGameId(row.game_id, row.game_name),
+        game_name: canonicalGameNameById(row.game_id, row.game_name),
         channel_status: channelStatus,
         channel_prd_info: channelPrdInfo,
         online_probe_snapshot: onlineProbeSnapshot,
@@ -156,6 +186,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
         'user_id',
         'game_account',
         'account_remark',
+        'game_id',
         'game_name',
         'channel_status',
         'channel_prd_info',
@@ -173,12 +204,13 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
     }
 
     await run(db, `ALTER TABLE user_game_account RENAME TO user_game_account_old`);
-    await run(db, `
+        await run(db, `
         CREATE TABLE user_game_account (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             game_account TEXT NOT NULL,
             account_remark TEXT NOT NULL DEFAULT '',
+            game_id TEXT NOT NULL DEFAULT '1',
             game_name TEXT NOT NULL DEFAULT 'WZRY',
             channel_status TEXT NOT NULL DEFAULT '{}',
             channel_prd_info TEXT NOT NULL DEFAULT '{}',
@@ -193,12 +225,17 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
     `);
     await run(db, `
         INSERT INTO user_game_account
-        (id, user_id, game_account, account_remark, game_name, channel_status, channel_prd_info, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, modify_date, is_deleted, desc)
+        (id, user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, modify_date, is_deleted, desc)
         SELECT
             id,
             user_id,
             game_account,
             COALESCE(account_remark, ''),
+            CASE
+                WHEN TRIM(COALESCE(game_id, '')) <> '' THEN COALESCE(game_id, '1')
+                WHEN COALESCE(game_name, 'WZRY') IN ('和平精英') THEN '2'
+                ELSE '1'
+            END,
             COALESCE(game_name, 'WZRY'),
             COALESCE(channel_status, '{}'),
             COALESCE(channel_prd_info, '{}'),
@@ -222,8 +259,9 @@ async function initUserGameAccountDb() {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 game_account TEXT NOT NULL,
-                game_name TEXT NOT NULL DEFAULT 'WZRY',
                 account_remark TEXT NOT NULL DEFAULT '',
+                game_id TEXT NOT NULL DEFAULT '1',
+                game_name TEXT NOT NULL DEFAULT 'WZRY',
                 channel_status TEXT NOT NULL DEFAULT '{}',
                 channel_prd_info TEXT NOT NULL DEFAULT '{}',
                 online_probe_snapshot TEXT NOT NULL DEFAULT '{}',
@@ -238,6 +276,17 @@ async function initUserGameAccountDb() {
         const cols = await tableColumns(db, 'user_game_account');
         if (!cols.has('account_remark')) {
             await run(db, `ALTER TABLE user_game_account ADD COLUMN account_remark TEXT NOT NULL DEFAULT ''`);
+        }
+        if (!cols.has('game_id')) {
+            await run(db, `ALTER TABLE user_game_account ADD COLUMN game_id TEXT NOT NULL DEFAULT '1'`);
+            await run(db, `
+                UPDATE user_game_account
+                SET game_id = CASE
+                    WHEN COALESCE(game_name, 'WZRY') IN ('和平精英') THEN '2'
+                    ELSE '1'
+                END
+                WHERE TRIM(COALESCE(game_id, '')) = ''
+            `);
         }
         if (!cols.has('channel_prd_info')) {
             await run(db, `ALTER TABLE user_game_account ADD COLUMN channel_prd_info TEXT NOT NULL DEFAULT '{}'`);
@@ -255,9 +304,10 @@ async function initUserGameAccountDb() {
             await run(db, `ALTER TABLE user_game_account ADD COLUMN forbidden_probe_snapshot TEXT NOT NULL DEFAULT '{}'`);
         }
         await reorderUserGameAccountColumnsIfNeeded(db);
+        await run(db, `DROP INDEX IF EXISTS uq_user_game_account_alive`);
         await run(db, `
             CREATE UNIQUE INDEX IF NOT EXISTS uq_user_game_account_alive
-            ON user_game_account(user_id, game_name, game_account, is_deleted)
+            ON user_game_account(user_id, game_id, game_account, is_deleted)
         `);
         await run(db, `
             CREATE INDEX IF NOT EXISTS idx_user_game_account_user_alive
@@ -281,7 +331,7 @@ function parseJsonObject(raw) {
 
 async function compactCanonicalGameNames(db) {
     const rows = await all(db, `
-        SELECT id, user_id, game_account, game_name, account_remark, channel_status, channel_prd_info
+        SELECT id, user_id, game_account, game_id, game_name, account_remark, channel_status, channel_prd_info
              , online_probe_snapshot, forbidden_probe_snapshot
         FROM user_game_account
         WHERE is_deleted = 0
@@ -290,10 +340,11 @@ async function compactCanonicalGameNames(db) {
 
     const groups = new Map();
     for (const row of rows) {
-        const gameName = canonicalGameName(row.game_name || 'WZRY');
-        const key = `${Number(row.user_id || 0)}::${gameName}::${String(row.game_account || '').trim()}`;
+        const gameId = canonicalGameId(row.game_id, row.game_name);
+        const gameName = canonicalGameNameById(gameId, row.game_name || 'WZRY');
+        const key = `${Number(row.user_id || 0)}::${gameId}::${String(row.game_account || '').trim()}`;
         const arr = groups.get(key) || [];
-        arr.push({ ...row, game_name: gameName });
+        arr.push({ ...row, game_id: gameId, game_name: gameName });
         groups.set(key, arr);
     }
 
@@ -327,10 +378,11 @@ async function compactCanonicalGameNames(db) {
 
         await run(db, `
             UPDATE user_game_account
-            SET game_name = ?, account_remark = ?, channel_status = ?, channel_prd_info = ?,
+            SET game_id = ?, game_name = ?, account_remark = ?, channel_status = ?, channel_prd_info = ?,
                 online_probe_snapshot = ?, forbidden_probe_snapshot = ?, modify_date = ?
             WHERE id = ?
         `, [
+            keeper.game_id,
             keeper.game_name,
             accountRemark,
             JSON.stringify(mergedStatus),
@@ -347,7 +399,8 @@ async function upsertUserGameAccount(input = {}) {
     await initUserGameAccountDb();
     const userId = Number(input.user_id || 0);
     const gameAccount = String(input.game_account || '').trim();
-    const gameName = canonicalGameName(String(input.game_name || 'WZRY').trim() || 'WZRY');
+    const gameId = canonicalGameId(input.game_id, input.game_name);
+    const gameName = canonicalGameNameById(gameId, String(input.game_name || 'WZRY').trim() || 'WZRY');
     const accountRemark = String(input.account_remark || '').trim();
     const purchasePriceRaw = Number(input.purchase_price);
     const hasPurchasePrice = Number.isFinite(purchasePriceRaw) && purchasePriceRaw >= 0;
@@ -364,17 +417,17 @@ async function upsertUserGameAccount(input = {}) {
     try {
         const row = await get(db, `
             SELECT * FROM user_game_account
-            WHERE user_id = ? AND game_name = ? AND game_account = ? AND is_deleted = 0
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
             LIMIT 1
-        `, [userId, gameName, gameAccount]);
+        `, [userId, gameId, gameAccount]);
 
         if (!row) {
             const deletedRow = await get(db, `
                 SELECT * FROM user_game_account
-                WHERE user_id = ? AND game_name = ? AND game_account = ? AND is_deleted = 1
+                WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 1
                 ORDER BY id DESC
                 LIMIT 1
-            `, [userId, gameName, gameAccount]);
+            `, [userId, gameId, gameAccount]);
 
             if (deletedRow) {
                 let deletedStatus = {};
@@ -398,11 +451,13 @@ async function upsertUserGameAccount(input = {}) {
                 const mergedForbiddenSnapshot = parseJsonObject(deletedRow.forbidden_probe_snapshot);
                 await run(db, `
                     UPDATE user_game_account
-                    SET account_remark = ?, channel_status = ?, channel_prd_info = ?,
+                    SET game_id = ?, game_name = ?, account_remark = ?, channel_status = ?, channel_prd_info = ?,
                         online_probe_snapshot = ?, forbidden_probe_snapshot = ?,
                         purchase_price = ?, purchase_date = ?, modify_date = ?, is_deleted = 0, desc = ?
                     WHERE id = ?
                 `, [
+                    gameId,
+                    gameName,
                     mergedRemark,
                     JSON.stringify(mergedStatus),
                     JSON.stringify(mergedPrdInfo),
@@ -417,12 +472,13 @@ async function upsertUserGameAccount(input = {}) {
             } else {
                 await run(db, `
                     INSERT INTO user_game_account
-                    (user_id, game_account, account_remark, game_name, channel_status, channel_prd_info, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, modify_date, is_deleted, desc)
-                    VALUES (?, ?, ?, ?, ?, ?, '{}', '{}', ?, ?, ?, 0, ?)
+                    (user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, modify_date, is_deleted, desc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, '{}', '{}', ?, ?, ?, 0, ?)
                 `, [
                     userId,
                     gameAccount,
                     accountRemark,
+                    gameId,
                     gameName,
                     JSON.stringify(nextStatus),
                     JSON.stringify(nextPrdInfo),
@@ -469,9 +525,9 @@ async function upsertUserGameAccount(input = {}) {
 
         const updated = await get(db, `
             SELECT * FROM user_game_account
-            WHERE user_id = ? AND game_name = ? AND game_account = ? AND is_deleted = 0
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
             LIMIT 1
-        `, [userId, gameName, gameAccount]);
+        `, [userId, gameId, gameAccount]);
         return rowToAccount(updated);
     } finally {
         db.close();
@@ -520,10 +576,14 @@ async function softDeleteEmptyAccountsByUser(userId) {
 
             const deletedRow = await get(db, `
                 SELECT * FROM user_game_account
-                WHERE user_id = ? AND game_name = ? AND game_account = ? AND is_deleted = 1
+                WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 1
                 ORDER BY id DESC
                 LIMIT 1
-            `, [uid, String(row.game_name || ''), String(row.game_account || '')]);
+            `, [
+                uid,
+                canonicalGameId(row.game_id, row.game_name),
+                String(row.game_account || '')
+            ]);
 
             if (!deletedRow) {
                 await run(db, `
@@ -636,7 +696,7 @@ async function listOwnersByGameAccounts(gameAccounts = [], gameName = '') {
         let whereGameName = '';
         if (gameName) {
             whereGameName = ' AND game_name = ? ';
-            params.push(String(gameName));
+            params.push(canonicalGameNameById('', String(gameName)));
         }
 
         const rows = await all(db, `
@@ -771,6 +831,28 @@ async function getUserGameAccountProbeSnapshotsByUserAndAccount(userId, gameAcco
     }
 }
 
+async function getLatestUserGameAccountByUserAndAccount(userId, gameAccount) {
+    await initUserGameAccountDb();
+    const uid = Number(userId || 0);
+    const acc = String(gameAccount || '').trim();
+    if (!uid) throw new Error('user_id 不合法');
+    if (!acc) throw new Error('game_account 不能为空');
+
+    const db = openDatabase();
+    try {
+        const row = await get(db, `
+            SELECT *
+            FROM user_game_account
+            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            ORDER BY id DESC
+            LIMIT 1
+        `, [uid, acc]);
+        return row ? rowToAccount(row) : null;
+    } finally {
+        db.close();
+    }
+}
+
 async function updateUserGameAccountOnlineProbeSnapshot(userId, gameAccount, input = {}, desc = '') {
     await initUserGameAccountDb();
     const uid = Number(userId || 0);
@@ -849,6 +931,7 @@ module.exports = {
     listOwnersByGameAccounts,
     listAccountRemarksByUserAndAccounts,
     updateUserGameAccountPurchaseByUserAndAccount,
+    getLatestUserGameAccountByUserAndAccount,
     getUserGameAccountProbeSnapshotsByUserAndAccount,
     updateUserGameAccountOnlineProbeSnapshot,
     updateUserGameAccountForbiddenProbeSnapshot

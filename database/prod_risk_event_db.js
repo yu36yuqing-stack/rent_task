@@ -102,6 +102,54 @@ function safeJsonText(v) {
     try { return JSON.stringify(v || {}); } catch { return '{}'; }
 }
 
+function safeJsonObject(v) {
+    if (!v) return {};
+    if (typeof v === 'object' && !Array.isArray(v)) return v;
+    try {
+        const parsed = JSON.parse(String(v));
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+        return {};
+    } catch {
+        return {};
+    }
+}
+
+function normalizeLatestOrder(input) {
+    const src = input && typeof input === 'object' ? input : {};
+    return {
+        order_no: String(src.order_no || '').trim(),
+        end_time: String(src.end_time || '').trim()
+    };
+}
+
+function normalizeSnapshot(input, now) {
+    const out = safeJsonObject(input);
+    out.latest_order = normalizeLatestOrder(out.latest_order);
+    if (!String(out.hit_at || '').trim()) out.hit_at = String(now || '').trim();
+    if (!String(out.first_hit_at || '').trim()) out.first_hit_at = String(out.hit_at || '').trim();
+    return out;
+}
+
+function mergeSnapshotForOpenEvent(oldSnapshotRaw, nextSnapshotRaw, now) {
+    const oldSnapshot = normalizeSnapshot(oldSnapshotRaw, now);
+    const nextSnapshot = normalizeSnapshot(nextSnapshotRaw, now);
+
+    // 事件 open 周期内，订单末次结束时间按首次命中快照冻结。
+    const oldLatest = normalizeLatestOrder(oldSnapshot.latest_order);
+    const hasOldLatest = Boolean(oldLatest.order_no || oldLatest.end_time);
+    nextSnapshot.latest_order = hasOldLatest
+        ? oldLatest
+        : normalizeLatestOrder(nextSnapshot.latest_order);
+
+    if (String(oldSnapshot.first_hit_at || '').trim()) {
+        nextSnapshot.first_hit_at = String(oldSnapshot.first_hit_at || '').trim();
+    }
+    if (String(oldSnapshot.hit_at || '').trim()) {
+        nextSnapshot.hit_at = String(oldSnapshot.hit_at || '').trim();
+    }
+    return nextSnapshot;
+}
+
 async function upsertOpenRiskEvent(userId, gameAccount, riskType, options = {}) {
     await initProdRiskEventDb();
     const uid = Number(userId || 0);
@@ -112,14 +160,13 @@ async function upsertOpenRiskEvent(userId, gameAccount, riskType, options = {}) 
     if (!type) throw new Error('risk_type 不能为空');
 
     const level = String(options.risk_level || 'medium').trim() || 'medium';
-    const snapshot = safeJsonText(options.snapshot);
     const desc = String(options.desc || '').trim();
     const now = nowText();
 
     const db = openDatabase();
     try {
         const old = await get(db, `
-            SELECT id
+            SELECT id, snapshot
             FROM prod_risk_event
             WHERE user_id = ?
               AND game_account = ?
@@ -129,6 +176,7 @@ async function upsertOpenRiskEvent(userId, gameAccount, riskType, options = {}) 
             LIMIT 1
         `, [uid, acc, type, STATUS_OPEN]);
         if (!old) {
+            const snapshot = safeJsonText(normalizeSnapshot(options.snapshot, now));
             const ret = await run(db, `
                 INSERT INTO prod_risk_event
                 (user_id, game_account, risk_type, risk_level, status, hit_at, resolved_at, snapshot, create_date, modify_date, is_deleted, desc)
@@ -136,6 +184,7 @@ async function upsertOpenRiskEvent(userId, gameAccount, riskType, options = {}) 
             `, [uid, acc, type, level, STATUS_OPEN, now, snapshot, now, now, desc]);
             return { id: Number(ret.lastID || 0), inserted: true };
         }
+        const snapshot = safeJsonText(mergeSnapshotForOpenEvent(old.snapshot, options.snapshot, now));
         await run(db, `
             UPDATE prod_risk_event
             SET risk_level = ?,

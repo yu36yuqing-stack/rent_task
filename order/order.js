@@ -19,6 +19,8 @@ const {
     reconcileOrderCooldownEntryByUser
 } = require('./order_cooldown');
 const { initOrderComplaintDb, upsertOrderComplaint, getOrderComplaintByOrder } = require('../database/order_complaint_db');
+const { sendDingdingMessage } = require('../report/dingding/ding_notify');
+const { buildComplaintFirstHitText } = require('../report/dingding/ding_style');
 const { listAllOrders, getOrderDetail } = require('../uuzuhao/uuzuhao_api');
 const { listAllOrderPages } = require('../uhaozu/uhaozu_api');
 const { getOrderListByEncryptedPayload } = require('../zuhaowang/zuhaowang_api');
@@ -552,6 +554,35 @@ function getOrder3OffEnabled(user = {}) {
     return Boolean(sw.order_3_off);
 }
 
+function hasComplaintInfo(input = {}) {
+    if (!input || typeof input !== 'object') return false;
+    const complaintStatus = Number(input.complaint_status ?? input.complaintStatus ?? 0);
+    const complaintId = String(input.complaint_id ?? input.complaintId ?? '').trim();
+    return complaintStatus > 0 || complaintId.length > 0;
+}
+
+function resolveDingdingConfigByUser(user = {}) {
+    const cfg = user && user.notify_config && typeof user.notify_config === 'object'
+        ? user.notify_config
+        : {};
+    const ding = cfg && cfg.dingding && typeof cfg.dingding === 'object'
+        ? cfg.dingding
+        : {};
+    return {
+        webhook: String(ding.webhook || '').trim(),
+        secret: String(ding.secret || '').trim()
+    };
+}
+
+function toComplaintTimeText(rawTs) {
+    const n = Number(rawTs || 0);
+    if (!Number.isFinite(n) || n <= 0) return '';
+    const ms = n > 1e12 ? n : n * 1000;
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return '';
+    return toDateTimeText(d);
+}
+
 function parseTimeToMinute(v) {
     const text = String(v || '').trim();
     const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(text);
@@ -730,6 +761,8 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
         last_sync_ts: lastSyncTs
     })}`);
     const productIndex = await buildUuzuhaoProductIndex(uid);
+    const currentUser = options.user && Number(options.user.id) === uid ? options.user : null;
+    const dingCfg = resolveDingdingConfigByUser(currentUser);
 
     const pulled = await listAllOrders(query, { auth, maxPages: options.maxPages });
     const orderList = Array.isArray(pulled.order_list) ? pulled.order_list : [];
@@ -744,6 +777,9 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
     let complaint_detail_ok = 0;
     let complaint_upserted = 0;
     let complaint_detail_fail = 0;
+    let complaint_notify_sent = 0;
+    let complaint_notify_fail = 0;
+    const complaintNotifyDedup = new Set();
     const needComplaintDetail = (raw = {}) => {
         const complaintStatus = Number(raw && raw.complaintStatus);
         const complaintId = String((raw && raw.complaintId) || '').trim();
@@ -765,13 +801,12 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
 
         if (!needComplaintDetail(raw)) continue;
         complaint_candidates += 1;
+        const oldComplaint = await getOrderComplaintByOrder(uid, CHANNEL_UUZUHAO, mapped.order_no);
+        const hadComplaintBefore = hasComplaintInfo(oldComplaint);
         try {
             const detailRes = await getOrderDetail({ purchaseOrderNo: mapped.order_no }, { auth });
             const detail = detailRes && detailRes.detail && typeof detailRes.detail === 'object' ? detailRes.detail : {};
-            await upsertOrderComplaint({
-                user_id: uid,
-                channel: CHANNEL_UUZUHAO,
-                order_no: mapped.order_no,
+            const complaintRow = {
                 complaint_status: Number(detail.complaintStatus || raw.complaintStatus || 0),
                 complaint_id: String(detail.complaintId || raw.complaintId || '').trim(),
                 complaint_type: Number(detail.complaintType || 0),
@@ -783,9 +818,43 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
                 check_result_desc: String(detail.checkResultDesc || '').trim(),
                 complaint_attachment: String(detail.complaintAttachment || '').trim(),
                 raw_payload: detail
+            };
+            await upsertOrderComplaint({
+                user_id: uid,
+                channel: CHANNEL_UUZUHAO,
+                order_no: mapped.order_no,
+                ...complaintRow
             }, {
                 desc: String(options.desc || 'sync complaint by order/uuzuhao')
             });
+            const hasComplaintNow = hasComplaintInfo(complaintRow);
+            const notifyKey = `${uid}::${CHANNEL_UUZUHAO}::${mapped.order_no}`;
+            if (!hadComplaintBefore && hasComplaintNow && dingCfg.webhook && !complaintNotifyDedup.has(notifyKey)) {
+                try {
+                    await sendDingdingMessage(buildComplaintFirstHitText({
+                        user_id: uid,
+                        user_account: String((currentUser && currentUser.account) || '').trim(),
+                        user_name: String((currentUser && currentUser.name) || '').trim(),
+                        channel: CHANNEL_UUZUHAO,
+                        order_no: mapped.order_no,
+                        game_account: String(mapped.game_account || '').trim(),
+                        role_name: String(mapped.role_name || '').trim(),
+                        complaint_status: complaintRow.complaint_status,
+                        complaint_id: complaintRow.complaint_id,
+                        complaint_type_desc: complaintRow.complaint_type_desc,
+                        complaint_context: complaintRow.complaint_context,
+                        complaint_start_time: toComplaintTimeText(complaintRow.complaint_start_time_raw)
+                    }), {
+                        webhook: dingCfg.webhook,
+                        secret: dingCfg.secret || ''
+                    });
+                    complaint_notify_sent += 1;
+                    complaintNotifyDedup.add(notifyKey);
+                } catch (notifyErr) {
+                    complaint_notify_fail += 1;
+                    console.warn(`[OrderSync][uuzuhao][complaint_notify] user_id=${uid} order_no=${mapped.order_no} notify_failed=${String(notifyErr && notifyErr.message ? notifyErr.message : notifyErr)}`);
+                }
+            }
             complaint_detail_ok += 1;
             complaint_upserted += 1;
         } catch (e) {
@@ -794,7 +863,7 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
         }
     }
     await setLastSyncTimestamp(uid, CHANNEL_UUZUHAO, nowSec, 'order sync watermark');
-    console.log(`[OrderSync][uuzuhao] user_id=${uid} upserted=${upserted} linked=${linked} unlinked=${unlinked} complaint_candidates=${complaint_candidates} complaint_detail_ok=${complaint_detail_ok} complaint_detail_fail=${complaint_detail_fail} set_last_sync_ts=${nowSec}`);
+    console.log(`[OrderSync][uuzuhao] user_id=${uid} upserted=${upserted} linked=${linked} unlinked=${unlinked} complaint_candidates=${complaint_candidates} complaint_detail_ok=${complaint_detail_ok} complaint_detail_fail=${complaint_detail_fail} complaint_notify_sent=${complaint_notify_sent} complaint_notify_fail=${complaint_notify_fail} set_last_sync_ts=${nowSec}`);
 
     return {
         user_id: uid,
@@ -814,7 +883,9 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
             candidates: complaint_candidates,
             detail_ok: complaint_detail_ok,
             upserted: complaint_upserted,
-            detail_fail: complaint_detail_fail
+            detail_fail: complaint_detail_fail,
+            notify_sent: complaint_notify_sent,
+            notify_fail: complaint_notify_fail
         },
         mapping: UUZUHAO_ORDER_FIELD_MAPPING
     };
@@ -1065,6 +1136,7 @@ async function syncOrdersByUser(userId, options = {}) {
 
     const uuzuhaoOptions = {
         ...(options.uuzuhao || {}),
+        user: options.user && Number(options.user.id) === uid ? options.user : null,
         compensation_lookback_sec: Math.max(
             Number((options.uuzuhao || {}).compensation_lookback_sec || 0),
             compensateLookbackSec

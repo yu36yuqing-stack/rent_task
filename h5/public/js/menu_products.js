@@ -121,6 +121,7 @@
 
     async function queryStatus(item) {
       const account = String(item && item.game_account || '').trim();
+      const gameName = String(item && item.game_name || 'WZRY').trim() || 'WZRY';
       if (!account) return;
       state.onlineLoadingMap[account] = true;
       state.forbiddenLoadingMap[account] = true;
@@ -130,11 +131,11 @@
         const [onlineRes, forbiddenRes] = await Promise.all([
           request('/api/products/online', {
             method: 'POST',
-            body: JSON.stringify({ game_account: account, game_name: 'WZRY' })
+            body: JSON.stringify({ game_account: account, game_name: gameName })
           }),
           request('/api/products/forbidden/query', {
             method: 'POST',
-            body: JSON.stringify({ game_account: account, game_name: 'WZRY' })
+            body: JSON.stringify({ game_account: account, game_name: gameName })
           })
         ]);
         const online = Boolean(onlineRes && onlineRes.data && onlineRes.data.online);
@@ -348,6 +349,7 @@
       state.forbiddenSheet = {
         open: false,
         account: '',
+        game_name: 'WZRY',
         role_name: '',
         result_text: '',
         result_type: '',
@@ -369,6 +371,7 @@
       state.forbiddenSheet = {
         open: true,
         account,
+        game_name: String(item && item.game_name || 'WZRY').trim() || 'WZRY',
         role_name: String(item && (item.role_name || item.game_account) || '').trim(),
         result_text: '',
         result_type: '',
@@ -387,6 +390,7 @@
       state.forbiddenSheet = {
         open: false,
         account: '',
+        game_name: 'WZRY',
         role_name: '',
         result_text: '',
         result_type: '',
@@ -404,6 +408,7 @@
       state.forbiddenSheet = {
         open: false,
         account: '',
+        game_name: 'WZRY',
         role_name: '',
         result_text: '',
         result_type: '',
@@ -543,6 +548,7 @@
 
     async function submitForbidden(enabled) {
       const account = String((state.forbiddenSheet || {}).account || '').trim();
+      const gameName = String((state.forbiddenSheet || {}).game_name || 'WZRY').trim() || 'WZRY';
       if (!account) return;
       state.forbiddenSheet.loading = true;
       state.forbiddenSheet.result_text = '处理中...';
@@ -553,7 +559,7 @@
       try {
         const out = await request('/api/products/forbidden/play', {
           method: 'POST',
-          body: JSON.stringify({ game_account: account, game_name: 'WZRY', enabled: Boolean(enabled) })
+          body: JSON.stringify({ game_account: account, game_name: gameName, enabled: Boolean(enabled) })
         });
         const on = Boolean(out && out.data && out.data.enabled);
         const queryTime = String((out && out.data && out.data.query_time) || '').trim();
@@ -582,6 +588,7 @@
 
     async function queryForbidden() {
       const account = String((state.forbiddenSheet || {}).account || '').trim();
+      const gameName = String((state.forbiddenSheet || {}).game_name || 'WZRY').trim() || 'WZRY';
       if (!account) return;
       state.forbiddenSheet.query_loading = true;
       state.forbiddenSheet.result_text = '';
@@ -592,7 +599,7 @@
       try {
         const out = await request('/api/products/forbidden/query', {
           method: 'POST',
-          body: JSON.stringify({ game_account: account, game_name: 'WZRY' })
+          body: JSON.stringify({ game_account: account, game_name: gameName })
         });
         const on = Boolean(out && out.data && out.data.enabled);
         const queryTime = String((out && out.data && out.data.query_time) || '').trim();
