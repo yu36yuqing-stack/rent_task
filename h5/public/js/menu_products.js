@@ -77,6 +77,10 @@
       return text;
     }
 
+    function isMaintenanceReason(reasonText) {
+      return String(reasonText || '').trim() === '维护中';
+    }
+
     function normalizeGameName(gameName, gameId) {
       const n = String(gameName || '').trim();
       const lower = n.toLowerCase();
@@ -144,6 +148,30 @@
         renderList();
       } catch (e) {
         alert(e.message);
+      }
+    }
+
+    async function toggleMaintenance(item) {
+      const account = String(item && item.game_account || '').trim();
+      if (!account) return;
+      const reason = String(item && item.blacklist_reason || '').trim();
+      const enabled = !Boolean(item && item.blacklisted && isMaintenanceReason(reason));
+      try {
+        state.moreOpsSheet.maintenance_loading = true;
+        renderMoreOpsSheet();
+        await request('/api/products/maintenance/toggle', {
+          method: 'POST',
+          body: JSON.stringify({ game_account: account, enabled })
+        });
+        closeMoreOpsSheet();
+        await loadList();
+        renderList();
+        showToast(enabled ? '已开启维护' : '已结束维护');
+      } catch (e) {
+        alert(e.message || (enabled ? '开启维护失败' : '结束维护失败'));
+      } finally {
+        state.moreOpsSheet.maintenance_loading = false;
+        renderMoreOpsSheet();
       }
     }
 
@@ -364,16 +392,24 @@
       const account = String(state.moreOpsSheet.account || '').trim();
       const querying = Boolean(state.onlineLoadingMap[account]);
       const handling = Boolean(state.forbiddenLoadingMap[account]);
+      const maintenanceLoading = Boolean(state.moreOpsSheet.maintenance_loading);
+      const maintenanceEnabled = Boolean(state.moreOpsSheet.maintenance_enabled);
       els.moreOpsSheetTitle.textContent = `更多操作 · ${name || '当前账号'}`;
-      els.moreOpsForbiddenBtn.disabled = querying || handling;
-      els.moreOpsPurchaseBtn.disabled = querying || handling;
-      els.moreOpsCloseBtn.disabled = querying || handling;
+      els.moreOpsForbiddenBtn.disabled = querying || handling || maintenanceLoading;
+      if (els.moreOpsMaintenanceBtn) {
+        els.moreOpsMaintenanceBtn.disabled = querying || handling || maintenanceLoading;
+        els.moreOpsMaintenanceBtn.textContent = maintenanceLoading
+          ? '处理中...'
+          : (maintenanceEnabled ? '结束维护' : '开启维护');
+      }
+      els.moreOpsPurchaseBtn.disabled = querying || handling || maintenanceLoading;
+      els.moreOpsCloseBtn.disabled = querying || handling || maintenanceLoading;
       els.moreOpsForbiddenBtn.textContent = handling ? '处理中...' : '处理禁玩';
     }
 
     function closeActionSheets() {
       state.activeActionSheet = '';
-      state.moreOpsSheet = { open: false, account: '', role_name: '' };
+      state.moreOpsSheet = { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false };
       state.forbiddenSheet = {
         open: false,
         account: '',
@@ -393,7 +429,7 @@
     function openForbiddenSheet(item) {
       const account = String(item && item.game_account || '').trim();
       if (!account) return;
-      state.moreOpsSheet = { open: false, account: '', role_name: '' };
+      state.moreOpsSheet = { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false };
       state.activeActionSheet = 'forbidden';
       renderMoreOpsSheet();
       state.forbiddenSheet = {
@@ -449,7 +485,9 @@
       state.moreOpsSheet = {
         open: true,
         account,
-        role_name: String(item && (item.role_name || item.game_account) || '').trim()
+        role_name: String(item && (item.role_name || item.game_account) || '').trim(),
+        maintenance_enabled: Boolean(item && item.blacklisted && isMaintenanceReason(item.blacklist_reason)),
+        maintenance_loading: false
       };
       renderForbiddenSheet();
       renderMoreOpsSheet();
@@ -457,7 +495,7 @@
 
     function closeMoreOpsSheet() {
       if (state.activeActionSheet === 'more') state.activeActionSheet = '';
-      state.moreOpsSheet = { open: false, account: '', role_name: '' };
+      state.moreOpsSheet = { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false };
       renderMoreOpsSheet();
     }
 

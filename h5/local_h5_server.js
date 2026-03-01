@@ -13,6 +13,7 @@ const {
     initUserBlacklistDb,
     listUserBlacklistByUserWithMeta,
     upsertUserBlacklistEntry,
+    hardDeleteUserBlacklistEntry
 } = require('../database/user_blacklist_db');
 const { deleteBlacklistWithGuard } = require('../blacklist/blacklist_release_guard');
 const {
@@ -45,7 +46,7 @@ const {
     queryForbiddenStatusCached,
     setForbiddenPlayWithSnapshot
 } = require('../product/prod_probe_cache_service');
-const { syncUserAccountsByAuth } = require('../product/product');
+const { runFullUserPipeline } = require('../pipeline/user_pipeline');
 const {
     initProdRiskEventDb,
     listRiskEventsByUser
@@ -83,8 +84,14 @@ const ORDER_SYNC_LOCK_KEY = String(process.env.ORDER_SYNC_LOCK_KEY || 'order_syn
 const ORDER_SYNC_LOCK_LEASE_SEC = Math.max(60, Number(process.env.ORDER_SYNC_LOCK_LEASE_SEC || 1800));
 const STATS_REFRESH_LOCK_WAIT_MS = Math.max(0, Number(process.env.STATS_REFRESH_LOCK_WAIT_MS || 120000));
 const STATS_REFRESH_LOCK_POLL_MS = Math.max(200, Number(process.env.STATS_REFRESH_LOCK_POLL_MS || 800));
+const USER_PIPELINE_LOCK_KEY_PREFIX = String(process.env.USER_PIPELINE_LOCK_KEY_PREFIX || 'pipeline_user');
+const USER_PIPELINE_LOCK_LEASE_SEC = Math.max(60, Number(process.env.USER_PIPELINE_LOCK_LEASE_SEC || 900));
+const USER_PIPELINE_LOCK_WAIT_MS = Math.max(0, Number(process.env.USER_PIPELINE_LOCK_WAIT_MS || 5000));
 const COOLDOWN_BLACKLIST_REASON = '冷却期下架';
+const MAINTENANCE_BLACKLIST_REASON = '维护中';
 const PROBE_CACHE_TTL_SEC = Math.max(1, Number(process.env.PROBE_CACHE_TTL_SEC || 60));
+const ACTION_READ_ONLY = ['1', 'true', 'yes', 'on'].includes(String(process.env.ACTION_READ_ONLY || 'false').toLowerCase());
+const ACTION_ENABLED = !['0', 'false', 'no', 'off'].includes(String(process.env.ACTION_ENABLE || 'true').toLowerCase());
 const authBff = createAuthBff({ requireAuth, readJsonBody, json });
 const orderBff = createOrderBff({ requireAuth, json });
 function normalizeOrderOffThreshold(v, fallback = 3) {
@@ -192,6 +199,18 @@ function parseCooldownUntilSecFromDesc(descText) {
     }
 }
 
+function parseMaintenanceSinceFromDesc(descText) {
+    const raw = String(descText || '').trim();
+    if (!raw) return '';
+    try {
+        const obj = JSON.parse(raw);
+        const since = String((obj && obj.maintain_since) || '').trim();
+        return since;
+    } catch {
+        return '';
+    }
+}
+
 function formatDateTimeByUnixSec(sec) {
     const n = Number(sec || 0);
     if (!Number.isFinite(n) || n <= 0) return '';
@@ -204,10 +223,16 @@ function formatDateTimeByUnixSec(sec) {
 function resolveBlacklistDisplayDate(row = {}) {
     const createDate = String((row && row.create_date) || '').trim();
     const reason = String((row && row.reason) || '').trim();
-    if (reason !== COOLDOWN_BLACKLIST_REASON) return createDate;
-    const untilSec = parseCooldownUntilSecFromDesc(row.desc);
-    const cooldownDate = formatDateTimeByUnixSec(untilSec);
-    return cooldownDate || createDate;
+    if (reason === COOLDOWN_BLACKLIST_REASON) {
+        const untilSec = parseCooldownUntilSecFromDesc(row.desc);
+        const cooldownDate = formatDateTimeByUnixSec(untilSec);
+        return cooldownDate || createDate;
+    }
+    if (reason === MAINTENANCE_BLACKLIST_REASON) {
+        const since = parseMaintenanceSinceFromDesc(row.desc);
+        return since || createDate;
+    }
+    return createDate;
 }
 
 function sleep(ms) {
@@ -512,11 +537,51 @@ async function handleProducts(req, res, urlObj) {
 
 async function handleProductSyncNow(req, res) {
     const user = await requireAuth(req);
-    const out = await syncUserAccountsByAuth(user.id);
-    return json(res, 200, {
-        ok: true,
-        ...out
+    const uid = Number(user && user.id || 0);
+    if (!uid) return json(res, 400, { ok: false, message: 'user_id 非法' });
+    const lockKey = `${USER_PIPELINE_LOCK_KEY_PREFIX}_${uid}`;
+    const lockOwner = `h5/products/sync user_id=${uid} pid=${process.pid}`;
+    const lock = await acquireOrderSyncLockWithWait({
+        key: lockKey,
+        owner: lockOwner,
+        lease_sec: USER_PIPELINE_LOCK_LEASE_SEC,
+        wait_ms: USER_PIPELINE_LOCK_WAIT_MS,
+        poll_ms: STATS_REFRESH_LOCK_POLL_MS
     });
+    if (!lock.acquired) {
+        throw httpError(409, `用户任务执行中，请稍后重试（lock=${lockKey}）`);
+    }
+    try {
+        const fullUser = await getActiveUserById(uid);
+        if (!fullUser || String(fullUser.status || '').trim() !== 'enabled') {
+            throw httpError(401, '用户不存在或已禁用');
+        }
+        const out = await runFullUserPipeline(fullUser, {
+            logger: console,
+            actionEnabled: ACTION_ENABLED,
+            readOnly: ACTION_READ_ONLY
+        });
+        if (!out || !out.ok) {
+            const msg = Array.isArray(out && out.errors) && out.errors.length > 0
+                ? String(out.errors[0] || 'pipeline_failed')
+                : 'pipeline_failed';
+            return json(res, 500, {
+                ok: false,
+                message: msg,
+                data: out || null,
+                lock_key: lockKey,
+                lock_waited_ms: Number(lock.waited_ms || 0)
+            });
+        }
+        return json(res, 200, {
+            ok: true,
+            data: out || null,
+            lock_key: lockKey,
+            lock_waited_ms: Number(lock.waited_ms || 0)
+        });
+    } finally {
+        await releaseLock(lockKey, `release by ${lockOwner}`);
+    }
 }
 
 async function handleOrders(req, res, urlObj) {
@@ -751,6 +816,59 @@ async function handleBlacklistRemove(req, res) {
         removed: Boolean(out && out.removed),
         blocked: Boolean(out && out.blocked),
         blocked_reason: String((out && out.blocked_reason) || '')
+    });
+}
+
+async function handleProductMaintenanceToggle(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const gameAccount = String(body.game_account || '').trim();
+    const enabled = body.enabled === true || String(body.enabled || '').trim().toLowerCase() === 'true';
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+
+    if (enabled) {
+        const now = new Date();
+        const p = (n) => String(n).padStart(2, '0');
+        const maintainSince = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`;
+        const out = await upsertUserBlacklistEntry(
+            user.id,
+            {
+                game_account: gameAccount,
+                reason: MAINTENANCE_BLACKLIST_REASON
+            },
+            {
+                source: 'h5_maintenance',
+                operator: user.account || 'h5_user',
+                desc: JSON.stringify({
+                    type: 'manual_maintenance',
+                    maintain_since: maintainSince,
+                    operator: user.account || 'h5_user'
+                }),
+                create_date: maintainSince
+            }
+        );
+        return json(res, 200, { ok: true, data: { ...out, maintenance_enabled: true } });
+    }
+
+    const removed = await hardDeleteUserBlacklistEntry(
+        user.id,
+        gameAccount,
+        {
+            source: 'h5_maintenance',
+            operator: user.account || 'h5_user',
+            desc: 'manual maintenance end by h5',
+            reason_expected: MAINTENANCE_BLACKLIST_REASON
+        }
+    );
+    if (!removed) {
+        return json(res, 409, { ok: false, message: '该账号当前不是“维护中”状态，无法结束维护' });
+    }
+    return json(res, 200, {
+        ok: true,
+        data: {
+            game_account: gameAccount,
+            maintenance_enabled: false
+        }
     });
 }
 
@@ -1072,6 +1190,7 @@ async function bootstrap() {
             if (req.method === 'GET' && urlObj.pathname === '/api/risk-center/events') return await handleRiskCenterList(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/add') return await handleBlacklistAdd(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/remove') return await handleBlacklistRemove(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/products/maintenance/toggle') return await handleProductMaintenanceToggle(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/auth/platforms') return await authBff.handleGetPlatformAuthList(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/auth/platforms/upsert') return await authBff.handleUpsertPlatformAuth(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/ping') return json(res, 200, { ok: true, ts: Date.now() });

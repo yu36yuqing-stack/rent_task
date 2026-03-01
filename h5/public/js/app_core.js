@@ -182,7 +182,7 @@
         query_status: '',
         query_text: ''
       },
-      moreOpsSheet: { open: false, account: '', role_name: '' },
+      moreOpsSheet: { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false },
       activeActionSheet: '',
       purchaseSheet: {
         open: false,
@@ -325,6 +325,7 @@
       moreOpsSheet: document.getElementById('moreOpsSheet'),
       moreOpsSheetTitle: document.getElementById('moreOpsSheetTitle'),
       moreOpsForbiddenBtn: document.getElementById('moreOpsForbiddenBtn'),
+      moreOpsMaintenanceBtn: document.getElementById('moreOpsMaintenanceBtn'),
       moreOpsPurchaseBtn: document.getElementById('moreOpsPurchaseBtn'),
       moreOpsCloseBtn: document.getElementById('moreOpsCloseBtn'),
       purchaseSheet: document.getElementById('purchaseSheet'),
@@ -972,7 +973,7 @@
         query_status: '',
         query_text: ''
       };
-      state.moreOpsSheet = { open: false, account: '', role_name: '' };
+      state.moreOpsSheet = { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false };
       state.activeActionSheet = '';
       state.purchaseSheet = {
         open: false,
@@ -1213,6 +1214,15 @@
       closeMoreOpsSheet();
       openForbiddenSheet(item);
     });
+    if (els.moreOpsMaintenanceBtn) {
+      els.moreOpsMaintenanceBtn.addEventListener('click', () => {
+        const account = String((state.moreOpsSheet || {}).account || '').trim();
+        if (!account) return;
+        const item = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
+        if (!item) return;
+        void toggleMaintenance(item);
+      });
+    }
     els.moreOpsPurchaseBtn.addEventListener('click', () => {
       const account = String((state.moreOpsSheet || {}).account || '').trim();
       if (!account) return;

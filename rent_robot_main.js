@@ -1,21 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 const util = require('util');
-const {
-    sendTelegram,
-    toReportAccountFromUserGameRow,
-    fillTodayOrderCounts,
-    buildRecentActionsForUser,
-    buildPayloadForOneUser,
-    notifyUserByPayload
-} = require('./report/report_rent_status.js');
+const { sendTelegram } = require('./report/report_rent_status.js');
 const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('./database/user_db.js');
-const { syncUserAccountsByAuth, listAllUserGameAccountsByUser } = require('./product/product');
-const { triggerProdStatusGuard, probeProdOnlineStatus } = require('./product/prod_status_guard');
-const { startOrderSyncWorkerIfNeeded, reconcileOrder3OffBlacklistByUser } = require('./order/order');
+const { startOrderSyncWorkerIfNeeded } = require('./order/order');
 const { startOrderStatsWorkerIfNeeded } = require('./stats/order_stats');
-const { loadUserBlacklistSet, loadUserBlacklistReasonMap } = require('./user/user');
-const { executeUserActionsIfNeeded } = require('./action_engine/action_engine.js');
+const { tryAcquireLock: tryAcquireDbLock, releaseLock: releaseDbLock } = require('./database/lock_db');
+const { runFullUserPipeline } = require('./pipeline/user_pipeline');
 
 // ===== 基础目录与运行开关 =====
 const TASK_DIR = __dirname;
@@ -35,6 +26,8 @@ const ORDER_STATS_DAILY_TARGET_HOUR = Math.max(0, Math.min(23, Number(process.en
 const ORDER_STATS_DAILY_TARGET_MINUTE = Math.max(0, Math.min(59, Number(process.env.ORDER_STATS_DAILY_TARGET_MINUTE || 0)));
 const ORDER_STATS_DAILY_WINDOW_SEC = Math.max(0, Number(process.env.ORDER_STATS_DAILY_WINDOW_SEC || 300));
 const ORDER_STATS_DAILY_FORCE = ['1', 'true', 'yes', 'on'].includes(String(process.env.ORDER_STATS_DAILY_FORCE || 'false').toLowerCase());
+const USER_PIPELINE_LOCK_KEY_PREFIX = String(process.env.USER_PIPELINE_LOCK_KEY_PREFIX || 'pipeline_user');
+const USER_PIPELINE_LOCK_LEASE_SEC = Math.max(60, Number(process.env.USER_PIPELINE_LOCK_LEASE_SEC || 900));
 
 // 主日志: 保留控制台输出，同时落盘到 log/rent_robot_main.log
 function setupMainLogger() {
@@ -102,32 +95,6 @@ function releaseLock() {
     }
 }
 
-function applyActionResultToRows(rows = [], actions = []) {
-    if (!Array.isArray(rows) || rows.length === 0) return;
-    if (!Array.isArray(actions) || actions.length === 0) return;
-    const rowMap = new Map();
-    for (const row of rows) {
-        const acc = String((row && row.game_account) || '').trim();
-        if (!acc) continue;
-        rowMap.set(acc, row);
-    }
-    for (const act of actions) {
-        const type = String((act && act.type) || '').trim();
-        const acc = String((act && act.item && act.item.account) || '').trim();
-        if (!type || !acc) continue;
-        const row = rowMap.get(acc);
-        if (!row) continue;
-        const cs = row.channel_status && typeof row.channel_status === 'object' ? row.channel_status : {};
-        if (type === 'off_y') cs.uuzuhao = '下架';
-        else if (type === 'on_y') cs.uuzuhao = '上架';
-        else if (type === 'off_u') cs.uhaozu = '下架';
-        else if (type === 'on_u') cs.uhaozu = '上架';
-        else if (type === 'off_z') cs.zuhaowang = '下架';
-        else if (type === 'on_z') cs.zuhaowang = '上架';
-        row.channel_status = cs;
-    }
-}
-
 const HISTORY_FILE = path.join(TASK_DIR, 'rent_robot_history.jsonl');
 
 async function runPipeline(runRecord) {
@@ -153,96 +120,60 @@ async function runPipeline(runRecord) {
 
     // 用户级主流程（拉取 -> 策略/执行 -> 通知）
     for (const user of targets) {
-        let rows = [];
-        let blacklistSet = new Set();
-        let blacklistReasonMap = {};
+        const uid = Number(user && user.id || 0);
+        const userLockKey = `${USER_PIPELINE_LOCK_KEY_PREFIX}_${uid}`;
+        const userLockOwner = `cron/pipeline user_id=${uid} pid=${process.pid}`;
+        const userLock = await tryAcquireDbLock(userLockKey, USER_PIPELINE_LOCK_LEASE_SEC, userLockOwner);
+        if (!userLock || !userLock.acquired) {
+            const leaseUntil = Number((userLock && userLock.lease_until) || 0);
+            const skipMsg = `pipeline_locked user=${uid} lock=${userLockKey} lease_until=${leaseUntil}`;
+            console.warn(`[User] 跳过处理 user_id=${uid}，原因=同用户任务执行中 lease_until=${leaseUntil}`);
+            runRecord.errors.push(skipMsg);
+            errors.push({ user_id: uid, account: user.account, errors: [skipMsg] });
+            continue;
+        }
 
         try {
-            console.log(`[User] 开始处理 user_id=${user.id} account=${user.account}`);
-            // Step 1: 拉取三平台最新数据并落到 user_game_account
-            await syncUserAccountsByAuth(user.id);
-            rows = await listAllUserGameAccountsByUser(user.id);
-
-            // Step 1.5: 每次主流程都基于当前订单表执行一次 3 单黑名单收敛，
-            // 保障“移出黑名单”先发生，再进入上下架决策，避免仅靠异步订单任务导致时序不一致。
-            try {
-                const reconcile = await reconcileOrder3OffBlacklistByUser(user);
-                console.log(`[Order3Off] user_id=${user.id} reconcile=${JSON.stringify(reconcile)}`);
-            } catch (e) {
-                console.warn(`[Order3Off] 收敛失败 user_id=${user.id}: ${e.message}`);
-            }
-
-            blacklistSet = await loadUserBlacklistSet(user.id);
-            blacklistReasonMap = await loadUserBlacklistReasonMap(user.id);
-
-            // Step 2: 策略计算并执行（ACTION_ENABLE/ACTION_READ_ONLY 控制）
-            const actionResult = await executeUserActionsIfNeeded({
-                user,
-                rows,
-                blacklistSet,
+            const out = await runFullUserPipeline(user, {
+                logger: console,
                 actionEnabled: ACTION_ENABLED,
                 readOnly: ACTION_READ_ONLY
             });
-            applyActionResultToRows(rows, actionResult.actions);
-            if (actionResult.actions.length > 0) {
+            const actionResult = out && out.action_result && typeof out.action_result === 'object'
+                ? out.action_result
+                : { actions: [], errors: [] };
+            if (Array.isArray(actionResult.actions) && actionResult.actions.length > 0) {
                 runRecord.actions.push(...actionResult.actions.map((a) => ({ ...a, user_id: user.id, user_account: user.account })));
             }
-            if (actionResult.errors.length > 0) {
+            if (Array.isArray(actionResult.errors) && actionResult.errors.length > 0) {
                 const actionErrs = actionResult.errors.map((e) => `action_error user=${user.id} ${e}`);
                 runRecord.errors.push(...actionErrs);
                 errors.push({ user_id: user.id, account: user.account, errors: actionResult.errors });
             }
-
-            // Step 3: 暂时关闭“执行后再次拉取”逻辑，降低平台请求频次，避免触发风控。
-            // TODO: 后续补充更稳健方案（例如仅成功动作增量校验/延迟抽样回拉），兼顾准确性与风控。
-            // if (actionResult.planned > 0 && !ACTION_READ_ONLY) {
-            //     await syncUserAccountsByAuth(user.id);
-            //     rows = await listAllUserGameAccountsByUser(user.id);
-            // }
-
-            // Step 4: 组装并发送用户通知（Telegram/Dingding）
-            const accounts = rows.map((r) => toReportAccountFromUserGameRow(r, blacklistSet, blacklistReasonMap));
-            await fillTodayOrderCounts(user.id, accounts);
-            const onlineProbe = await probeProdOnlineStatus(user, accounts, { logger: console, include_rows: true });
-            const onlineTagMap = {};
-            for (const row of (onlineProbe && Array.isArray(onlineProbe.probe_rows) ? onlineProbe.probe_rows : [])) {
-                const acc = String((row && row.account) || '').trim();
-                if (!acc) continue;
-                onlineTagMap[acc] = String((row && row.online_tag) || '').trim().toUpperCase();
+            const nonFatal = Array.isArray(out && out.non_fatal_errors) ? out.non_fatal_errors : [];
+            if (nonFatal.length > 0) {
+                runRecord.errors.push(...nonFatal.map((e) => `pipeline_warn user=${user.id} ${e}`));
             }
-            for (const one of accounts) {
-                const acc = String((one && one.account) || '').trim();
-                one.online_tag = String(onlineTagMap[acc] || '').trim();
-            }
-            triggerProdStatusGuard(user, accounts, { logger: console, snapshot: onlineProbe });
-            const recentActions = await buildRecentActionsForUser(user.id, { limit: 8 });
-            const payload = buildPayloadForOneUser(accounts, {
-                report_owner: String(user.name || user.account || '').trim(),
-                recentActions
-            });
-
-            const notifyResult = await notifyUserByPayload(user, payload);
-            if (!notifyResult.ok) {
-                const notifyErrs = Array.isArray(notifyResult.errors) ? notifyResult.errors : [notifyResult.reason || 'notify_failed'];
-                errors.push({ user_id: user.id, account: user.account, errors: notifyErrs });
-                runRecord.errors.push(...notifyErrs.map((e) => `notify_error user=${user.id} ${e}`));
+            if (!out || !out.ok) {
+                const pipelineErrs = Array.isArray(out && out.errors) && out.errors.length > 0
+                    ? out.errors
+                    : ['pipeline_failed'];
+                errors.push({ user_id: user.id, account: user.account, errors: pipelineErrs });
+                runRecord.errors.push(...pipelineErrs.map((e) => `pipeline_error user=${user.id} ${e}`));
                 continue;
             }
 
-            routed.push({ user_id: user.id, account: user.account, accounts: accounts.length });
+            const accCount = Number(out && out.accounts_count || 0);
+            routed.push({ user_id: user.id, account: user.account, accounts: accCount });
             runRecord.actions.push({
                 type: 'notify_user',
                 item: { user_id: user.id, account: user.account },
-                reason: `notify ${accounts.length} accounts`,
+                reason: `notify ${accCount} accounts`,
                 time: Date.now(),
                 success: true
             });
-            console.log(`[User] 处理完成 user_id=${user.id} accounts=${accounts.length}`);
-        } catch (e) {
-            const msg = `sync_failed: ${e.message}`;
-            errors.push({ user_id: user.id, account: user.account, errors: [msg] });
-            runRecord.errors.push(`pipeline_error user=${user.id} ${msg}`);
-            console.error(`[User] 处理失败 user_id=${user.id}: ${e.message}`);
+        } finally {
+            await releaseDbLock(userLockKey, `release by ${userLockOwner}`);
         }
     }
 
