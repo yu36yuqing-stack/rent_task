@@ -2,10 +2,22 @@ const { openDatabase } = require('../database/sqlite_client');
 const { initOrderDb } = require('../database/order_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { getLastSyncTimestamp } = require('../database/order_sync_db');
+const { getActiveUserById } = require('../database/user_db');
 const {
     listUserBlacklistByUserWithMeta,
     upsertUserBlacklistEntry
 } = require('../database/user_blacklist_db');
+const {
+    initProdRiskEventDb,
+    upsertOpenRiskEvent
+} = require('../database/prod_risk_event_db');
+const {
+    TASK_STATUS_PENDING,
+    TASK_STATUS_WATCHING,
+    initProdGuardTaskDb,
+    upsertGuardTask,
+    getGuardTaskByEventId
+} = require('../database/prod_guard_task_db');
 const { deleteBlacklistWithGuard } = require('../blacklist/blacklist_release_guard');
 
 const CHANNEL_UUZUHAO = 'uuzuhao';
@@ -18,6 +30,10 @@ const COOLDOWN_SOURCE = 'order_cooldown';
 const COOLDOWN_START_DELAY_SEC = 10 * 60;
 const COOLDOWN_END_DELAY_SEC = 10 * 60;
 const COOLDOWN_SYNC_FRESH_WINDOW_SEC = 12 * 60;
+const GUARD_BRIDGE_RISK_TYPE = 'online_non_renting';
+const GUARD_BRIDGE_TASK_TYPE = 'sheep_fix';
+const GUARD_BRIDGE_BOOTSTRAP_DELAY_SEC = 5;
+const GUARD_BRIDGE_MAX_RETRY = 5;
 
 function dbAll(db, sql, params = []) {
     return new Promise((resolve, reject) => {
@@ -96,6 +112,82 @@ function parseCooldownMetaFromDesc(descText) {
     } catch {
         return { cooldown_until: 0, source_order_no: '', source_channel: '' };
     }
+}
+
+function toDateTimeText(d = new Date()) {
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function isProdGuardEnabledByUser(user) {
+    const sw = user && user.switch && typeof user.switch === 'object' ? user.switch : {};
+    if (sw.prod_guard_enabled === undefined) return true;
+    return Boolean(sw.prod_guard_enabled);
+}
+
+async function bridgeGuardBlockedToRiskTask(userId, gameAccount, row, guardRet = {}) {
+    const uid = Number(userId || 0);
+    const acc = String(gameAccount || '').trim();
+    if (!uid || !acc) return { bridged: false, reason: 'invalid_input' };
+    const blockedReason = String((guardRet && guardRet.blocked_reason) || '').trim();
+    if (!blockedReason) return { bridged: false, reason: 'empty_blocked_reason' };
+
+    const user = await getActiveUserById(uid).catch(() => null);
+    if (!isProdGuardEnabledByUser(user)) {
+        return { bridged: false, reason: 'prod_guard_disabled_by_user_switch' };
+    }
+
+    await initProdRiskEventDb();
+    await initProdGuardTaskDb();
+
+    const meta = parseCooldownMetaFromDesc(row && row.desc);
+    const snapshot = {
+        source: 'order_cooldown_guard_bridge',
+        blocked_reason: blockedReason,
+        online_tag: blockedReason === '检测在线' ? 'ON' : '',
+        guard_checked: Boolean(guardRet && guardRet.guard_checked),
+        guard_error: String((guardRet && guardRet.guard_error) || '').trim(),
+        cooldown_reason: COOLDOWN_REASON,
+        source_order_no: String(meta.source_order_no || '').trim(),
+        source_channel: String(meta.source_channel || '').trim(),
+        cooldown_until: Number(meta.cooldown_until || 0),
+        hit_at: toDateTimeText()
+    };
+    const event = await upsertOpenRiskEvent(uid, acc, GUARD_BRIDGE_RISK_TYPE, {
+        risk_level: 'high',
+        snapshot,
+        desc: 'auto open by order_cooldown guard blocked'
+    });
+    if (!event || !Number(event.id || 0)) return { bridged: false, reason: 'risk_event_upsert_failed' };
+
+    const existTask = await getGuardTaskByEventId(Number(event.id || 0));
+    if (existTask && (existTask.status === TASK_STATUS_PENDING || existTask.status === TASK_STATUS_WATCHING)) {
+        return {
+            bridged: true,
+            event_id: Number(event.id || 0),
+            task_id: Number(existTask.id || 0),
+            task_reused: true
+        };
+    }
+
+    const task = await upsertGuardTask({
+        user_id: uid,
+        game_account: acc,
+        risk_type: GUARD_BRIDGE_RISK_TYPE,
+        task_type: GUARD_BRIDGE_TASK_TYPE,
+        status: TASK_STATUS_PENDING,
+        event_id: Number(event.id || 0),
+        next_check_at: Math.floor(Date.now() / 1000) + GUARD_BRIDGE_BOOTSTRAP_DELAY_SEC,
+        max_retry: GUARD_BRIDGE_MAX_RETRY
+    }, {
+        desc: 'auto enqueue by order_cooldown guard blocked'
+    });
+    return {
+        bridged: true,
+        event_id: Number(event.id || 0),
+        task_id: Number((task && task.id) || 0),
+        task_reused: false
+    };
 }
 
 async function getOrderStatusByOrderNo(userId, orderNo, channel = '') {
@@ -281,6 +373,9 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
     let released_by_refund = 0;
     let pending = 0;
     let invalid = 0;
+    let guard_blocked = 0;
+    let guard_blocked_bridged = 0;
+    let guard_blocked_bridge_failed = 0;
     for (const row of cooldownRows) {
         const acc = String(row.game_account || '').trim();
         if (!acc) continue;
@@ -304,6 +399,17 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
                     released_by_refund += 1;
                     continue;
                 }
+                if (out && out.blocked) {
+                    guard_blocked += 1;
+                    try {
+                        const bridgeRet = await bridgeGuardBlockedToRiskTask(uid, acc, row, out);
+                        if (bridgeRet && bridgeRet.bridged) guard_blocked_bridged += 1;
+                        else guard_blocked_bridge_failed += 1;
+                    } catch {
+                        guard_blocked_bridge_failed += 1;
+                    }
+                    continue;
+                }
             }
         }
         if (nowSec < untilSec) {
@@ -316,7 +422,20 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
             desc: 'auto release by cooldown_until',
             reason_expected: COOLDOWN_REASON
         });
-        if (out && out.removed) released += 1;
+        if (out && out.removed) {
+            released += 1;
+            continue;
+        }
+        if (out && out.blocked) {
+            guard_blocked += 1;
+            try {
+                const bridgeRet = await bridgeGuardBlockedToRiskTask(uid, acc, row, out);
+                if (bridgeRet && bridgeRet.bridged) guard_blocked_bridged += 1;
+                else guard_blocked_bridge_failed += 1;
+            } catch {
+                guard_blocked_bridge_failed += 1;
+            }
+        }
     }
 
     return {
@@ -328,7 +447,10 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
         released,
         released_by_refund,
         pending,
-        invalid
+        invalid,
+        guard_blocked,
+        guard_blocked_bridged,
+        guard_blocked_bridge_failed
     };
 }
 
