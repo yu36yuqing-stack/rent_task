@@ -19,7 +19,7 @@ const {
     reconcileOrderCooldownEntryByUser
 } = require('./order_cooldown');
 const { initOrderComplaintDb, upsertOrderComplaint, getOrderComplaintByOrder } = require('../database/order_complaint_db');
-const { sendDingdingMessage } = require('../report/dingding/ding_notify');
+const { sendDingdingMessage, resolveDingdingAtOptions } = require('../report/dingding/ding_notify');
 const { buildComplaintFirstHitText } = require('../report/dingding/ding_style');
 const { listAllOrders, getOrderDetail } = require('../uuzuhao/uuzuhao_api');
 const { listAllOrderPages } = require('../uhaozu/uhaozu_api');
@@ -570,7 +570,9 @@ function resolveDingdingConfigByUser(user = {}) {
         : {};
     return {
         webhook: String(ding.webhook || '').trim(),
-        secret: String(ding.secret || '').trim()
+        secret: String(ding.secret || '').trim(),
+        at_options: resolveDingdingAtOptions(ding, ''),
+        complaint_at_options: resolveDingdingAtOptions(ding, 'complaint')
     };
 }
 
@@ -846,7 +848,8 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
                         complaint_start_time: toComplaintTimeText(complaintRow.complaint_start_time_raw)
                     }), {
                         webhook: dingCfg.webhook,
-                        secret: dingCfg.secret || ''
+                        secret: dingCfg.secret || '',
+                        ...dingCfg.complaint_at_options
                     });
                     complaint_notify_sent += 1;
                     complaintNotifyDedup.add(notifyKey);

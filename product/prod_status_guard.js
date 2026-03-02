@@ -25,7 +25,7 @@ const {
     queryOnlineStatusCached,
     setForbiddenPlayWithSnapshot
 } = require('./prod_probe_cache_service');
-const { sendDingdingMessage } = require('../report/dingding/ding_notify');
+const { sendDingdingMessage, resolveDingdingAtOptions } = require('../report/dingding/ding_notify');
 const { deleteBlacklistWithGuard, REASON_ONLINE } = require('../blacklist/blacklist_release_guard');
 
 const ONLINE_PROBE_WINDOW_SEC = 90;
@@ -560,6 +560,7 @@ async function alertOnlineConflictIfNeeded(user, probeRows = [], options = {}) {
         ? user.notify_config.dingding
         : {};
     const rows = Array.isArray(probeRows) ? probeRows : [];
+    const dingAtOptions = resolveDingdingAtOptions(dingCfg, '');
     if (rows.length === 0) return { ok: true, skipped: true, reason: 'empty_probe_rows' };
 
     const onlineAccounts = collectOnlineAccounts(rows);
@@ -625,7 +626,7 @@ async function alertOnlineConflictIfNeeded(user, probeRows = [], options = {}) {
         await sendDingdingMessage(text, {
             webhook: dingCfg.webhook,
             secret: dingCfg.secret || '',
-            at_all: true
+            ...dingAtOptions
         });
     }
     return {
