@@ -67,9 +67,15 @@ async function initUserPlatformRestrictDb() {
                 desc TEXT NOT NULL DEFAULT ''
             )
         `);
+        // 迁移说明：
+        // 历史索引把 is_deleted 也纳入唯一约束，会导致 active -> deleted 逻辑删除时
+        // 与既有 deleted 行冲突（UNIQUE constraint failed）。
+        // 这里改为“仅 active 行唯一”的部分索引，允许保留多条历史 deleted 记录。
+        await run(db, `DROP INDEX IF EXISTS uq_user_platform_restrict_alive`);
         await run(db, `
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_user_platform_restrict_alive
-            ON user_platform_restrict(user_id, game_account, platform, is_deleted)
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_user_platform_restrict_active
+            ON user_platform_restrict(user_id, game_account, platform)
+            WHERE is_deleted = 0
         `);
         await run(db, `
             CREATE INDEX IF NOT EXISTS idx_user_platform_restrict_user

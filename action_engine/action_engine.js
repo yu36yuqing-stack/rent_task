@@ -15,6 +15,62 @@ const {
     listPlatformRestrictByUserAndAccounts
 } = require('../database/user_platform_restrict_db');
 
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+async function clearPlatformRestrictReliable({
+    userId,
+    account,
+    platform,
+    desc,
+    logger = console,
+    runErrors = null,
+    maxRetries = 3,
+    baseDelayMs = 60
+}) {
+    const uid = Number(userId || 0);
+    const acc = String(account || '').trim();
+    const pf = String(platform || '').trim();
+    if (!uid || !acc || !pf) {
+        const msg = `[RestrictClear] invalid_args user_id=${uid} account=${acc} platform=${pf}`;
+        logger.error(msg);
+        if (Array.isArray(runErrors)) runErrors.push(msg);
+        return { ok: false, attempts: 0, last_error: 'invalid_args' };
+    }
+
+    const retryCount = Math.max(1, Number(maxRetries) || 1);
+    let lastErr = '';
+    let stillActive = true;
+    for (let attempt = 1; attempt <= retryCount; attempt += 1) {
+        try {
+            await removePlatformRestrict(uid, acc, pf, `${String(desc || '').trim()}#attempt=${attempt}`);
+            const remains = await listPlatformRestrictByUserAndAccounts(uid, [acc]);
+            stillActive = remains.some((r) => String(r.game_account || '').trim() === acc && String(r.platform || '').trim() === pf);
+            if (!stillActive) {
+                if (attempt > 1) {
+                    logger.warn(`[RestrictClear] recovered user_id=${uid} account=${acc} platform=${pf} attempts=${attempt}`);
+                }
+                return { ok: true, attempts: attempt, last_error: '' };
+            }
+            lastErr = 'still_active_after_remove';
+            logger.warn(`[RestrictClear] verify_still_active user_id=${uid} account=${acc} platform=${pf} attempt=${attempt}`);
+        } catch (e) {
+            const msg = String(e && e.message ? e.message : e || 'clear_failed');
+            lastErr = msg;
+            logger.warn(`[RestrictClear] clear_error user_id=${uid} account=${acc} platform=${pf} attempt=${attempt} err=${msg}`);
+        }
+        if (attempt < retryCount) {
+            await sleep(baseDelayMs * Math.pow(2, attempt - 1));
+        }
+    }
+
+    const failMsg = `[RestrictClear] failed user_id=${uid} account=${acc} platform=${pf} last_error=${lastErr || 'unknown'}`;
+    logger.error(failMsg);
+    if (Array.isArray(runErrors)) runErrors.push(failMsg);
+    return { ok: false, attempts: retryCount, last_error: lastErr || 'unknown', still_active: stillActive };
+}
+
 function detectConflictsAndBuildSnapshot({
     youpinData,
     uhaozuData,
@@ -183,12 +239,14 @@ async function executeActions({
             if (success) {
                 console.log(`[Result] 成功: ${action.type} -> ${action.item.account}`);
                 if (platform && action.type.startsWith('on_')) {
-                    await removePlatformRestrict(
-                        user && user.id,
-                        action.item && action.item.account,
+                    await clearPlatformRestrictReliable({
+                        userId: user && user.id,
+                        account: action.item && action.item.account,
                         platform,
-                        'auto clear by on success'
-                    ).catch(() => {});
+                        desc: 'auto clear by on success',
+                        logger: console,
+                        runErrors: runRecord && Array.isArray(runRecord.errors) ? runRecord.errors : null
+                    });
                 }
                 runRecord.actions.push({ ...action, time: Date.now(), success: true });
                 await appendProductOnoffHistory({
@@ -314,6 +372,8 @@ async function executeUserActionsIfNeeded({
     const platformRestrictSet = new Set(
         restrictRows.map((r) => `${String(r.game_account || '').trim()}::${String(r.platform || '').trim()}`).filter(Boolean)
     );
+    const preCleanupErrors = [];
+    const cleanupStats = { attempted: 0, cleared: 0, failed: 0 };
 
     // 平台状态已恢复（上架/租赁中）时，自动清理限制标记，避免“平台限制上架”残留卡住。
     for (const row of rows || []) {
@@ -324,17 +384,59 @@ async function executeUserActionsIfNeeded({
         const u = String(st.uhaozu || '').trim();
         const z = String(st.zuhaowang || '').trim();
         if (['上架', '租赁中', '出租中'].includes(y) && platformRestrictSet.has(`${acc}::uuzuhao`)) {
-            await removePlatformRestrict(user.id, acc, 'uuzuhao', `auto clear by status=${y}`).catch(() => {});
-            platformRestrictSet.delete(`${acc}::uuzuhao`);
+            cleanupStats.attempted += 1;
+            const out = await clearPlatformRestrictReliable({
+                userId: user.id,
+                account: acc,
+                platform: 'uuzuhao',
+                desc: `auto clear by status=${y}`,
+                logger: console,
+                runErrors: preCleanupErrors
+            });
+            if (out.ok) {
+                cleanupStats.cleared += 1;
+                platformRestrictSet.delete(`${acc}::uuzuhao`);
+            } else {
+                cleanupStats.failed += 1;
+            }
         }
         if (['上架', '租赁中', '出租中'].includes(u) && platformRestrictSet.has(`${acc}::uhaozu`)) {
-            await removePlatformRestrict(user.id, acc, 'uhaozu', `auto clear by status=${u}`).catch(() => {});
-            platformRestrictSet.delete(`${acc}::uhaozu`);
+            cleanupStats.attempted += 1;
+            const out = await clearPlatformRestrictReliable({
+                userId: user.id,
+                account: acc,
+                platform: 'uhaozu',
+                desc: `auto clear by status=${u}`,
+                logger: console,
+                runErrors: preCleanupErrors
+            });
+            if (out.ok) {
+                cleanupStats.cleared += 1;
+                platformRestrictSet.delete(`${acc}::uhaozu`);
+            } else {
+                cleanupStats.failed += 1;
+            }
         }
         if (['上架', '租赁中', '出租中'].includes(z) && platformRestrictSet.has(`${acc}::zuhaowang`)) {
-            await removePlatformRestrict(user.id, acc, 'zuhaowang', `auto clear by status=${z}`).catch(() => {});
-            platformRestrictSet.delete(`${acc}::zuhaowang`);
+            cleanupStats.attempted += 1;
+            const out = await clearPlatformRestrictReliable({
+                userId: user.id,
+                account: acc,
+                platform: 'zuhaowang',
+                desc: `auto clear by status=${z}`,
+                logger: console,
+                runErrors: preCleanupErrors
+            });
+            if (out.ok) {
+                cleanupStats.cleared += 1;
+                platformRestrictSet.delete(`${acc}::zuhaowang`);
+            } else {
+                cleanupStats.failed += 1;
+            }
         }
+    }
+    if (cleanupStats.attempted > 0) {
+        console.log(`[RestrictClear] precheck user_id=${user.id} attempted=${cleanupStats.attempted} cleared=${cleanupStats.cleared} failed=${cleanupStats.failed}`);
     }
     const { actions } = detectConflictsAndBuildSnapshot({
         youpinData,
@@ -397,7 +499,10 @@ async function executeUserActionsIfNeeded({
     return {
         planned: actions.length,
         actions: Array.isArray(runRecord.actions) ? runRecord.actions : [],
-        errors: Array.isArray(runRecord.errors) ? runRecord.errors : []
+        errors: [
+            ...(Array.isArray(preCleanupErrors) ? preCleanupErrors : []),
+            ...(Array.isArray(runRecord.errors) ? runRecord.errors : [])
+        ]
     };
 }
 
