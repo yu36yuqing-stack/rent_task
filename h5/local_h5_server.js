@@ -656,8 +656,10 @@ async function handleStatsDashboard(req, res, urlObj) {
     const user = await requireAuth(req);
     const period = String(urlObj.searchParams.get('period') || 'today').trim().toLowerCase();
     const gameName = String(urlObj.searchParams.get('game_name') || 'WZRY').trim() || 'WZRY';
+    const statDate = String(urlObj.searchParams.get('stat_date') || '').trim();
     const data = await getOrderStatsDashboardByUser(user.id, {
         period,
+        stat_date: statDate,
         game_name: gameName
     });
     return json(res, 200, { ok: true, ...data });

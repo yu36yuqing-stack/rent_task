@@ -204,6 +204,16 @@ function buildPeriodRange(period = 'today', now = new Date()) {
     return { startDate: toDateText(today), endDate: toDateText(today), period: 'today' };
 }
 
+function normalizeStatDateText(dateText = '') {
+    const raw = String(dateText || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return '';
+    const [y, m, d] = raw.split('-').map((x) => Number(x || 0));
+    const dt = new Date(y, (m || 1) - 1, d || 1);
+    if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return '';
+    if (toDateText(dt) !== raw) return '';
+    return raw;
+}
+
 function reduceRows(rows = []) {
     const out = {
         order_cnt_total: 0,
@@ -480,7 +490,10 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     await initOrderStatsDailyDb();
     const gameName = String(options.game_name || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
     const now = options.now instanceof Date ? options.now : new Date();
-    const periodInfo = buildPeriodRange(options.period, now);
+    const pickedDate = normalizeStatDateText(options.stat_date);
+    const periodInfo = pickedDate
+        ? { startDate: pickedDate, endDate: pickedDate, period: 'day' }
+        : buildPeriodRange(options.period, now);
     const rows = await listOrderStatsRows(uid, periodInfo.startDate, periodInfo.endDate, gameName);
     const config = await loadAccountConfigByUser(uid, gameName);
     const latestDisplayNameMap = new Map(
@@ -585,6 +598,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
 
     return {
         period: periodInfo.period,
+        selected_date: pickedDate,
         range: {
             start_date: periodInfo.startDate,
             end_date: periodInfo.endDate

@@ -30,6 +30,10 @@
       return new Date(y, (m || 1) - 1, day).getDay();
     }
 
+    function isDateText(v) {
+      return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim());
+    }
+
     async function loadStatsCalendar(monthText = '') {
       const month = /^\d{4}-\d{2}$/.test(String(monthText || '').trim())
         ? String(monthText).trim()
@@ -52,9 +56,17 @@
       const amountByDay = new Map(
         byDay.map((x) => [String(x.stat_date || '').slice(-2), Number(x.amount_rec_sum || 0)])
       );
+      const selectedDate = isDateText(state.statsBoard && state.statsBoard.selected_date)
+        ? String(state.statsBoard.selected_date).trim()
+        : '';
 
       els.statsCalMonth.value = month;
-      els.statsCalTitle.textContent = `收入日历（元）/合计：¥${Number(cal.total_rec_amount || 0).toFixed(2)}`;
+      let titleAmount = Number(cal.total_rec_amount || 0);
+      if (selectedDate) {
+        const pickedDay = String(selectedDate).slice(-2);
+        titleAmount = Number(amountByDay.get(pickedDay) || 0);
+      }
+      els.statsCalTitle.textContent = `收入日历（元）/合计：¥${Number(titleAmount || 0).toFixed(2)}`;
 
       const totalDays = daysInMonth(month);
       const firstWeekday = dayOfWeek(month, 1);
@@ -66,14 +78,36 @@
         const dd = String(d).padStart(2, '0');
         const amt = Number(amountByDay.get(dd) || 0);
         const has = amt > 0;
+        const statDate = `${month}-${dd}`;
+        const active = selectedDate === statDate;
         cells.push(`
-          <div class="stats-cal-cell ${has ? 'has-income' : ''}">
+          <div class="stats-cal-cell ${has ? 'has-income' : ''} ${active ? 'active' : ''}" data-stat-date="${statDate}">
             <p class="stats-cal-day">${d}</p>
             <p class="stats-cal-income">${has ? `+${amt.toFixed(2)}` : ''}</p>
           </div>
         `);
       }
       els.statsCalGrid.innerHTML = cells.join('');
+      els.statsCalGrid.classList.toggle('has-active', Boolean(selectedDate));
+      Array.from(els.statsCalGrid.querySelectorAll('.stats-cal-cell[data-stat-date]')).forEach((n) => {
+        n.addEventListener('click', async () => {
+          try {
+            const dateText = String(n.getAttribute('data-stat-date') || '').trim();
+            if (!isDateText(dateText)) return;
+            if (String((state.statsBoard && state.statsBoard.selected_date) || '').trim() === dateText) {
+              state.statsBoard.selected_date = '';
+              await loadStatsBoard({ stat_date: '' });
+              renderStatsView();
+              return;
+            }
+            state.statsBoard.selected_date = dateText;
+            await loadStatsBoard({ stat_date: dateText });
+            renderStatsView();
+          } catch (e) {
+            alert(e.message || '加载单日统计失败');
+          }
+        });
+      });
       els.statsCalMonth.onchange = async () => {
         try {
           const nextMonth = String(els.statsCalMonth.value || '').trim();
@@ -93,8 +127,6 @@
         { k: 'CFM', t: 'CFM枪战王者', icon: '/assets/game_icons/cfm.png' }
       ];
       const periods = [
-        { k: 'today', t: '当日' },
-        { k: 'yesterday', t: '昨日' },
         { k: 'week', t: '本周' },
         { k: 'last7', t: '近7天' },
         { k: 'month', t: '本月' },
@@ -200,6 +232,7 @@
           const k = String(n.getAttribute('data-stats-period') || 'today').trim();
           if (k === state.statsBoard.period) return;
           state.statsBoard.period = k;
+          state.statsBoard.selected_date = '';
           await loadStatsBoard();
           renderStatsView();
         });

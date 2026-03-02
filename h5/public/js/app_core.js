@@ -84,6 +84,11 @@
         : '自然日：每天 06:00 ~ 次日 06:00';
     }
 
+    function todayDateText() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
     const state = {
       token: initialAuth.token,
       refreshToken: initialAuth.refreshToken,
@@ -122,7 +127,8 @@
       },
       statsBoard: {
         game_name: 'WZRY',
-        period: 'today',
+        period: 'week',
+        selected_date: todayDateText(),
         range: { start_date: '', end_date: '' },
         summary: null,
         profitability: null,
@@ -746,14 +752,17 @@
       state.orders.pageSize = Number(data.page_size || o.pageSize || 20);
     }
 
-    async function loadStatsBoard() {
+    async function loadStatsBoard(options = {}) {
       const s = state.statsBoard || {};
       const period = String(s.period || 'today').trim();
       const gameName = String(s.game_name || 'WZRY').trim() || 'WZRY';
-      const data = await request(`/api/stats/dashboard?period=${encodeURIComponent(period)}&game_name=${encodeURIComponent(gameName)}`);
+      const statDateCandidate = String(options.stat_date === undefined ? (s.selected_date || '') : options.stat_date).trim();
+      const hasStatDate = /^\d{4}-\d{2}-\d{2}$/.test(statDateCandidate);
+      const data = await request(`/api/stats/dashboard?period=${encodeURIComponent(period)}&game_name=${encodeURIComponent(gameName)}${hasStatDate ? `&stat_date=${encodeURIComponent(statDateCandidate)}` : ''}`);
       state.statsBoard = {
         game_name: String(data.game_name || gameName).trim() || gameName,
         period: String(data.period || period),
+        selected_date: hasStatDate ? statDateCandidate : '',
         range: data.range || { start_date: '', end_date: '' },
         summary: data.summary || null,
         profitability: data.profitability || null,
@@ -989,7 +998,8 @@
       state.pullRefresh = { dragging: false, ready: false, loading: false, startY: 0, distance: 0 };
       state.statsBoard = {
         game_name: 'WZRY',
-        period: 'today',
+        period: 'week',
+        selected_date: todayDateText(),
         range: { start_date: '', end_date: '' },
         summary: null,
         profitability: null,
