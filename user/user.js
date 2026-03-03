@@ -33,8 +33,7 @@ function isAuthUsable(row = {}) {
 
 function normalizeZuhaowangAuthPayload(payload = {}) {
     const raw = payload && typeof payload === 'object' ? payload : {};
-    const nested = raw.zuhaowang && typeof raw.zuhaowang === 'object' ? raw.zuhaowang : raw;
-    const yuanbao = raw.yuanbao && typeof raw.yuanbao === 'object' ? raw.yuanbao : {};
+    const yuanbao = raw.yuanbao && typeof raw.yuanbao === 'object' ? raw.yuanbao : raw;
     const yuanbaoData = yuanbao.data && typeof yuanbao.data === 'object' ? yuanbao.data : {};
 
     const tokenYuanbao = String(
@@ -47,7 +46,6 @@ function normalizeZuhaowangAuthPayload(payload = {}) {
         yuanbao.package_name
         || yuanbao.packageName
         || (tokenYuanbao ? 'com.duodian.merchant' : '')
-        || nested.package_name
         || ''
     ).trim();
     const deviceId = String(
@@ -55,24 +53,22 @@ function normalizeZuhaowangAuthPayload(payload = {}) {
         || yuanbao.deviceId
         || yuanbaoData.device_id
         || yuanbaoData.deviceId
-        || nested.device_id
         || ''
     ).trim();
 
     return {
-        ...(nested || {}),
         ...(yuanbao || {}),
         token_yuanbao: tokenYuanbao,
-        token_get: String(nested.token_get || tokenYuanbao || '').trim(),
-        token_post: String(nested.token_post || tokenYuanbao || '').trim(),
+        token_get: String(tokenYuanbao || '').trim(),
+        token_post: String(tokenYuanbao || '').trim(),
         device_id: deviceId,
         package_name: packageName,
-        source: String(yuanbao.source || nested.source || 'android').trim() || 'android',
-        app_version: String(yuanbao.app_version || nested.app_version || nested.x_versioncode || '2.1.6').trim(),
-        main_version: String(yuanbao.main_version || nested.main_version || nested.x_versioncode || '2.1.6').trim(),
-        x_versioncode: String(yuanbao.x_versioncode || nested.x_versioncode || nested.app_version || '2.1.6').trim(),
-        x_versionnumber: String(yuanbao.x_versionnumber || nested.x_versionnumber || '216').trim(),
-        x_channel: String(yuanbao.x_channel || nested.x_channel || 'ybxiaomi').trim()
+        source: String(yuanbao.source || 'android').trim() || 'android',
+        app_version: String(yuanbao.app_version || yuanbao.x_versioncode || '2.1.6').trim(),
+        main_version: String(yuanbao.main_version || yuanbao.x_versioncode || '2.1.6').trim(),
+        x_versioncode: String(yuanbao.x_versioncode || yuanbao.app_version || '2.1.6').trim(),
+        x_versionnumber: String(yuanbao.x_versionnumber || '216').trim(),
+        x_channel: String(yuanbao.x_channel || 'ybxiaomi').trim()
     };
 }
 
@@ -80,9 +76,7 @@ function resolveAuthPayloadByPlatform(platform, payload = {}) {
     const p = String(platform || '').trim();
     const raw = payload && typeof payload === 'object' ? payload : {};
 
-    // 兼容租号王授权结构升级：
-    // - 旧结构：auth_payload.token_get/token_post...
-    // - 新结构：auth_payload.zuhaowang.{token_get/token_post...}
+    // 租号王统一只读 yuanbao 授权结构。
     if (p === 'zuhaowang') {
         return normalizeZuhaowangAuthPayload(raw);
     }
