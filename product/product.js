@@ -108,7 +108,15 @@ async function pullPlatformDataByAuth(platform, authPayload = {}) {
         const nested = authPayload && typeof authPayload === 'object' && authPayload.zuhaowang && typeof authPayload.zuhaowang === 'object'
             ? authPayload.zuhaowang
             : authPayload;
-        const list = await getGoodsList(nested);
+        const yuanbao = authPayload && typeof authPayload === 'object' && authPayload.yuanbao && typeof authPayload.yuanbao === 'object'
+            ? authPayload.yuanbao
+            : {};
+        const mergedAuth = {
+            ...(nested || {}),
+            ...(yuanbao || {}),
+            token_yuanbao: String((yuanbao && (yuanbao.token_yuanbao || yuanbao.token)) || '').trim()
+        };
+        const list = await getGoodsList(mergedAuth);
         return list.map((x) => ({
             ...mapChannelGameToStandard(PLATFORM_ZHW, x.gameId, x.gameName),
             game_account: String(x.account || '').trim(),

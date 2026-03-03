@@ -151,7 +151,7 @@ function detectConflictsAndBuildSnapshot({
                     actions.push({ type: 'on_u', item: { account: acc }, reason: '无租赁，自动补上架U号租' });
                 }
                 if (statZ === '下架' && !platformRestrictSet.has(`${acc}::zuhaowang`) && canAutoOnZ) {
-                    actions.push({ type: 'on_z', item: { account: acc, gameId: z ? z.gameId : 1104466820 }, reason: '无租赁，自动补上架租号王' });
+                    actions.push({ type: 'on_z', item: { account: acc, gameId: z ? z.gameId : 1104466820, dataId: z ? z.dataId : '' }, reason: '无租赁，自动补上架租号王' });
                 }
             }
         }
@@ -228,11 +228,11 @@ async function executeActions({
             // 租号王 (API)
             else if (action.type === 'off_z') {
                 // type=2 下架
-                if (action.item.gameId) success = await changeZhwStatus(action.item.account, action.item.gameId, 2);
+                if (action.item.gameId) success = await changeZhwStatus(action.item.account, action.item.gameId, 2, action.item.dataId);
                 else console.error(`[Error] 缺少 gameId，无法下架租号王 ${action.item.account}`);
             } else if (action.type === 'on_z') {
                 // type=1 上架
-                if (action.item.gameId) success = await changeZhwStatus(action.item.account, action.item.gameId, 1);
+                if (action.item.gameId) success = await changeZhwStatus(action.item.account, action.item.gameId, 1, action.item.dataId);
                 else console.error(`[Error] 缺少 gameId，无法上架租号王 ${action.item.account}`);
             }
 
@@ -333,7 +333,8 @@ function buildPlatformRowsFromUserAccounts(rows = []) {
             zhwData.push({
                 account,
                 status: z,
-                gameId: Number((prd.zuhaowang && (prd.zuhaowang.game_id || prd.zuhaowang.gameId)) || 0)
+                gameId: Number((prd.zuhaowang && (prd.zuhaowang.game_id || prd.zuhaowang.gameId)) || 0),
+                dataId: String((prd.zuhaowang && (prd.zuhaowang.prd_id || prd.zuhaowang.id)) || '').trim()
             });
         }
     }
@@ -488,10 +489,10 @@ async function executeUserActionsIfNeeded({
             if (!auth) return false;
             return uhaozuOnShelf(null, account, { auth });
         },
-        changeZhwStatus: (account, gameId, type) => {
+        changeZhwStatus: (account, gameId, type, dataId) => {
             const auth = authMap.zuhaowang;
             if (!auth) return false;
-            return changeZhwStatus(account, gameId, type, auth);
+            return changeZhwStatus(account, gameId, type, auth, { data_id: dataId, user_id: user && user.id });
         },
         readOnly
     });

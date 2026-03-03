@@ -4,11 +4,42 @@ const { buildEncryptedBody } = require('./toEncryptBody');
 
 const DEFAULT_SOURCE = 'android';
 
+function nowMs() {
+    return Date.now();
+}
+
+function shortTraceId(prefix = 'zhw') {
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function resolveLogMeta(auth = {}, options = {}) {
+    const userId = Number(
+        options.user_id
+        || options.userId
+        || auth.user_id
+        || 0
+    ) || 0;
+    const traceId = String(options.trace_id || options.traceId || '').trim() || shortTraceId('zhw');
+    return { userId, traceId };
+}
+
+function buildStatusCount(list = []) {
+    const out = {};
+    for (const row of list || []) {
+        const k = String((row && row.status) || '未知');
+        out[k] = Number(out[k] || 0) + 1;
+    }
+    return out;
+}
+
 function resolveAuth(auth = {}) {
+    const tokenYuanbao = String(auth.token_yuanbao || auth.token || '').trim();
+    const tokenGet = String(auth.token_get || '').trim() || tokenYuanbao;
+    const tokenPost = String(auth.token_post || '').trim() || tokenYuanbao;
     const cfg = {
-        token_get: String(auth.token_get || '').trim(),
-        token_post: String(auth.token_post || '').trim(),
-        token_yuanbao: String(auth.token_yuanbao || '').trim(),
+        token_get: tokenGet,
+        token_post: tokenPost,
+        token_yuanbao: tokenYuanbao,
         device_id: String(auth.device_id || '').trim(),
         package_name: String(auth.package_name || '').trim(),
         source: String(auth.source || DEFAULT_SOURCE).trim() || DEFAULT_SOURCE,
@@ -21,8 +52,7 @@ function resolveAuth(auth = {}) {
         content_type: String(auth.content_type || '').trim(),
         rsa_public_key: String(auth.rsa_public_key || '').trim()
     };
-    if (!cfg.token_get) throw new Error('zuhaowang token_get 未配置');
-    if (!cfg.token_post) throw new Error('zuhaowang token_post 未配置');
+    if (!cfg.token_get && !cfg.token_post && !cfg.token_yuanbao) throw new Error('zuhaowang token 未配置');
     if (!cfg.device_id) throw new Error('zuhaowang device_id 未配置');
     if (!cfg.package_name) throw new Error('zuhaowang package_name 未配置');
     return cfg;
@@ -68,60 +98,46 @@ function curlRequest(url, method, data = null, token, auth = {}) {
 
 // 获取商品列表
 async function getGoodsList(auth = {}) {
-    const cfg = resolveAuth(auth);
-    const url = 'https://api-game.duodian.cn/api/accountManage/getManageList?gameId&sort=0&status=0';
-    const res = await curlRequest(url, 'GET', null, cfg.token_get, cfg);
-    
-    if (!res || res.code !== '0') {
-        throw new Error(res ? res.desc : 'API Error');
-    }
-    
-    if (!res.data) return [];
-
-    return res.data.map(item => {
-        // status: 2:出租中; -1:已下架; 1:待出租(上架)
-        const info = item.rentInfo || {};
-        const rawStatus = info.status;
-        let statusText = '未知';
-        
-        // 映射逻辑
-        if (rawStatus === 2) statusText = '租赁中';
-        else if (rawStatus === -1) statusText = '下架';
-        else if (rawStatus === 1) statusText = '上架';
-
-        return {
-            account: String(item.accountNo), // 统一转字符串
-            gameName: item.gameName,
-            roleName: item.roleName,
-            exceptionMsg: String(item.exceptionMsg || ''),
-            status: statusText,
-            rawStatus: rawStatus,
-            gameId: item.gameId,
-            id: info.dataId
-        };
-    });
+    const out = await getGoodsListByEncryptedPayload({ biz_params: {} }, auth);
+    const list = Array.isArray(out.goods_list) ? out.goods_list : [];
+    return list.map((x) => ({
+        account: String(x.account || '').trim(),
+        gameName: String(x.gameName || '').trim(),
+        roleName: String(x.roleName || '').trim(),
+        exceptionMsg: String(x.exceptionMsg || '').trim(),
+        status: String(x.status || '未知'),
+        rawStatus: Number(x.rawStatus),
+        gameId: Number(x.gameId),
+        id: String(x.id || '').trim()
+    }));
 }
 
-// 变更状态
+async function resolveDataIdByAccountAndGame(accountNo, gameId, auth = {}) {
+    const acc = String(accountNo || '').trim();
+    const gid = Number(gameId || 0);
+    if (!acc || !gid) return '';
+    const out = await getGoodsListByEncryptedPayload({ biz_params: {} }, auth);
+    const list = Array.isArray(out.goods_list) ? out.goods_list : [];
+    const hit = list.find((x) => String(x.account || '').trim() === acc && Number(x.gameId || 0) === gid);
+    return hit ? String(hit.id || '').trim() : '';
+}
+
+// 变更状态（默认切元宝 changeStatusSingle）
 // type: 1=上架, 2=下架
-async function changeStatus(accountNo, gameId, type, auth = {}) {
-    const cfg = resolveAuth(auth);
-    const url = 'https://api-game.duodian.cn/api/accountManage/changeStatus';
-    const payload = { 
-        "accountNo": String(accountNo), 
-        "gameId": Number(gameId), 
-        "type": Number(type) 
-    };
-    
-    // Retry logic if needed, but for now simple call
-    const res = await curlRequest(url, 'POST', payload, cfg.token_post, cfg);
-    
-    if (res && res.code === '0') {
-        return true;
-    } else {
-        console.error(`[Zuhaowan] Change status failed: ${res ? res.desc : 'Unknown error'}`);
+async function changeStatus(accountNo, gameId, type, auth = {}, options = {}) {
+    const meta = resolveLogMeta(auth, options);
+    const dataId = String(
+        (options && (options.data_id || options.dataId)) || ''
+    ).trim() || await resolveDataIdByAccountAndGame(accountNo, gameId, auth);
+    if (!dataId) {
+        console.error(`[ZHW_YB_STATUS] user_id=${meta.userId} trace_id=${meta.traceId} ok=0 reason=missing_data_id account=${String(accountNo || '')} game_id=${Number(gameId || 0)} type=${Number(type || 0)}`);
         return false;
     }
+    return changeStatusSingleByEncryptedPayload(accountNo, gameId, type, auth, {
+        ...options,
+        trace_id: meta.traceId,
+        data_id: Number(dataId)
+    });
 }
 
 function buildOrderEncryptedPayload(payload = {}, auth = {}) {
@@ -143,6 +159,166 @@ function buildOrderEncryptedPayload(payload = {}, auth = {}) {
     return buildEncryptedBody(bizParams, {
         public_key: auth.rsa_public_key
     });
+}
+
+function mapGoodsStatus(rawStatus) {
+    const n = Number(rawStatus);
+    if (n === 2) return '租赁中';
+    if (n === -1) return '下架';
+    if (n === 1) return '上架';
+    return '未知';
+}
+
+function inferGameNameByGameId(gameId) {
+    const gid = String(gameId || '').trim();
+    if (gid === '1104466820') return 'WZRY';
+    if (gid === '1106467070') return '和平精英';
+    return '';
+}
+
+function buildGoodsEncryptedPayload(payload = {}, auth = {}) {
+    const bizParams = payload.biz_params && typeof payload.biz_params === 'object'
+        ? payload.biz_params
+        : {};
+    return buildEncryptedBody(bizParams, {
+        public_key: auth.rsa_public_key
+    });
+}
+
+function buildChangeStatusEncryptedPayload(payload = {}, auth = {}) {
+    const bizParams = payload.biz_params && typeof payload.biz_params === 'object'
+        ? payload.biz_params
+        : {};
+    return buildEncryptedBody(bizParams, {
+        public_key: auth.rsa_public_key
+    });
+}
+
+// 元宝商品列表：
+// - 仅支持业务参数，由本地 toEncryptBody.js 实时加密生成 ak/data
+async function getGoodsListByEncryptedPayload(payload = {}, auth = {}, options = {}) {
+    const startedAt = nowMs();
+    const meta = resolveLogMeta(auth, options);
+    const cfg = resolveAuth(auth);
+    const url = String(options.url || 'https://api-game.duodian.cn/api/ybzs/accountManage/getAccountList').trim();
+    const body = buildGoodsEncryptedPayload(payload, cfg);
+    if (!body.ak || !body.data) throw new Error('zuhaowang 商品请求缺少 ak/data');
+
+    const token = String(
+        options.token
+        || payload.token
+        || cfg.token_yuanbao
+        || cfg.token_get
+    ).trim();
+    if (!token) throw new Error('zuhaowang 商品请求缺少 token（可用 token_yuanbao 或 token_get）');
+
+    let res;
+    try {
+        res = await curlRequest(url, 'POST', body, token, cfg);
+    } catch (e) {
+        const costMs = nowMs() - startedAt;
+        console.error(`[ZHW_YB_GOODS] user_id=${meta.userId} trace_id=${meta.traceId} ok=0 cost_ms=${costMs} url=${url} err=${String(e && e.message ? e.message : e)}`);
+        throw e;
+    }
+    if (!res || String(res.code) !== '0') {
+        const costMs = nowMs() - startedAt;
+        console.warn(`[ZHW_YB_GOODS] user_id=${meta.userId} trace_id=${meta.traceId} ok=0 cost_ms=${costMs} url=${url} code=${String(res && res.code || '')} desc=${String(res && res.desc || '')}`);
+        throw new Error(res ? String(res.desc || 'API Error') : 'API Error');
+    }
+
+    const list = Array.isArray(res.data) ? res.data : [];
+    const mapped = list.map((item) => {
+        const rawStatus = Number(item && item.status);
+        return {
+            account: String((item && item.accountNo) || '').trim(),
+            gameName: String((item && item.gameName) || '').trim() || inferGameNameByGameId(item && item.gameId),
+            roleName: String((item && item.roleName) || '').trim(),
+            exceptionMsg: String((item && item.exceptionMsg) || '').trim(),
+            status: mapGoodsStatus(rawStatus),
+            rawStatus,
+            gameId: Number(item && item.gameId),
+            id: String((item && item.dataId) || '').trim(),
+            raw: item
+        };
+    }).filter((x) => x.account);
+
+    const costMs = nowMs() - startedAt;
+    const statusCount = buildStatusCount(mapped);
+    console.log(`[ZHW_YB_GOODS] user_id=${meta.userId} trace_id=${meta.traceId} ok=1 cost_ms=${costMs} url=${url} code=${String(res.code)} total=${mapped.length} status_count=${JSON.stringify(statusCount)}`);
+
+    return {
+        goods_list: mapped,
+        total_count: mapped.length,
+        raw: res
+    };
+}
+
+// 元宝商品状态变更（单个）：
+// - 默认按抓包参数模型 { paramList:[{ dataId, type, skipFreqLimit }] } 生成加密业务参数
+// - 仅支持由本地 toEncryptBody.js 实时生成 ak/data
+async function changeStatusSingleByEncryptedPayload(accountNo, gameId, type, auth = {}, options = {}) {
+    const startedAt = nowMs();
+    const meta = resolveLogMeta(auth, options);
+    const cfg = resolveAuth(auth);
+    const url = String(options.url || 'https://api-game.duodian.cn/api/ybzs/accountManage/changeStatusSingle').trim();
+    const dataId = Number(
+        (options && options.data_id)
+        || (options && options.dataId)
+        || 0
+    );
+    const opType = Number(type || 0);
+    if (![1, 2].includes(opType)) throw new Error('changeStatusSingle type 仅支持 1(上架)/2(下架)');
+
+    const defaultBizParams = {
+        paramList: [
+            {
+                dataId,
+                type: opType,
+                skipFreqLimit: Number(
+                    options && options.skip_freq_limit !== undefined
+                        ? options.skip_freq_limit
+                        : (options && options.skipFreqLimit !== undefined ? options.skipFreqLimit : 0)
+                )
+            }
+        ]
+    };
+
+    const bizParams = options.biz_params && typeof options.biz_params === 'object'
+        ? options.biz_params
+        : defaultBizParams;
+
+    const list = Array.isArray(bizParams.paramList) ? bizParams.paramList : [];
+    const first = list[0] && typeof list[0] === 'object' ? list[0] : null;
+    if (!first || !Number(first.dataId)) throw new Error('changeStatusSingle 缺少 dataId（paramList[0].dataId）');
+    if (![1, 2].includes(Number(first.type))) throw new Error('changeStatusSingle 缺少合法 type（paramList[0].type）');
+
+    const body = buildChangeStatusEncryptedPayload({ biz_params: bizParams }, cfg);
+    if (!body.ak || !body.data) throw new Error('zuhaowang changeStatusSingle 请求缺少 ak/data');
+
+    const token = String(
+        options.token
+        || cfg.token_yuanbao
+        || cfg.token_post
+        || cfg.token_get
+    ).trim();
+    if (!token) throw new Error('zuhaowang changeStatusSingle 请求缺少 token');
+
+    let res;
+    try {
+        res = await curlRequest(url, 'POST', body, token, cfg);
+    } catch (e) {
+        const costMs = nowMs() - startedAt;
+        console.error(`[ZHW_YB_STATUS] user_id=${meta.userId} trace_id=${meta.traceId} ok=0 cost_ms=${costMs} url=${url} account=${String(accountNo || '')} game_id=${Number(gameId || 0)} data_id=${Number(first.dataId || 0)} type=${Number(first.type || 0)} err=${String(e && e.message ? e.message : e)}`);
+        return false;
+    }
+    if (res && String(res.code) === '0') {
+        const costMs = nowMs() - startedAt;
+        console.log(`[ZHW_YB_STATUS] user_id=${meta.userId} trace_id=${meta.traceId} ok=1 cost_ms=${costMs} url=${url} account=${String(accountNo || '')} game_id=${Number(gameId || 0)} data_id=${Number(first.dataId || 0)} type=${Number(first.type || 0)} code=${String(res.code)} desc=${String(res.desc || '')}`);
+        return true;
+    }
+    const costMs = nowMs() - startedAt;
+    console.warn(`[ZHW_YB_STATUS] user_id=${meta.userId} trace_id=${meta.traceId} ok=0 cost_ms=${costMs} url=${url} account=${String(accountNo || '')} game_id=${Number(gameId || 0)} data_id=${Number(first.dataId || 0)} type=${Number(first.type || 0)} code=${String(res && res.code || '')} desc=${String(res && res.desc || '')}`);
+    return false;
 }
 
 // 订单列表：
@@ -172,8 +348,14 @@ async function getOrderListByEncryptedPayload(payload = {}, auth = {}, options =
 module.exports = {
     getGoodsList,
     changeStatus,
+    getGoodsListByEncryptedPayload,
+    changeStatusSingleByEncryptedPayload,
     getOrderListByEncryptedPayload,
     _internals: {
-        buildOrderEncryptedPayload
+        buildOrderEncryptedPayload,
+        buildGoodsEncryptedPayload,
+        buildChangeStatusEncryptedPayload,
+        mapGoodsStatus,
+        inferGameNameByGameId
     }
 };

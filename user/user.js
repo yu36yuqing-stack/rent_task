@@ -40,7 +40,15 @@ function resolveAuthPayloadByPlatform(platform, payload = {}) {
     // - 新结构：auth_payload.zuhaowang.{token_get/token_post...}
     if (p === 'zuhaowang') {
         const nested = raw.zuhaowang && typeof raw.zuhaowang === 'object' ? raw.zuhaowang : null;
-        return nested || raw;
+        const yuanbao = raw.yuanbao && typeof raw.yuanbao === 'object' ? raw.yuanbao : null;
+        if (nested || yuanbao) {
+            return {
+                ...(nested || {}),
+                ...(yuanbao || {}),
+                token_yuanbao: String((yuanbao && (yuanbao.token_yuanbao || yuanbao.token)) || '').trim()
+            };
+        }
+        return raw;
     }
 
     return raw;
