@@ -3,7 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
-const { initUserDb, verifyUserLogin, getActiveUserById } = require('../database/user_db');
+const { initUserDb, verifyUserLogin, getActiveUserById, updateUserNotifyConfigByUserId } = require('../database/user_db');
 const {
     initUserGameAccountDb,
     listUserGameAccounts,
@@ -12,8 +12,7 @@ const {
 const {
     initUserBlacklistDb,
     listUserBlacklistByUserWithMeta,
-    upsertUserBlacklistEntry,
-    hardDeleteUserBlacklistEntry
+    upsertUserBlacklistEntry
 } = require('../database/user_blacklist_db');
 const { deleteBlacklistWithGuard } = require('../blacklist/blacklist_release_guard');
 const {
@@ -109,6 +108,27 @@ function normalizeOrderOffMode(v, fallback = ORDER_OFF_MODE_NATURAL_DAY) {
 
 function orderOffModeLabel(mode) {
     return mode === ORDER_OFF_MODE_ROLLING_24H ? '滑动窗口' : '自然日';
+}
+
+function normalizeAtMode(modeText, fallback = 'none') {
+    const v = String(modeText || '').trim().toLowerCase();
+    if (v === 'owner' || v === 'all' || v === 'none') return v;
+    return fallback;
+}
+
+function normalizeMobileListInput(input) {
+    const rawList = Array.isArray(input) ? input : String(input || '').split(',');
+    const out = [];
+    for (const one of rawList) {
+        const raw = String(one || '').trim();
+        if (!raw) continue;
+        const digits = raw.replace(/\D+/g, '');
+        if (!digits) continue;
+        const mobile = digits.startsWith('86') && digits.length === 13 ? digits.slice(2) : digits;
+        if (!/^\d{11}$/.test(mobile)) continue;
+        if (!out.includes(mobile)) out.push(mobile);
+    }
+    return out;
 }
 
 async function getOrderOffRuleByUser(userId) {
@@ -782,6 +802,111 @@ async function handleSetOrderOffThreshold(req, res) {
     });
 }
 
+async function handleGetProfile(req, res) {
+    const user = await requireAuth(req);
+    const fullUser = await getActiveUserById(user.id);
+    if (!fullUser || String(fullUser.status || '').trim() !== 'enabled') {
+        throw httpError(401, '用户不存在或已禁用');
+    }
+    const ding = fullUser.notify_config && fullUser.notify_config.dingding && typeof fullUser.notify_config.dingding === 'object'
+        ? fullUser.notify_config.dingding
+        : {};
+    const primaryAtMode = normalizeAtMode(ding.at_mode, 'none');
+    const primaryAtMobiles = normalizeMobileListInput(ding.at_mobiles || []);
+    const fallbackAtMode = normalizeAtMode(ding.complaint_at_mode, 'none');
+    const fallbackAtMobiles = normalizeMobileListInput(ding.complaint_at_mobiles || []);
+    const atMode = primaryAtMode !== 'none' ? primaryAtMode : fallbackAtMode;
+    const atMobiles = primaryAtMobiles.length > 0 ? primaryAtMobiles : fallbackAtMobiles;
+    const rule = await getOrderOffRuleByUser(fullUser.id);
+    return json(res, 200, {
+        ok: true,
+        profile: {
+            user: {
+                id: Number(fullUser.id || 0),
+                account: String(fullUser.account || '').trim(),
+                name: String(fullUser.name || '').trim()
+            },
+            notify: {
+                at_mode: atMode,
+                at_mobiles: atMobiles
+            },
+            order_off: {
+                threshold: rule.threshold,
+                mode: rule.mode,
+                mode_label: orderOffModeLabel(rule.mode)
+            }
+        }
+    });
+}
+
+async function handleSetProfileNotify(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const atMode = normalizeAtMode(body.at_mode, 'none');
+    const atMobiles = normalizeMobileListInput(body.at_mobiles || []);
+
+    const fullUser = await getActiveUserById(user.id);
+    if (!fullUser || String(fullUser.status || '').trim() !== 'enabled') {
+        throw httpError(401, '用户不存在或已禁用');
+    }
+    const oldCfg = fullUser.notify_config && typeof fullUser.notify_config === 'object'
+        ? fullUser.notify_config
+        : {};
+    const oldDing = oldCfg.dingding && typeof oldCfg.dingding === 'object'
+        ? oldCfg.dingding
+        : {};
+    const nextDing = {
+        ...oldDing,
+        at_mode: atMode,
+        at_mobiles: atMobiles,
+        complaint_at_mode: atMode,
+        complaint_at_mobiles: atMobiles
+    };
+    const updated = await updateUserNotifyConfigByUserId(user.id, {
+        ...oldCfg,
+        dingding: nextDing
+    }, 'set by h5 profile notify');
+    const ding = updated.notify_config && updated.notify_config.dingding && typeof updated.notify_config.dingding === 'object'
+        ? updated.notify_config.dingding
+        : {};
+    return json(res, 200, {
+        ok: true,
+        notify: {
+            at_mode: normalizeAtMode(ding.at_mode, 'none'),
+            at_mobiles: normalizeMobileListInput(ding.at_mobiles || [])
+        }
+    });
+}
+
+async function handleSetProfileOrderOff(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const threshold = normalizeOrderOffThreshold(body.threshold, NaN);
+    if (!Number.isFinite(threshold)) {
+        return json(res, 400, { ok: false, message: 'threshold 必须是 1~10 的整数' });
+    }
+    const modeInput = body.mode === undefined || body.mode === null ? '' : String(body.mode || '').trim().toLowerCase();
+    if (modeInput && modeInput !== ORDER_OFF_MODE_NATURAL_DAY && modeInput !== ORDER_OFF_MODE_ROLLING_24H) {
+        return json(res, 400, { ok: false, message: 'mode 仅支持 natural_day / rolling_24h' });
+    }
+    const current = await getOrderOffRuleByUser(user.id);
+    const mode = normalizeOrderOffMode(modeInput, current.mode || ORDER_OFF_MODE_NATURAL_DAY);
+    await upsertUserRuleByName(user.id, {
+        rule_name: ORDER_OFF_THRESHOLD_RULE_NAME,
+        rule_detail: { threshold, mode }
+    }, {
+        desc: 'set by h5 profile'
+    });
+    return json(res, 200, {
+        ok: true,
+        order_off: {
+            threshold,
+            mode,
+            mode_label: orderOffModeLabel(mode)
+        }
+    });
+}
+
 async function handleBlacklistAdd(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
@@ -852,7 +977,7 @@ async function handleProductMaintenanceToggle(req, res) {
         return json(res, 200, { ok: true, data: { ...out, maintenance_enabled: true } });
     }
 
-    const removed = await hardDeleteUserBlacklistEntry(
+    const out = await deleteBlacklistWithGuard(
         user.id,
         gameAccount,
         {
@@ -862,7 +987,13 @@ async function handleProductMaintenanceToggle(req, res) {
             reason_expected: MAINTENANCE_BLACKLIST_REASON
         }
     );
-    if (!removed) {
+    if (!out || !out.removed) {
+        if (out && out.blocked) {
+            return json(res, 409, {
+                ok: false,
+                message: `该账号当前命中${String(out.blocked_reason || '风控')}，已进入风控跟进，暂不可结束维护`
+            });
+        }
         return json(res, 409, { ok: false, message: '该账号当前不是“维护中”状态，无法结束维护' });
     }
     return json(res, 200, {
@@ -1183,6 +1314,9 @@ async function bootstrap() {
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/dashboard') return await handleStatsDashboard(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/calendar') return await handleStatsCalendar(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/stats/refresh') return await handleStatsRefresh(req, res);
+            if (req.method === 'GET' && urlObj.pathname === '/api/profile') return await handleGetProfile(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/profile/notify') return await handleSetProfileNotify(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/profile/order-off') return await handleSetProfileOrderOff(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/user-rules/order-off-threshold') return await handleGetOrderOffThreshold(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/user-rules/order-off-threshold') return await handleSetOrderOffThreshold(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/online') return await handleProductOnlineQuery(req, res);

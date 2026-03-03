@@ -47,10 +47,10 @@
       </div>
 
       <div class="products-tabs-row">
-        <div id="filters" class="filters"></div>
-        <button id="productSyncNowBtn" class="btn btn-ghost">同步商品</button>
+        <div id="filters" class="orders-tabs filters product-filters"></div>
+        <button id="productSyncNowBtn" class="btn btn-ghost btn-page-action">同步商品</button>
       </div>
-      <p id="orderTotal" class="order-total"></p>
+      <p id="orderTotal" class="order-total head-summary-text"></p>
       <div id="listContainer"></div>
 
       <div class="pager">
@@ -63,10 +63,10 @@
     <section id="orderView" class="hidden orders-view">
       <div class="orders-tabs-row">
         <div id="orderStatusTabs" class="orders-tabs"></div>
-        <button id="orderSyncNowBtn" class="btn btn-ghost">同步订单</button>
+        <button id="orderSyncNowBtn" class="btn btn-ghost btn-page-action">同步订单</button>
       </div>
       <div id="orderQuickFilters" class="orders-quick"></div>
-      <p id="orderGameHint" class="orders-game-hint"></p>
+      <p id="orderGameHint" class="orders-game-hint head-summary-text"></p>
       <div id="orderListContainer"></div>
       <div class="pager">
         <button id="orderPrevPage" class="btn btn-ghost">上一页</button>
@@ -86,8 +86,8 @@
       <div id="statsGameTabs" class="stats-game-tabs"></div>
       <div id="statsPeriods" class="stats-periods"></div>
       <div class="stats-head-row">
-        <p id="statsRangeText" class="stats-title">统计区间：-</p>
-        <button id="statsRefreshBtn" class="btn btn-ghost">手动刷新</button>
+        <p id="statsRangeText" class="head-summary-text">统计区间：-</p>
+        <button id="statsRefreshBtn" class="btn btn-ghost btn-page-action">手动刷新</button>
       </div>
       <div id="statsKpiGrid" class="stats-kpi-grid"></div>
       <div id="statsCalCard" class="stats-cal-card">
@@ -113,26 +113,72 @@
       <div id="authChannelList" class="auth-channel-list"></div>
     </section>
 
+    <section id="profileView" class="hidden profile-view">
+      <div class="panel profile-card">
+        <div class="profile-head-row">
+          <p class="auth-title">通知设置</p>
+        </div>
+        <div class="field profile-field">
+          <label for="profileAtMode">通知@策略</label>
+          <input id="profileAtMode" type="hidden" value="none">
+          <div class="mode-options profile-mode-inline">
+            <button id="profileAtModeNone" type="button" class="mode-option-row active">
+              <span class="mode-name">不@</span>
+            </button>
+            <button id="profileAtModeOwner" type="button" class="mode-option-row">
+              <span class="mode-name">只@负责人</span>
+            </button>
+            <button id="profileAtModeAll" type="button" class="mode-option-row">
+              <span class="mode-name">@所有人</span>
+            </button>
+          </div>
+        </div>
+        <div class="field profile-field">
+          <label for="profileAtMobiles">负责人手机号（多个逗号分隔）</label>
+          <input id="profileAtMobiles" placeholder="例如 11 位手机号，多个用逗号分隔">
+        </div>
+        <div class="profile-actions">
+          <button id="profileNotifySaveBtn" class="btn btn-ghost">保存通知设置</button>
+        </div>
+      </div>
+
+      <div class="panel profile-card">
+        <div class="profile-head-row">
+          <p class="auth-title">X单下架参数</p>
+        </div>
+        <div class="field profile-field profile-threshold-row">
+          <label for="profileOrderOffThreshold">下架订单阈值</label>
+          <div class="profile-threshold-input-wrap">
+            <input id="profileOrderOffThreshold" class="profile-threshold-input" type="number" step="1" min="1" max="10" inputmode="numeric" placeholder="1~10">
+            <span class="profile-threshold-unit">单</span>
+          </div>
+        </div>
+        <div class="field profile-field">
+          <label for="profileOrderOffMode">下架统计模式</label>
+          <input id="profileOrderOffMode" type="hidden" value="natural_day">
+          <div class="mode-options">
+            <button id="profileOrderOffModeNatural" type="button" class="mode-option-row active">
+              <span class="mode-name">自然日</span>
+              <span class="mode-tip-inline">每天 06:00 ~ 次日 06:00</span>
+            </button>
+            <button id="profileOrderOffModeRolling" type="button" class="mode-option-row">
+              <span class="mode-name">滑动窗口</span>
+              <span class="mode-tip-inline">当前时刻往前 24 小时</span>
+            </button>
+          </div>
+        </div>
+        <div class="profile-actions">
+          <button id="profileOrderOffSaveBtn" class="btn btn-ghost">保存X单下架参数</button>
+        </div>
+      </div>
+    </section>
+
     <div id="drawerMask" class="drawer-mask hidden"></div>
     <aside id="sideDrawer" class="side-drawer hidden" aria-hidden="true">
       <div class="drawer-user">
         <div class="drawer-user-head">
           <p id="drawerUserName" class="drawer-user-name">当前用户：-</p>
           <button id="btnLogout" class="drawer-logout-btn">退出</button>
-        </div>
-        <div class="drawer-user-divider"></div>
-        <div class="drawer-user-rule-head">
-          <p class="drawer-user-rule-title">X单下架参数</p>
-          <button id="btnSetOrderOffThreshold" class="drawer-rule-btn">参数设置</button>
-        </div>
-        <p id="drawerOrderOffThreshold" class="drawer-user-rule-text drawer-user-rule-item">• 阈值：3单</p>
-        <p id="drawerOrderOffMode" class="drawer-user-rule-text drawer-user-rule-item">
-          • 统计周期：自然日
-          <button id="drawerOrderOffModeHelpBtn" class="drawer-help-btn" aria-label="查看下架模式时间范围说明" type="button">?</button>
-        </p>
-        <div id="drawerOrderOffModeHelp" class="drawer-help-popover hidden" role="note">
-          <p class="drawer-help-title">模式时间范围</p>
-          <p id="drawerOrderOffModeHelpText" class="drawer-help-text">自然日：每天 06:00 ~ 次日 06:00</p>
         </div>
       </div>
       <div class="drawer-list">
@@ -141,18 +187,19 @@
         <button class="drawer-item" data-menu="stats" data-label="统计看板">统计看板</button>
         <button class="drawer-item" data-menu="risk" data-label="风控中心">风控中心</button>
         <button class="drawer-item" data-menu="auth" data-label="授权管理">授权管理</button>
+        <button class="drawer-item" data-menu="profile" data-label="个人中心">个人中心</button>
       </div>
     </aside>
 
     <section id="riskView" class="hidden orders-view">
       <div class="orders-tabs-row">
         <div id="riskStatusTabs" class="orders-tabs">
-          <button class="orders-tab active" data-status="all">全部</button>
-          <button class="orders-tab" data-status="open">处理中</button>
-          <button class="orders-tab" data-status="resolved">已恢复</button>
-          <button class="orders-tab" data-status="ignored">已忽略</button>
+          <button class="orders-tab header-tab active" data-status="all">全部</button>
+          <button class="orders-tab header-tab" data-status="open">处理中</button>
+          <button class="orders-tab header-tab" data-status="resolved">已恢复</button>
+          <button class="orders-tab header-tab" data-status="ignored">已忽略</button>
         </div>
-        <button id="riskRefreshBtn" class="btn btn-ghost">手工刷新</button>
+        <button id="riskRefreshBtn" class="btn btn-ghost btn-page-action">手工刷新</button>
       </div>
       <div id="riskListContainer"></div>
       <div class="pager">
@@ -329,6 +376,7 @@
     </div>
   </div>
   <script defer src="/js/app_core.js?v=20260228b"></script>
+  <script defer src="/js/menu_user.js?v=20260302a"></script>
   <script defer src="/js/menu_products.js?v=20260228b"></script>
   <script defer src="/js/menu_orders.js?v=20260228b"></script>
   <script defer src="/js/menu_risk.js?v=20260228b"></script>

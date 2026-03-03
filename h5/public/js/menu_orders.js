@@ -437,10 +437,10 @@
         { k: 'last30', t: '近30天' }
       ];
       els.orderStatusTabs.innerHTML = tabs.map((x) => `
-        <button class="orders-tab ${o.status_filter === x.k ? 'active' : ''}" data-order-status="${x.k}">${x.t}</button>
+        <button class="orders-tab header-tab ${o.status_filter === x.k ? 'active' : ''}" data-order-status="${x.k}">${x.t}</button>
       `).join('');
       els.orderQuickFilters.innerHTML = quick.map((x) => `
-        <button class="orders-quick-item ${o.quick_filter === x.k ? 'active' : ''}" data-order-quick="${x.k}">${x.t}</button>
+        <button class="orders-quick-item header-quick-tab ${o.quick_filter === x.k ? 'active' : ''}" data-order-quick="${x.k}">${x.t}</button>
       `).join('');
       if (els.orderSyncNowBtn) {
         els.orderSyncNowBtn.disabled = Boolean(o.syncing);

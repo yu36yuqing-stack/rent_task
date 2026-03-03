@@ -1176,9 +1176,9 @@
     }
 
     .plat-renting {
-      color: #bb2d3b;
-      border-color: #f1c8cf;
-      background: #fff4f6;
+      color: #1f5f99;
+      border-color: #bcd7f1;
+      background: #eef6ff;
       font-weight: 600;
     }
 
@@ -1247,6 +1247,18 @@
       gap: 12px;
     }
 
+    #orderView.orders-view {
+      gap: 9px;
+    }
+
+    #orderView .orders-quick {
+      padding-bottom: 0;
+    }
+
+    #orderView .orders-game-hint.head-summary-text {
+      margin-top: -1px;
+    }
+
     #riskView.orders-view {
       gap: 8px;
     }
@@ -1259,11 +1271,139 @@
       margin-top: 8px;
     }
 
+    #profileView.profile-view {
+      display: grid;
+      gap: 12px;
+    }
+
+    #profileView .profile-card {
+      border-radius: 14px;
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+      border: 1px solid #d9e4ef;
+      background: #ffffff;
+    }
+
+    #profileView .profile-head-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    #profileView .profile-threshold-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    #profileView .profile-threshold-row > label {
+      margin: 0;
+      font-size: 12px;
+      font-weight: 700;
+      color: #3e546d;
+      white-space: nowrap;
+    }
+
+    #profileView .profile-threshold-input-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid #d3dbe5;
+      border-radius: 10px;
+      padding: 6px 8px;
+      background: #ffffff;
+      box-sizing: border-box;
+    }
+
+    #profileView .profile-threshold-input {
+      width: 56px;
+      border: none;
+      outline: none;
+      padding: 0;
+      font-size: 14px;
+      font-weight: 600;
+      text-align: right;
+      background: transparent;
+      color: #1f3148;
+    }
+
+    #profileView .profile-threshold-input-wrap:focus-within {
+      border-color: #5fa3eb;
+      box-shadow: 0 0 0 3px rgba(36, 127, 226, 0.15);
+    }
+
+    #profileView .profile-threshold-unit {
+      font-size: 12px;
+      color: #607a94;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    #profileView .profile-subsection {
+      border: 1px solid #e3ebf4;
+      border-radius: 12px;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+      background: #fbfdff;
+    }
+
+    #profileView .profile-subtitle {
+      margin: 0;
+      font-size: 12px;
+      font-weight: 700;
+      color: #3e546d;
+    }
+
+    #profileView .profile-field {
+      margin-top: 0;
+    }
+
+    #profileView .profile-select {
+      width: 100%;
+      border: 1px solid #d3dbe5;
+      border-radius: 12px;
+      padding: 11px 12px;
+      font-size: 14px;
+      background: #fbfdff;
+      outline: none;
+      transition: border-color .2s ease, box-shadow .2s ease;
+      appearance: none;
+    }
+
+    #profileView .profile-select:focus {
+      border-color: #5fa3eb;
+      box-shadow: 0 0 0 3px rgba(36, 127, 226, 0.15);
+    }
+
+    #profileView .profile-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #profileView .profile-mode-inline {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    #profileView .profile-mode-inline .mode-option-row {
+      min-height: 34px;
+      padding: 7px 8px;
+      justify-content: center;
+    }
+
     .products-tabs-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+      margin-bottom: 8px;
     }
 
     .products-tabs-row .filters {
@@ -1271,13 +1411,145 @@
       margin-bottom: 0;
     }
 
-    #productSyncNowBtn {
+    #listView .product-filters {
+      gap: 8px;
+      padding-bottom: 0;
+    }
+
+    #listView .order-total.head-summary-text {
+      margin-top: 0;
+      margin-bottom: 9px;
+    }
+
+    #listView .product-card {
+      margin-top: 8px;
+      padding: 10px 10px 9px;
+      border-radius: 14px;
+    }
+
+    #listView .order-card-top {
+      margin-bottom: 8px;
+      gap: 6px;
+    }
+
+    #listView .product-card-role {
+      max-width: 68%;
+      gap: 5px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    #listView .game-avatar {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+    }
+
+    #listView .card-top-chips {
+      gap: 4px;
+      row-gap: 4px;
+    }
+
+    #listView .chip {
+      padding: 2px 6px;
+      font-size: 10px;
+    }
+
+    #listView .status-main-chip {
+      max-width: 154px;
+    }
+
+    #listView .info-squares {
+      margin-top: 6px;
+      gap: 6px;
+    }
+
+    #listView .info-square {
+      padding: 7px;
+      gap: 4px;
+      border-radius: 10px;
+    }
+
+    #listView .square-title {
+      font-size: 10px;
+    }
+
+    #listView .square-line {
+      font-size: 11px;
+      line-height: 1.3;
+    }
+
+    #listView .base-square .account {
+      font-size: 11px;
+      line-height: 1.3;
+    }
+
+    #listView .copy-btn {
+      padding: 2px 7px;
+      font-size: 11px;
+    }
+
+    #listView .channel-square .plat {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 7px;
+    }
+
+    #listView .product-filter-tab {
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+
+    #listView .ops {
+      margin-top: 7px;
+      gap: 6px;
+      justify-content: flex-end;
+      align-items: center;
+    }
+
+    .btn-card-action,
+    #listView .product-op-btn {
+      border-radius: 8px;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 3px 8px;
+      min-height: 24px;
+      line-height: 1;
+      letter-spacing: .1px;
+      color: var(--btn-green-text);
+      border-color: var(--btn-green-border);
+      background: var(--btn-green-bg);
+      box-shadow: 0 1px 2px rgba(25, 42, 66, 0.04);
+      white-space: nowrap;
+    }
+
+    #listView .product-op-btn-danger {
+      color: #b5423b;
+      border-color: #efc9c5;
+      background: #fff4f3;
+      box-shadow: 0 1px 2px rgba(133, 52, 48, 0.05);
+    }
+
+    #listView .product-op-btn:hover {
+      filter: brightness(0.99);
+    }
+
+    #listView .product-op-btn:active {
+      transform: translateY(1px) scale(0.985);
+    }
+
+    .btn-page-action,
+    #productSyncNowBtn,
+    #orderSyncNowBtn,
+    #statsRefreshBtn,
+    #riskRefreshBtn {
       font-size: 11px;
       font-weight: 700;
       border-radius: 12px;
       padding: 8px 10px;
       line-height: 1;
       white-space: nowrap;
+      align-self: center;
     }
 
     .orders-tabs-row {
@@ -1292,7 +1564,7 @@
       gap: 8px;
       flex-wrap: nowrap;
       overflow-x: auto;
-      padding-bottom: 2px;
+      padding-bottom: 0;
       flex: 1;
     }
 
@@ -1300,6 +1572,7 @@
       display: none;
     }
 
+    .header-tab,
     .orders-tab {
       border: 1px solid #d8e1ec;
       border-radius: 12px;
@@ -1311,6 +1584,7 @@
       cursor: pointer;
     }
 
+    .header-tab.active,
     .orders-tab.active {
       border-color: #83b7ec;
       background: linear-gradient(135deg, #f0f7ff, #e5f1ff);
@@ -1330,6 +1604,7 @@
       display: none;
     }
 
+    .header-quick-tab,
     .orders-quick-item {
       border: 1px solid #d8e1ec;
       border-radius: 999px;
@@ -1345,6 +1620,7 @@
       text-align: center;
     }
 
+    .header-quick-tab.active,
     .orders-quick-item.active {
       border-color: #83b7ec;
       background: #edf5ff;
@@ -1358,22 +1634,12 @@
       font-size: 12px;
     }
 
-    #orderSyncNowBtn {
-      font-size: 11px;
-      font-weight: 700;
-      border-radius: 12px;
-      padding: 8px 10px;
-      line-height: 1;
-      white-space: nowrap;
-    }
-
-    #riskRefreshBtn {
-      font-size: 11px;
-      font-weight: 700;
-      border-radius: 12px;
-      padding: 8px 10px;
-      line-height: 1;
-      white-space: nowrap;
+    .head-summary-text {
+      margin: 0;
+      color: #5e738b;
+      font-size: 12px;
+      line-height: 1.35;
+      font-weight: 500;
     }
 
     .order-card {
@@ -1542,9 +1808,9 @@
     }
 
     .order-chip.progress {
-      background: #eef9f3;
-      border-color: #bfe5d1;
-      color: #1f6a47;
+      background: #eef6ff;
+      border-color: #bcd7f1;
+      color: #1f5f99;
     }
 
     .order-chip.risk-failed {
@@ -2026,12 +2292,6 @@
       font-size: 13px;
       color: #24405f;
       font-weight: 400;
-    }
-
-    #statsRefreshBtn {
-      font-size: 13px;
-      font-weight: 400;
-      padding: 8px 12px;
     }
 
     .stats-acc-list {

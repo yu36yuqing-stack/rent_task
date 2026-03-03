@@ -173,6 +173,19 @@
         order_off_threshold: 3,
         order_off_mode: ORDER_OFF_MODE_NATURAL_DAY
       },
+      profile: {
+        loading: false,
+        notify_saving: false,
+        order_off_saving: false,
+        notify: {
+          at_mode: 'none',
+          at_mobiles: []
+        },
+        order_off: {
+          threshold: 3,
+          mode: ORDER_OFF_MODE_NATURAL_DAY
+        }
+      },
       onlineStatusMap: {},
       onlineLoadingMap: {},
       forbiddenLoadingMap: {},
@@ -215,6 +228,7 @@
       if (k === 'risk') return '风控中心';
       if (k === 'stats') return '统计看板';
       if (k === 'auth') return '授权管理';
+      if (k === 'profile') return '个人中心';
       return '商品列表';
     }
 
@@ -222,7 +236,7 @@
       try {
         const url = new URL(window.location.href);
         const m = String(url.searchParams.get('menu') || '').trim().toLowerCase();
-        if (m === 'orders' || m === 'risk' || m === 'stats' || m === 'auth' || m === 'products') return m;
+        if (m === 'orders' || m === 'risk' || m === 'stats' || m === 'auth' || m === 'profile' || m === 'products') return m;
       } catch (_) {}
       return 'products';
     }
@@ -259,6 +273,7 @@
       orderComplaintView: document.getElementById('orderComplaintView'),
       statsView: document.getElementById('statsView'),
       authView: document.getElementById('authView'),
+      profileView: document.getElementById('profileView'),
       heroLoginView: document.getElementById('heroLoginView'),
       heroAppView: document.getElementById('heroAppView'),
       heroMenuTitle: document.getElementById('heroMenuTitle'),
@@ -308,6 +323,17 @@
       statsAccountTitle: document.getElementById('statsAccountTitle'),
       statsAccountList: document.getElementById('statsAccountList'),
       authChannelList: document.getElementById('authChannelList'),
+      profileAtMode: document.getElementById('profileAtMode'),
+      profileAtModeNone: document.getElementById('profileAtModeNone'),
+      profileAtModeOwner: document.getElementById('profileAtModeOwner'),
+      profileAtModeAll: document.getElementById('profileAtModeAll'),
+      profileAtMobiles: document.getElementById('profileAtMobiles'),
+      profileNotifySaveBtn: document.getElementById('profileNotifySaveBtn'),
+      profileOrderOffThreshold: document.getElementById('profileOrderOffThreshold'),
+      profileOrderOffMode: document.getElementById('profileOrderOffMode'),
+      profileOrderOffModeNatural: document.getElementById('profileOrderOffModeNatural'),
+      profileOrderOffModeRolling: document.getElementById('profileOrderOffModeRolling'),
+      profileOrderOffSaveBtn: document.getElementById('profileOrderOffSaveBtn'),
       statsMissingOverlay: document.getElementById('statsMissingOverlay'),
       statsMissingList: document.getElementById('statsMissingList'),
       statsMissingClose: document.getElementById('statsMissingClose'),
@@ -728,6 +754,7 @@
         );
         state.page = 1;
         await loadOrderOffThresholdRule();
+        await loadProfileSafe();
         await loadList();
         render();
       } catch (e) {
@@ -810,6 +837,18 @@
       state.userRules.order_off_threshold = Number.isFinite(v) ? Math.max(1, Math.min(10, Math.floor(v))) : 3;
       state.userRules.order_off_mode = normalizeOrderOffMode(data.mode, ORDER_OFF_MODE_NATURAL_DAY);
     }
+
+    async function loadProfileSafe() {
+      if (typeof window.loadProfile === 'function') {
+        await window.loadProfile();
+      }
+    }
+
+    function renderProfileViewSafe() {
+      if (typeof window.renderProfileView === 'function') {
+        window.renderProfileView();
+      }
+    }
     function renderDrawer() {
       const opened = Boolean(state.drawerOpen);
       els.drawerMask.classList.toggle('hidden', !opened);
@@ -886,12 +925,14 @@
       const showRisk = loggedIn && state.currentMenu === 'risk';
       const showStats = loggedIn && state.currentMenu === 'stats';
       const showAuth = loggedIn && state.currentMenu === 'auth';
+      const showProfile = loggedIn && state.currentMenu === 'profile';
       els.listView.classList.toggle('hidden', !showProducts);
       els.orderView.classList.toggle('hidden', !showOrders || showOrderComplaint);
       if (els.riskView) els.riskView.classList.toggle('hidden', !showRisk);
       if (els.orderComplaintView) els.orderComplaintView.classList.toggle('hidden', !showOrderComplaint);
       els.statsView.classList.toggle('hidden', !showStats);
       els.authView.classList.toggle('hidden', !showAuth);
+      if (els.profileView) els.profileView.classList.toggle('hidden', !showProfile);
       els.heroLoginView.classList.toggle('hidden', loggedIn);
       els.heroAppView.classList.toggle('hidden', !loggedIn);
       els.heroMenuTitle.textContent = menuTitleByKey(state.currentMenu);
@@ -923,6 +964,7 @@
         if (showRisk) renderRiskCenterView();
         if (showStats) renderStatsView();
         if (showAuth) renderAuthView();
+        if (showProfile) renderProfileViewSafe();
         renderDrawer();
         renderMoreOpsSheet();
         renderForbiddenSheet();
@@ -1041,6 +1083,19 @@
       state.userRules = {
         order_off_threshold: 3,
         order_off_mode: ORDER_OFF_MODE_NATURAL_DAY
+      };
+      state.profile = {
+        loading: false,
+        notify_saving: false,
+        order_off_saving: false,
+        notify: {
+          at_mode: 'none',
+          at_mobiles: []
+        },
+        order_off: {
+          threshold: 3,
+          mode: ORDER_OFF_MODE_NATURAL_DAY
+        }
       };
       state.orders.syncing = false;
       state.orders.complaint_detail = { open: false, loading: false, error: '', order_no: '', channel: '', order: null, data: null, preview_image_url: '' };
@@ -1387,6 +1442,18 @@
           })();
           return;
         }
+        if (key === 'profile') {
+          render();
+          (async () => {
+            try {
+              await loadProfileSafe();
+              render();
+            } catch (e) {
+              showToast(e.message || '个人中心加载失败');
+            }
+          })();
+          return;
+        }
         render();
         alert('该功能正在开发中');
       });
@@ -1459,6 +1526,7 @@
       if (state.token && state.user) {
         try {
           await loadOrderOffThresholdRule();
+          await loadProfileSafe();
           await loadList();
           await loadOrders();
           await loadRiskCenter();

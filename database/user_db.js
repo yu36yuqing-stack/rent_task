@@ -330,6 +330,47 @@ async function updateUserSwitchByUserId(userId, switchPatch = {}, desc = '') {
     }
 }
 
+async function updateUserNotifyConfigByUserId(userId, notifyConfigPatch = {}, desc = '') {
+    await initUserDb();
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+
+    const db = openDatabase();
+    try {
+        const row = await get(db, `SELECT id, notify_config FROM user WHERE id = ? AND is_deleted = 0`, [uid]);
+        if (!row) throw new Error('用户不存在');
+        let current = {};
+        try { current = JSON.parse(String(row.notify_config || '{}')) || {}; } catch { current = {}; }
+
+        let patchObj = notifyConfigPatch;
+        if (typeof patchObj === 'string') {
+            try {
+                patchObj = JSON.parse(patchObj);
+            } catch {
+                throw new Error('notify_config_patch 必须是合法 JSON');
+            }
+        }
+        if (!patchObj || typeof patchObj !== 'object' || Array.isArray(patchObj)) {
+            throw new Error('notify_config_patch 必须是 JSON 对象');
+        }
+
+        const merged = {
+            ...current,
+            ...patchObj
+        };
+        const normalized = normalizeNotifyConfig(merged);
+        await run(db, `
+            UPDATE user
+            SET notify_config = ?, modify_date = ?, desc = ?
+            WHERE id = ? AND is_deleted = 0
+        `, [normalized, nowText(), String(desc || ''), uid]);
+        const updated = await get(db, `SELECT * FROM user WHERE id = ? AND is_deleted = 0`, [uid]);
+        return rowToPublicUser(updated);
+    } finally {
+        db.close();
+    }
+}
+
 async function verifyUserLogin(account, rawPassword) {
     await initUserDb();
     const target = String(account || '').trim();
@@ -375,6 +416,7 @@ module.exports = {
     getActiveUserById,
     verifyUserLogin,
     touchUserLastLogin,
+    updateUserNotifyConfigByUserId,
     updateUserSwitchByUserId,
     listActiveUsers
 };

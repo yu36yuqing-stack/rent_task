@@ -739,22 +739,16 @@
       const summaryTotal = Number(summaryMap[state.filter] || 0);
       const orderCountLabel = orderCountLabelByMode();
       els.filters.innerHTML = `
-        <div class="filter-tab ${allActive ? 'active' : ''}" data-filter="all">
-          <div class="txt">全部</div>
-        </div>
-        <div class="filter-tab ${restrictedActive ? 'active' : ''}" data-filter="restricted">
-          <div class="txt">限制中</div>
-        </div>
-        <div class="filter-tab ${rentingActive ? 'active' : ''}" data-filter="renting">
-          <div class="txt">租赁中</div>
-        </div>
+        <button class="orders-tab header-tab product-filter-tab ${allActive ? 'active' : ''}" data-filter="all" type="button">全部</button>
+        <button class="orders-tab header-tab product-filter-tab ${restrictedActive ? 'active' : ''}" data-filter="restricted" type="button">限制中</button>
+        <button class="orders-tab header-tab product-filter-tab ${rentingActive ? 'active' : ''}" data-filter="renting" type="button">租赁中</button>
       `;
       els.orderTotal.innerHTML = `
         <span class="order-total-main">${orderCountLabel}：${Number(state.stats.total_paid || 0)}</span>
         <span class="order-total-divider" aria-hidden="true"></span>
         <span class="order-total-summary">汇总${summaryTotal}</span>
       `;
-      Array.from(els.filters.querySelectorAll('.filter-tab')).forEach((n) => {
+      Array.from(els.filters.querySelectorAll('.product-filter-tab')).forEach((n) => {
         n.addEventListener('click', async () => {
           const nextFilter = n.getAttribute('data-filter') || 'all';
           if (nextFilter === state.filter) return;
@@ -843,13 +837,13 @@
               </div>
             </div>
             <div class="ops">
-              <button class="btn btn-chip btn-chip-ok" data-op="online-query" ${querying ? 'disabled' : ''}>
+              <button class="btn btn-ghost btn-card-action product-op-btn" data-op="online-query" ${querying ? 'disabled' : ''}>
                 状态查询
               </button>
-              <button class="btn btn-chip ${item.blacklisted ? 'btn-chip-danger' : 'btn-chip-ok'}" data-op="blacklist-toggle">
+              <button class="btn btn-ghost btn-card-action product-op-btn ${item.blacklisted ? 'product-op-btn-danger' : ''}" data-op="blacklist-toggle">
                 ${item.blacklisted ? '移出黑名单' : '加入黑名单'}
               </button>
-              <button class="btn btn-chip btn-chip-ok" data-op="more-ops" ${(querying || forbiddenLoading) ? 'disabled' : ''}>
+              <button class="btn btn-ghost btn-card-action product-op-btn" data-op="more-ops" ${(querying || forbiddenLoading) ? 'disabled' : ''}>
                 更多操作
               </button>
             </div>
