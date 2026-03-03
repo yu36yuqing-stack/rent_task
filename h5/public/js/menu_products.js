@@ -728,6 +728,30 @@
     }
 
     function renderFilters() {
+      if (els.productGameTabs) {
+        const games = [
+          { k: 'WZRY', t: '王者荣耀', icon: '/assets/game_icons/wzry.webp' },
+          { k: '和平精英', t: '和平精英', icon: '/assets/game_icons/hpjy.png' },
+          { k: 'CFM', t: 'CFM枪战王者', icon: '/assets/game_icons/cfm.png' }
+        ];
+        els.productGameTabs.innerHTML = games.map((x) => `
+          <button class="stats-game-tab ${String(state.product_game_name || 'WZRY') === x.k ? 'active' : ''}" data-product-game="${x.k}" type="button">
+            <span class="game-avatar"><img src="${x.icon}" alt="${x.t}" loading="lazy" decoding="async"></span>
+            <span class="stats-game-tab-text">${x.t}</span>
+          </button>
+        `).join('');
+        Array.from(els.productGameTabs.querySelectorAll('[data-product-game]')).forEach((n) => {
+          n.addEventListener('click', async () => {
+            const k = String(n.getAttribute('data-product-game') || 'WZRY').trim();
+            if (k === String(state.product_game_name || 'WZRY')) return;
+            state.product_game_name = k;
+            state.page = 1;
+            await loadList();
+            renderList();
+          });
+        });
+      }
+
       const allActive = state.filter === 'all';
       const restrictedActive = state.filter === 'restricted';
       const rentingActive = state.filter === 'renting';
@@ -739,9 +763,9 @@
       const summaryTotal = Number(summaryMap[state.filter] || 0);
       const orderCountLabel = orderCountLabelByMode();
       els.filters.innerHTML = `
-        <button class="orders-tab header-tab product-filter-tab ${allActive ? 'active' : ''}" data-filter="all" type="button">全部</button>
-        <button class="orders-tab header-tab product-filter-tab ${restrictedActive ? 'active' : ''}" data-filter="restricted" type="button">限制中</button>
-        <button class="orders-tab header-tab product-filter-tab ${rentingActive ? 'active' : ''}" data-filter="renting" type="button">租赁中</button>
+        <button class="stats-period-btn product-filter-tab ${allActive ? 'active' : ''}" data-filter="all" type="button">全部</button>
+        <button class="stats-period-btn product-filter-tab ${restrictedActive ? 'active' : ''}" data-filter="restricted" type="button">限制中</button>
+        <button class="stats-period-btn product-filter-tab ${rentingActive ? 'active' : ''}" data-filter="renting" type="button">租赁中</button>
       `;
       els.orderTotal.innerHTML = `
         <span class="order-total-main">${orderCountLabel}：${Number(state.stats.total_paid || 0)}</span>

@@ -95,6 +95,7 @@
       rememberLogin: initialAuth.remember,
       user: initialAuth.user,
       filter: 'all',
+      product_game_name: 'WZRY',
       productsSyncing: false,
       page: 1,
       pageSize: 20,
@@ -292,6 +293,7 @@
       btnSetOrderOffThreshold: document.getElementById('btnSetOrderOffThreshold'),
       pullRefresh: document.getElementById('pullRefresh'),
       pullRefreshInner: document.getElementById('pullRefreshInner'),
+      productGameTabs: document.getElementById('productGameTabs'),
       filters: document.getElementById('filters'),
       productSyncNowBtn: document.getElementById('productSyncNowBtn'),
       orderTotal: document.getElementById('orderTotal'),
@@ -763,9 +765,11 @@
     }
 
     async function loadList() {
-      const data = await request(`/api/products?page=${state.page}&page_size=${state.pageSize}&filter=${state.filter}`);
+      const gameName = String(state.product_game_name || 'WZRY').trim() || 'WZRY';
+      const data = await request(`/api/products?page=${state.page}&page_size=${state.pageSize}&filter=${state.filter}&game_name=${encodeURIComponent(gameName)}`);
       state.list = Array.isArray(data.list) ? data.list : [];
       state.total = Number(data.total || 0);
+      state.product_game_name = String(data.game_name || gameName).trim() || gameName;
       state.stats = data.stats || { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_renting: 0, total_paid: 0 };
     }
 
@@ -1007,6 +1011,7 @@
       state.productsSyncing = false;
       state.total = 0;
       state.page = 1;
+      state.product_game_name = 'WZRY';
       state.currentMenu = 'products';
       state.drawerOpen = false;
       state.onlineStatusMap = {};
