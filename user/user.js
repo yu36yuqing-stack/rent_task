@@ -31,6 +31,51 @@ function isAuthUsable(row = {}) {
     return t > Date.now();
 }
 
+function normalizeZuhaowangAuthPayload(payload = {}) {
+    const raw = payload && typeof payload === 'object' ? payload : {};
+    const nested = raw.zuhaowang && typeof raw.zuhaowang === 'object' ? raw.zuhaowang : raw;
+    const yuanbao = raw.yuanbao && typeof raw.yuanbao === 'object' ? raw.yuanbao : {};
+    const yuanbaoData = yuanbao.data && typeof yuanbao.data === 'object' ? yuanbao.data : {};
+
+    const tokenYuanbao = String(
+        yuanbao.token_yuanbao
+        || yuanbao.token
+        || yuanbaoData.token
+        || ''
+    ).trim();
+    const packageName = String(
+        yuanbao.package_name
+        || yuanbao.packageName
+        || (tokenYuanbao ? 'com.duodian.merchant' : '')
+        || nested.package_name
+        || ''
+    ).trim();
+    const deviceId = String(
+        yuanbao.device_id
+        || yuanbao.deviceId
+        || yuanbaoData.device_id
+        || yuanbaoData.deviceId
+        || nested.device_id
+        || ''
+    ).trim();
+
+    return {
+        ...(nested || {}),
+        ...(yuanbao || {}),
+        token_yuanbao: tokenYuanbao,
+        token_get: String(nested.token_get || tokenYuanbao || '').trim(),
+        token_post: String(nested.token_post || tokenYuanbao || '').trim(),
+        device_id: deviceId,
+        package_name: packageName,
+        source: String(yuanbao.source || nested.source || 'android').trim() || 'android',
+        app_version: String(yuanbao.app_version || nested.app_version || nested.x_versioncode || '2.1.6').trim(),
+        main_version: String(yuanbao.main_version || nested.main_version || nested.x_versioncode || '2.1.6').trim(),
+        x_versioncode: String(yuanbao.x_versioncode || nested.x_versioncode || nested.app_version || '2.1.6').trim(),
+        x_versionnumber: String(yuanbao.x_versionnumber || nested.x_versionnumber || '216').trim(),
+        x_channel: String(yuanbao.x_channel || nested.x_channel || 'ybxiaomi').trim()
+    };
+}
+
 function resolveAuthPayloadByPlatform(platform, payload = {}) {
     const p = String(platform || '').trim();
     const raw = payload && typeof payload === 'object' ? payload : {};
@@ -39,16 +84,7 @@ function resolveAuthPayloadByPlatform(platform, payload = {}) {
     // - 旧结构：auth_payload.token_get/token_post...
     // - 新结构：auth_payload.zuhaowang.{token_get/token_post...}
     if (p === 'zuhaowang') {
-        const nested = raw.zuhaowang && typeof raw.zuhaowang === 'object' ? raw.zuhaowang : null;
-        const yuanbao = raw.yuanbao && typeof raw.yuanbao === 'object' ? raw.yuanbao : null;
-        if (nested || yuanbao) {
-            return {
-                ...(nested || {}),
-                ...(yuanbao || {}),
-                token_yuanbao: String((yuanbao && (yuanbao.token_yuanbao || yuanbao.token)) || '').trim()
-            };
-        }
-        return raw;
+        return normalizeZuhaowangAuthPayload(raw);
     }
 
     return raw;
@@ -96,6 +132,7 @@ module.exports = {
     login,
     register,
     isAuthUsable,
+    normalizeZuhaowangAuthPayload,
     resolveAuthPayloadByPlatform,
     buildAuthMap,
     loadUserBlacklistSet,

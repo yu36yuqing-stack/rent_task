@@ -27,6 +27,7 @@ const { getOrderListByEncryptedPayload } = require('../zuhaowang/zuhaowang_api')
 const { listAllUserGameAccountsByUser } = require('../product/product');
 const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('../database/user_db');
 const { openDatabase } = require('../database/sqlite_client');
+const { normalizeZuhaowangAuthPayload } = require('../user/user');
 const {
     CHANNEL_UUZUHAO,
     UUZUHAO_ORDER_FIELD_MAPPING,
@@ -467,18 +468,7 @@ async function resolveZuhaowangAuthByUser(userId) {
     if (!resolved || !resolved.auth_payload || typeof resolved.auth_payload !== 'object') {
         throw new Error(`user_id=${uid} 缺少可用 ${CHANNEL_ZHW_YUANBAO}/${CHANNEL_ZHW} 授权`);
     }
-    const payload = resolved.auth_payload || {};
-    const yuanbaoPayload = payload && typeof payload.yuanbao === 'object'
-        ? payload.yuanbao
-        : payload;
-    const token = String(yuanbaoPayload.token_yuanbao || yuanbaoPayload.token || '').trim();
-    return {
-        ...yuanbaoPayload,
-        // 订单链路读取独立平台授权；商品链路仍走 zuhaowang 平台 token_get/token_post。
-        token_yuanbao: String(yuanbaoPayload.token_yuanbao || token).trim(),
-        token_get: String(yuanbaoPayload.token_get || token).trim(),
-        token_post: String(yuanbaoPayload.token_post || token).trim()
-    };
+    return normalizeZuhaowangAuthPayload(resolved.auth_payload || {});
 }
 
 async function buildUuzuhaoProductIndex(userId) {

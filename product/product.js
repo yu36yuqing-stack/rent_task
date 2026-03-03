@@ -9,6 +9,7 @@ const {
 } = require('../database/user_game_account_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { releaseOrderCooldownBlacklistByUser } = require('../order/order_cooldown');
+const { normalizeZuhaowangAuthPayload } = require('../user/user');
 
 const PLATFORM_ZHW = 'zuhaowang';
 const PLATFORM_UHZ = 'uhaozu';
@@ -105,17 +106,7 @@ function isAuthUsable(row = {}) {
 
 async function pullPlatformDataByAuth(platform, authPayload = {}) {
     if (platform === PLATFORM_ZHW) {
-        const nested = authPayload && typeof authPayload === 'object' && authPayload.zuhaowang && typeof authPayload.zuhaowang === 'object'
-            ? authPayload.zuhaowang
-            : authPayload;
-        const yuanbao = authPayload && typeof authPayload === 'object' && authPayload.yuanbao && typeof authPayload.yuanbao === 'object'
-            ? authPayload.yuanbao
-            : {};
-        const mergedAuth = {
-            ...(nested || {}),
-            ...(yuanbao || {}),
-            token_yuanbao: String((yuanbao && (yuanbao.token_yuanbao || yuanbao.token)) || '').trim()
-        };
+        const mergedAuth = normalizeZuhaowangAuthPayload(authPayload);
         const list = await getGoodsList(mergedAuth);
         return list.map((x) => ({
             ...mapChannelGameToStandard(PLATFORM_ZHW, x.gameId, x.gameName),
