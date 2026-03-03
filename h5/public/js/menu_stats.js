@@ -61,12 +61,7 @@
         : '';
 
       els.statsCalMonth.value = month;
-      let titleAmount = Number(cal.total_rec_amount || 0);
-      if (selectedDate) {
-        const pickedDay = String(selectedDate).slice(-2);
-        titleAmount = Number(amountByDay.get(pickedDay) || 0);
-      }
-      els.statsCalTitle.textContent = `收入日历（元）/合计：¥${Number(titleAmount || 0).toFixed(2)}`;
+      els.statsCalTitle.textContent = '收入日历';
 
       const totalDays = daysInMonth(month);
       const firstWeekday = dayOfWeek(month, 1);
@@ -95,8 +90,9 @@
             const dateText = String(n.getAttribute('data-stat-date') || '').trim();
             if (!isDateText(dateText)) return;
             if (String((state.statsBoard && state.statsBoard.selected_date) || '').trim() === dateText) {
+              state.statsBoard.period = 'last7';
               state.statsBoard.selected_date = '';
-              await loadStatsBoard({ stat_date: '' });
+              await loadStatsBoard();
               renderStatsView();
               return;
             }

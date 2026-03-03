@@ -2294,6 +2294,13 @@
       font-weight: 400;
     }
 
+    #statsCalTitle {
+      margin: 0;
+      font-size: 14px;
+      color: #1f3550;
+      font-weight: 600;
+    }
+
     .stats-acc-list {
       display: grid;
       gap: 8px;
