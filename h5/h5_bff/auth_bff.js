@@ -15,7 +15,7 @@ const CHANNEL_CONFIG = [
         platform: 'zuhaowang',
         name: '租号王',
         mode: '模拟客户端登录',
-        required_keys: ['token_get', 'token_post', 'device_id', 'package_name']
+        required_keys: ['yuanbao.data.token', 'yuanbao.data.deviceId', 'yuanbao.package_name']
     },
     {
         platform: 'uhaozu',
@@ -55,6 +55,16 @@ function maskSecret(v) {
     return `${raw.slice(0, 3)}***${raw.slice(-3)}`;
 }
 
+function pickValueByPath(obj, path) {
+    const keys = String(path || '').split('.').map((x) => String(x || '').trim()).filter(Boolean);
+    let cur = obj;
+    for (const k of keys) {
+        if (!cur || typeof cur !== 'object') return '';
+        cur = cur[k];
+    }
+    return cur;
+}
+
 function toChannelView(rows = []) {
     const map = new Map();
     for (const row of Array.isArray(rows) ? rows : []) {
@@ -68,7 +78,7 @@ function toChannelView(rows = []) {
         const payload = row && row.auth_payload && typeof row.auth_payload === 'object' ? row.auth_payload : {};
         const key_values = c.required_keys.map((k) => ({
             key: k,
-            masked_value: maskSecret(payload[k])
+            masked_value: maskSecret(pickValueByPath(payload, k))
         }));
         const authStatus = row ? String(row.auth_status || '') : '';
         const hasAuth = Boolean(row) && authStatus === 'valid';

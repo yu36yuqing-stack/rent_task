@@ -7,7 +7,7 @@ const AUTH_STATUS = new Set(['valid', 'expired', 'revoked']);
 const PLATFORM_AUTH_RULES = {
     zuhaowang: {
         types: new Set(['token']),
-        requiredKeys: ['token_get', 'token_post', 'device_id', 'package_name']
+        requiredKeys: ['yuanbao']
     },
     'zuhaowang-yuanbao': {
         types: new Set(['token']),
@@ -92,12 +92,77 @@ function ensureNonEmptyStringField(obj, key) {
     return value.length > 0;
 }
 
+function normalizeZuhaowangAuthPayloadForStorage(payloadObj = {}) {
+    const raw = payloadObj && typeof payloadObj === 'object' && !Array.isArray(payloadObj) ? payloadObj : {};
+    const fromYuanbao = raw.yuanbao && typeof raw.yuanbao === 'object' ? raw.yuanbao : null;
+    const source = fromYuanbao || raw;
+    const dataRaw = source.data && typeof source.data === 'object' ? source.data : {};
+
+    const token = String(
+        source.token_yuanbao
+        || source.token
+        || dataRaw.token
+        || raw.token_yuanbao
+        || raw.token_post
+        || raw.token_get
+        || ''
+    ).trim();
+    const deviceId = String(
+        source.device_id
+        || source.deviceId
+        || dataRaw.device_id
+        || dataRaw.deviceId
+        || raw.device_id
+        || ''
+    ).trim();
+    const packageName = String(
+        source.package_name
+        || source.packageName
+        || raw.package_name
+        || (token ? 'com.duodian.merchant' : '')
+    ).trim();
+
+    const normalizedData = {
+        ...(dataRaw || {}),
+        ...(token ? { token } : {}),
+        ...(deviceId ? { deviceId } : {})
+    };
+
+    const normalizedYuanbao = {
+        ...(source || {}),
+        ...(token ? { token } : {}),
+        ...(deviceId ? { deviceId } : {}),
+        ...(packageName ? { package_name: packageName } : {}),
+        data: normalizedData
+    };
+
+    return {
+        yuanbao: normalizedYuanbao
+    };
+}
+
+function normalizePlatformAuthPayload(platform, payloadObj = {}) {
+    if (platform === 'zuhaowang') return normalizeZuhaowangAuthPayloadForStorage(payloadObj);
+    return payloadObj;
+}
+
 function validatePlatformAuth(platform, authType, payloadObj) {
     const rule = PLATFORM_AUTH_RULES[platform];
     if (!rule) return;
 
     if (!rule.types.has(authType)) {
         throw new Error(`${platform} 仅支持 auth_type=${Array.from(rule.types).join('/')}`);
+    }
+
+    if (platform === 'zuhaowang') {
+        const normalized = normalizeZuhaowangAuthPayloadForStorage(payloadObj);
+        const yuanbao = normalized.yuanbao && typeof normalized.yuanbao === 'object' ? normalized.yuanbao : {};
+        const data = yuanbao.data && typeof yuanbao.data === 'object' ? yuanbao.data : {};
+        const token = String(yuanbao.token_yuanbao || yuanbao.token || data.token || '').trim();
+        const deviceId = String(yuanbao.device_id || yuanbao.deviceId || data.device_id || data.deviceId || '').trim();
+        if (!token) throw new Error('zuhaowang 缺少必要凭据字段: yuanbao.data.token');
+        if (!deviceId) throw new Error('zuhaowang 缺少必要凭据字段: yuanbao.data.deviceId');
+        return;
     }
 
     for (const key of rule.requiredKeys) {
@@ -164,6 +229,28 @@ async function migrateAuthPayloadToPlaintext(db) {
     }
 }
 
+async function migrateZuhaowangPayloadToYuanbaoOnly(db) {
+    const rows = await all(db, `
+        SELECT id, auth_payload
+        FROM user_platform_auth
+        WHERE is_deleted = 0
+          AND platform = 'zuhaowang'
+    `);
+
+    for (const row of rows) {
+        const parsed = parseStoredPayload(row.auth_payload);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+        const normalized = normalizeZuhaowangAuthPayloadForStorage(parsed);
+        const nextPayload = JSON.stringify(normalized);
+        if (nextPayload === String(row.auth_payload || '')) continue;
+        await run(db, `
+            UPDATE user_platform_auth
+            SET auth_payload = ?, modify_date = ?
+            WHERE id = ?
+        `, [nextPayload, nowText(), Number(row.id)]);
+    }
+}
+
 function isExpired(expireAt) {
     const value = String(expireAt || '').trim();
     if (!value) return false;
@@ -217,6 +304,7 @@ async function initUserPlatformAuthDb() {
             ON user_platform_auth(user_id, auth_status, is_deleted)
         `);
         await migrateAuthPayloadToPlaintext(db);
+        await migrateZuhaowangPayloadToYuanbaoOnly(db);
     } finally {
         db.close();
     }
@@ -228,7 +316,7 @@ async function upsertUserPlatformAuth(input = {}) {
     const platform = normalizePlatform(input.platform);
     const authType = normalizeAuthType(input.auth_type);
     const authStatus = normalizeAuthStatus(input.auth_status || 'valid');
-    const authPayloadObj = parseAuthPayload(input.auth_payload);
+    const authPayloadObj = normalizePlatformAuthPayload(platform, parseAuthPayload(input.auth_payload));
     const expireAt = String(input.expire_at || '').trim();
     const desc = String(input.desc || '').trim();
 

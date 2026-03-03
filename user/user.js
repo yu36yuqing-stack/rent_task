@@ -33,7 +33,7 @@ function isAuthUsable(row = {}) {
 
 function normalizeZuhaowangAuthPayload(payload = {}) {
     const raw = payload && typeof payload === 'object' ? payload : {};
-    const yuanbao = raw.yuanbao && typeof raw.yuanbao === 'object' ? raw.yuanbao : raw;
+    const yuanbao = raw.yuanbao && typeof raw.yuanbao === 'object' ? raw.yuanbao : {};
     const yuanbaoData = yuanbao.data && typeof yuanbao.data === 'object' ? yuanbao.data : {};
 
     const tokenYuanbao = String(
