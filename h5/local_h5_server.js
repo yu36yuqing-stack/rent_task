@@ -16,7 +16,7 @@ const {
 } = require('../database/user_blacklist_db');
 const { deleteBlacklistWithGuard } = require('../blacklist/blacklist_release_guard');
 const { manualRemoveBlacklistMode2 } = require('../blacklist/blacklist_manual_remove_v2');
-const { getBlacklistV2Mode } = require('../blacklist/blacklist_reconciler');
+const { getBlacklistV2Mode, buildProjectedBlacklistByUser } = require('../blacklist/blacklist_reconciler');
 const {
     RESTRICT_REASON,
     initUserPlatformRestrictDb,
@@ -257,6 +257,27 @@ function resolveBlacklistDisplayDate(row = {}) {
     return createDate;
 }
 
+function resolveBlacklistDisplayDateByMeta(input = {}) {
+    const reason = String(input.reason || '').trim();
+    const createDate = String(input.create_date || '').trim();
+    const descText = String(input.desc || '').trim();
+    const winnerDetail = input.winner_detail && typeof input.winner_detail === 'object'
+        ? input.winner_detail
+        : {};
+    if (reason === COOLDOWN_BLACKLIST_REASON) {
+        const sec = Number((winnerDetail && winnerDetail.cooldown_until) || 0);
+        const fromWinner = formatDateTimeByUnixSec(sec);
+        if (fromWinner) return fromWinner;
+        const fromDesc = formatDateTimeByUnixSec(parseCooldownUntilSecFromDesc(descText));
+        return fromDesc || createDate;
+    }
+    if (reason === MAINTENANCE_BLACKLIST_REASON) {
+        const fromDesc = parseMaintenanceSinceFromDesc(descText);
+        return fromDesc || createDate;
+    }
+    return createDate;
+}
+
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms || 0))));
 }
@@ -398,17 +419,46 @@ async function handleProducts(req, res, urlObj) {
     const filter = (filterRaw === 'restricted' || filterRaw === 'renting' || filterRaw === 'all')
         ? filterRaw
         : 'all';
+    const mode = Number(getBlacklistV2Mode());
     const blacklistRows = await listUserBlacklistByUserWithMeta(user.id);
-    const blacklistMap = {};
+    const legacyMap = {};
     for (const row of blacklistRows) {
         const acc = String((row && row.game_account) || '').trim();
         if (!acc) continue;
-        blacklistMap[acc] = {
-            reason: String((row && row.reason) || '').trim(),
-            remark: String((row && row.remark) || '').trim(),
-            create_date: String((row && row.create_date) || '').trim(),
-            display_date: resolveBlacklistDisplayDate(row)
-        };
+        legacyMap[acc] = row;
+    }
+    const blacklistMap = {};
+    if (mode >= 2) {
+        const projected = await buildProjectedBlacklistByUser(user.id, { include_legacy_bootstrap: true });
+        for (const acc of Object.keys(projected || {})) {
+            const p = projected[acc] || {};
+            const legacy = legacyMap[acc] || {};
+            const reason = String(p.reason || '').trim();
+            const createDate = String((legacy && legacy.create_date) || '').trim();
+            const winnerDetail = p.winner_detail && typeof p.winner_detail === 'object' ? p.winner_detail : {};
+            blacklistMap[acc] = {
+                reason,
+                remark: String((legacy && legacy.remark) || '').trim(),
+                create_date: createDate,
+                display_date: resolveBlacklistDisplayDateByMeta({
+                    reason,
+                    create_date: createDate,
+                    desc: String((legacy && legacy.desc) || '').trim(),
+                    winner_detail: winnerDetail
+                })
+            };
+        }
+    } else {
+        for (const row of blacklistRows) {
+            const acc = String((row && row.game_account) || '').trim();
+            if (!acc) continue;
+            blacklistMap[acc] = {
+                reason: String((row && row.reason) || '').trim(),
+                remark: String((row && row.remark) || '').trim(),
+                create_date: String((row && row.create_date) || '').trim(),
+                display_date: resolveBlacklistDisplayDate(row)
+            };
+        }
     }
 
     const orderOffRule = await getOrderOffRuleByUser(user.id);

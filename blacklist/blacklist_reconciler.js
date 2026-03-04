@@ -112,6 +112,8 @@ function toProjectedMapBySources(rows = []) {
             reason: String(winner.reason || '').trim(),
             source: String(winner.source || '').trim(),
             priority: Number(winner.priority || 0),
+            winner_detail: winner && winner.detail && typeof winner.detail === 'object' ? winner.detail : {},
+            winner_modify_date: String(winner.modify_date || '').trim(),
             source_count: activeList.length,
             sources: activeList
                 .sort((a, b) => Number(b.priority || 0) - Number(a.priority || 0))
@@ -198,6 +200,7 @@ async function reconcileBlacklistForAccount(userId, gameAccount, options = {}) {
             type: 'reconcile_blacklist_v2',
             winner_source: winner.source,
             winner_priority: winner.priority,
+            winner_detail: winner.winner_detail && typeof winner.winner_detail === 'object' ? winner.winner_detail : {},
             source_count: winner.source_count,
             sources: winner.sources
         })
