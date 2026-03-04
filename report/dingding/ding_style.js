@@ -122,7 +122,48 @@ function buildComplaintFirstHitText(payload = {}) {
     return lines.join('\n');
 }
 
+function buildBlacklistInspectorMismatchText(payload = {}) {
+    const userId = Number(payload.user_id || 0);
+    const userName = String(payload.user_name || payload.user_account || '').trim();
+    const mode = String(payload.mode || '').trim();
+    const mismatch = Array.isArray(payload.mismatch) ? payload.mismatch : [];
+    const checkedAt = String(payload.checked_at || nowDateTimeText()).trim();
+    const legacyTotal = Number(payload.legacy_total || 0);
+    const projectedTotal = Number(payload.projected_total || 0);
+
+    const lines = [];
+    lines.push('⚠️ 黑名单巡检发现差异');
+    lines.push(`时间: ${checkedAt}`);
+    lines.push(`用户: ${userId || '-'}${userName ? `(${userName})` : ''}`);
+    lines.push(`模式: ${mode || '-'}`);
+    lines.push(`旧黑名单数: ${legacyTotal} / 新推理数: ${projectedTotal}`);
+    lines.push(`差异账号数: ${mismatch.length}`);
+    lines.push('');
+
+    for (const row of mismatch.slice(0, 15)) {
+        const acc = String((row && row.game_account) || '').trim() || '-';
+        const oldR = String((row && row.legacy_reason) || '').trim() || '无';
+        const newR = String((row && row.projected_reason) || '').trim() || '无';
+        const src = String((row && row.projected_source) || '').trim();
+        lines.push(`• ${acc}: 旧=${oldR} / 新=${newR}${src ? ` (${src})` : ''}`);
+    }
+    if (mismatch.length > 15) lines.push(`• ... 其余 ${mismatch.length - 15} 条已省略`);
+    return lines.join('\n');
+}
+
+function buildBlacklistInspectorSummaryText(payload = {}) {
+    const checkedAt = String(payload.checked_at || nowDateTimeText()).trim();
+    const mode = String(payload.mode || '').trim();
+    const usersChecked = Number(payload.users_checked || 0);
+    const usersMismatch = Number(payload.users_mismatch || 0);
+    const accountsMismatch = Number(payload.accounts_mismatch || 0);
+    const durationMs = Number(payload.duration_ms || 0);
+    return `[BlacklistInspector] checked_at=${checkedAt} mode=${mode || '-'} users_checked=${usersChecked} users_mismatch=${usersMismatch} accounts_mismatch=${accountsMismatch} duration_ms=${durationMs}`;
+}
+
 module.exports = {
     buildDingdingMessage,
-    buildComplaintFirstHitText
+    buildComplaintFirstHitText,
+    buildBlacklistInspectorMismatchText,
+    buildBlacklistInspectorSummaryText
 };

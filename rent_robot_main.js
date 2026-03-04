@@ -7,6 +7,7 @@ const { startOrderSyncWorkerIfNeeded } = require('./order/order');
 const { startOrderStatsWorkerIfNeeded } = require('./stats/order_stats');
 const { tryAcquireLock: tryAcquireDbLock, releaseLock: releaseDbLock } = require('./database/lock_db');
 const { runFullUserPipeline } = require('./pipeline/user_pipeline');
+const { startBlacklistInspectorIfNeeded } = require('./blacklist/blacklist_inspector');
 
 // ===== 基础目录与运行开关 =====
 const TASK_DIR = __dirname;
@@ -220,6 +221,8 @@ async function runPipeline(runRecord) {
             run_record: runRecord,
             logger: console
         });
+        // 巡检异步运行，不阻塞主流程；由 lock_db 锁确保单实例执行。
+        startBlacklistInspectorIfNeeded({ logger: console });
         console.log('[Step] 启动用户清单主干（拉取/策略/执行/通知）');
         const route = await runPipeline(runRecord);
         console.log(`[Step] 主流程完成 routed=${route.routed} users=${route.routed_user_count || 0} processed=${route.processed_user_count || 0}`);

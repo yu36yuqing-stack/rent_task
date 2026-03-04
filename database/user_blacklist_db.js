@@ -1,5 +1,10 @@
 const { openDatabase } = require('./sqlite_client');
 
+const BL_MODE_LEGACY = 0;
+const BL_MODE_DUAL_READ_OLD = 1;
+const BL_MODE_DUAL_READ_NEW = 2;
+const BL_MODE_V2 = 3;
+
 function nowText() {
     const d = new Date();
     const p = (n) => String(n).padStart(2, '0');
@@ -47,6 +52,134 @@ async function inTx(db, fn) {
 
 function stableJson(v) {
     return JSON.stringify(v == null ? null : v);
+}
+
+function stableObjectJson(v) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return '{}';
+    return JSON.stringify(v);
+}
+
+function parseJsonObject(text) {
+    try {
+        const obj = JSON.parse(String(text || '{}'));
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {};
+        return obj;
+    } catch {
+        return {};
+    }
+}
+
+function normalizeBlacklistV2Mode(input) {
+    const n = Number(input);
+    if (n === BL_MODE_LEGACY || n === BL_MODE_DUAL_READ_OLD || n === BL_MODE_DUAL_READ_NEW || n === BL_MODE_V2) return n;
+    return BL_MODE_DUAL_READ_OLD;
+}
+
+function getBlacklistV2Mode() {
+    return normalizeBlacklistV2Mode(process.env.BL_V2_MODE || BL_MODE_DUAL_READ_OLD);
+}
+
+function shouldSyncSourceShadow() {
+    return getBlacklistV2Mode() >= BL_MODE_DUAL_READ_OLD;
+}
+
+function resolveSourcePriorityByReason(reason = '') {
+    const text = String(reason || '').trim();
+    if (text === '账号找回') return 1000;
+    if (text === '维护中') return 900;
+    if (text === '人工下架') return 850;
+    if (text === '禁玩中') return 700;
+    if (text === '检测在线') return 650;
+    if (text === '冷却期下架') return 500;
+    if (/^\d+单下架$/.test(text)) return 400;
+    return 600;
+}
+
+function resolveSourceByLegacyWrite(reason = '', source = '') {
+    const r = String(reason || '').trim();
+    const s = String(source || '').trim().toLowerCase();
+    if (s === 'order_cooldown' || r === '冷却期下架') return 'order_cooldown';
+    if (s === 'order_3_off' || s === 'order_3_off_guard' || /^\d+单下架$/.test(r)) return 'order_n_off';
+    if (r === '检测在线') return 'guard_online';
+    if (r === '禁玩中') return 'guard_forbidden';
+    if (s === 'h5_maintenance' || r === '维护中') return 'manual_maintenance';
+    if (r === '账号找回') return 'manual_recover';
+    if (s === 'h5' || r === '人工下架') return 'manual_block';
+    return 'legacy_carryover';
+}
+
+async function mirrorSourceShadowUpsert(userId, gameAccount, reason, options = {}) {
+    if (!shouldSyncSourceShadow()) return;
+    const db = options.db;
+    if (!db) return;
+    const uid = Number(userId || 0);
+    const acc = String(gameAccount || '').trim();
+    const rs = String(reason || '').trim();
+    if (!uid || !acc || !rs) return;
+    const src = resolveSourceByLegacyWrite(rs, options.source);
+    const now = String(options.now || '').trim() || nowText();
+    const desc = String(options.desc || '').trim() || 'mirror from legacy blacklist upsert';
+    const detail = stableObjectJson({
+        from: 'legacy_blacklist_write',
+        legacy_source: String(options.source || '').trim(),
+        legacy_operator: String(options.operator || '').trim()
+    });
+    const priority = resolveSourcePriorityByReason(rs);
+    const oldRow = await get(db, `
+        SELECT id
+        FROM user_blacklist_source
+        WHERE user_id = ? AND game_account = ? AND source = ? AND is_deleted = 0
+        LIMIT 1
+    `, [uid, acc, src]);
+    if (oldRow) {
+        await run(db, `
+            UPDATE user_blacklist_source
+            SET active = 1, reason = ?, priority = ?, detail = ?, expire_at = '',
+                modify_date = ?, is_deleted = 0, desc = ?
+            WHERE id = ?
+        `, [rs, priority, detail, now, desc, Number(oldRow.id)]);
+        return;
+    }
+    await run(db, `
+        INSERT INTO user_blacklist_source
+        (user_id, game_account, source, active, reason, priority, detail, expire_at, create_date, modify_date, is_deleted, desc)
+        VALUES (?, ?, ?, 1, ?, ?, ?, '', ?, ?, 0, ?)
+    `, [uid, acc, src, rs, priority, detail, now, now, desc]);
+}
+
+async function mirrorSourceShadowClearByAccount(userId, gameAccount, options = {}) {
+    if (!shouldSyncSourceShadow()) return;
+    const db = options.db;
+    if (!db) return;
+    const uid = Number(userId || 0);
+    const acc = String(gameAccount || '').trim();
+    if (!uid || !acc) return;
+    const now = String(options.now || '').trim() || nowText();
+    const desc = String(options.desc || '').trim() || 'mirror clear from legacy blacklist hard_delete';
+    const rows = await all(db, `
+        SELECT id, reason, priority, detail, expire_at
+        FROM user_blacklist_source
+        WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+    `, [uid, acc]);
+    for (const row of rows) {
+        const detail = parseJsonObject(row && row.detail);
+        await run(db, `
+            UPDATE user_blacklist_source
+            SET active = 0, reason = ?, priority = ?, detail = ?, expire_at = ?, modify_date = ?, is_deleted = 0, desc = ?
+            WHERE id = ?
+        `, [
+            String((row && row.reason) || '').trim(),
+            Number((row && row.priority) || 0),
+            stableObjectJson({
+                ...detail,
+                cleared_by: 'legacy_blacklist_hard_delete'
+            }),
+            String((row && row.expire_at) || '').trim(),
+            now,
+            desc,
+            Number((row && row.id) || 0)
+        ]);
+    }
 }
 
 async function tableColumnNamesInOrder(db, tableName) {
@@ -213,6 +346,31 @@ async function initUserBlacklistDb() {
             CREATE INDEX IF NOT EXISTS idx_user_blacklist_history_user
             ON user_blacklist_history(user_id, is_deleted, id)
         `);
+        await run(db, `
+            CREATE TABLE IF NOT EXISTS user_blacklist_source (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                game_account TEXT NOT NULL,
+                source TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 0,
+                reason TEXT NOT NULL DEFAULT '',
+                priority INTEGER NOT NULL DEFAULT 0,
+                detail TEXT NOT NULL DEFAULT '{}',
+                expire_at TEXT NOT NULL DEFAULT '',
+                create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                desc TEXT NOT NULL DEFAULT ''
+            )
+        `);
+        await run(db, `
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_user_blacklist_source_alive
+            ON user_blacklist_source(user_id, game_account, source, is_deleted)
+        `);
+        await run(db, `
+            CREATE INDEX IF NOT EXISTS idx_user_blacklist_source_user_alive
+            ON user_blacklist_source(user_id, active, modify_date, is_deleted)
+        `);
         try {
             await backfillUserBlacklistRemarkFromUserGameAccount(db);
         } catch (_) {
@@ -377,6 +535,18 @@ async function upsertUserBlacklistEntry(userId, entry, opts = {}) {
                 desc
             ]);
 
+            try {
+                await mirrorSourceShadowUpsert(uid, normalized.game_account, normalized.reason, {
+                    db,
+                    now,
+                    source,
+                    operator,
+                    desc
+                });
+            } catch (e) {
+                console.warn(`[BlacklistSourceShadow] upsert mirror failed user=${uid} account=${normalized.game_account}: ${e.message}`);
+            }
+
             return newPayload;
         });
     } finally {
@@ -480,6 +650,15 @@ async function hardDeleteUserBlacklistEntry(userId, gameAccount, opts = {}) {
                 now,
                 desc
             ]);
+            try {
+                await mirrorSourceShadowClearByAccount(uid, acc, {
+                    db,
+                    now,
+                    desc
+                });
+            } catch (e) {
+                console.warn(`[BlacklistSourceShadow] hard_delete mirror failed user=${uid} account=${acc}: ${e.message}`);
+            }
             return true;
         });
     } finally {

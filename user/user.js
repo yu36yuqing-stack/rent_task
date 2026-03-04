@@ -7,6 +7,7 @@ const {
     listActiveUsers
 } = require('../database/user_db');
 const { listBlacklistedAccountsByUser, listUserBlacklistByUser } = require('../database/user_blacklist_db');
+const { buildProjectedBlacklistByUser, getBlacklistV2Mode } = require('../blacklist/blacklist_reconciler');
 
 async function initUserModule() {
     await initUserDb();
@@ -97,6 +98,11 @@ function buildAuthMap(rows = []) {
 
 async function loadUserBlacklistSet(userId) {
     try {
+        const mode = Number(getBlacklistV2Mode());
+        if (mode >= 2) {
+            const projected = await buildProjectedBlacklistByUser(userId, { include_legacy_bootstrap: true });
+            return new Set(Object.keys(projected));
+        }
         const rows = await listBlacklistedAccountsByUser(userId);
         return new Set(rows);
     } catch (e) {
@@ -107,6 +113,15 @@ async function loadUserBlacklistSet(userId) {
 
 async function loadUserBlacklistReasonMap(userId) {
     try {
+        const mode = Number(getBlacklistV2Mode());
+        if (mode >= 2) {
+            const projected = await buildProjectedBlacklistByUser(userId, { include_legacy_bootstrap: true });
+            const out = {};
+            for (const acc of Object.keys(projected || {})) {
+                out[acc] = String((((projected || {})[acc] || {}).reason) || '').trim();
+            }
+            return out;
+        }
         const rows = await listUserBlacklistByUser(userId);
         const out = {};
         for (const row of rows) {
