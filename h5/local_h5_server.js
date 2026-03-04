@@ -15,6 +15,8 @@ const {
     upsertUserBlacklistEntry
 } = require('../database/user_blacklist_db');
 const { deleteBlacklistWithGuard } = require('../blacklist/blacklist_release_guard');
+const { manualRemoveBlacklistMode2 } = require('../blacklist/blacklist_manual_remove_v2');
+const { getBlacklistV2Mode } = require('../blacklist/blacklist_reconciler');
 const {
     RESTRICT_REASON,
     initUserPlatformRestrictDb,
@@ -936,6 +938,24 @@ async function handleBlacklistRemove(req, res) {
     const body = await readJsonBody(req);
     const gameAccount = String(body.game_account || '').trim();
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    const mode = Number(getBlacklistV2Mode());
+    if (mode >= 2) {
+        const out = await manualRemoveBlacklistMode2(user.id, gameAccount, {
+            source: 'h5',
+            operator: user.account || 'h5_user',
+            desc: 'manual remove by h5 mode2',
+            game_name: String(body.game_name || 'WZRY').trim() || 'WZRY'
+        });
+        return json(res, 200, {
+            ok: true,
+            mode,
+            removed: Boolean(out && out.removed),
+            blocked: Boolean(out && out.blocked),
+            blocked_reason: String((out && out.blocked_reason) || ''),
+            winner_source: String((out && out.winner_source) || ''),
+            cleared_sources: Array.isArray(out && out.cleared_sources) ? out.cleared_sources : []
+        });
+    }
     const out = await deleteBlacklistWithGuard(user.id, gameAccount, {
         source: 'h5',
         operator: user.account || 'h5_user',
