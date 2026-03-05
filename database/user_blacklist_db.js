@@ -112,6 +112,8 @@ async function mirrorSourceShadowUpsert(userId, gameAccount, reason, options = {
     if (!shouldSyncSourceShadow()) return;
     const db = options.db;
     if (!db) return;
+    // V2 投影写回 old 表时，不允许再次镜像回 source，避免 source 被反向污染。
+    if (String(options.source || '').trim() === 'reconcile_blacklist_v2') return;
     const uid = Number(userId || 0);
     const acc = String(gameAccount || '').trim();
     const rs = String(reason || '').trim();

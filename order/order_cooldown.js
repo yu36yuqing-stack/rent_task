@@ -131,6 +131,40 @@ async function getOrderStatusByOrderNo(userId, orderNo, channel = '') {
     }
 }
 
+async function getOrderEndTimeByOrderNo(userId, orderNo, channel = '') {
+    const uid = Number(userId || 0);
+    const no = String(orderNo || '').trim();
+    const ch = normalizeOrderPlatform(channel);
+    if (!uid || !no) return '';
+    await initOrderDb();
+    const db = openDatabase();
+    try {
+        const row = ch
+            ? await dbGet(db, `
+                SELECT end_time
+                FROM "order"
+                WHERE user_id = ?
+                  AND is_deleted = 0
+                  AND order_no = ?
+                  AND channel = ?
+                ORDER BY id DESC
+                LIMIT 1
+            `, [uid, no, ch])
+            : await dbGet(db, `
+                SELECT end_time
+                FROM "order"
+                WHERE user_id = ?
+                  AND is_deleted = 0
+                  AND order_no = ?
+                ORDER BY id DESC
+                LIMIT 1
+            `, [uid, no]);
+        return String((row && row.end_time) || '').trim();
+    } finally {
+        db.close();
+    }
+}
+
 async function listAuthorizedOrderPlatforms(userId) {
     const uid = Number(userId || 0);
     if (!uid) return [];
@@ -270,6 +304,7 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
     const freshWindowSec = Math.max(60, Number(options.fresh_window_sec || COOLDOWN_SYNC_FRESH_WINDOW_SEC));
+    const endDelaySec = Math.max(0, Number(options.end_delay_sec || COOLDOWN_END_DELAY_SEC));
     const nowSec = Math.floor(Date.now() / 1000);
     const freshness = await isOrderSyncFreshByUser(uid, freshWindowSec);
     if (!freshness.fresh) {
@@ -293,7 +328,12 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
         const acc = String(row.game_account || '').trim();
         if (!acc) continue;
         const meta = parseCooldownMetaFromDesc(row.desc);
-        const untilSec = Number(meta.cooldown_until || 0);
+        let untilSec = Number(meta.cooldown_until || 0);
+        if (!untilSec && meta.source_order_no) {
+            const endTime = await getOrderEndTimeByOrderNo(uid, meta.source_order_no, meta.source_channel);
+            const endSec = parseDateTimeTextToSec(endTime);
+            if (endSec > 0) untilSec = endSec + endDelaySec;
+        }
         if (!untilSec) {
             invalid += 1;
             continue;
