@@ -11,10 +11,9 @@ const {
 const { getLastSyncTimestamp, setLastSyncTimestamp } = require('../database/order_sync_db');
 const { getUserRuleByName } = require('../database/user_rule_db');
 const {
-    listUserBlacklistByUserWithMeta,
-    upsertUserBlacklistEntry,
+    listUserBlacklistByUserWithMeta
 } = require('../database/user_blacklist_db');
-const { deleteBlacklistWithGuard } = require('../blacklist/blacklist_release_guard');
+const { upsertSourceAndReconcile } = require('../blacklist/blacklist_source_gateway');
 const {
     reconcileOrderCooldownEntryByUser
 } = require('./order_cooldown');
@@ -682,10 +681,15 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     let added = 0;
     let deleted = 0;
     for (const acc of toAdd) {
-        await upsertUserBlacklistEntry(uid, {
-            game_account: acc,
-            remark: accountToRemark.get(acc) || '',
-            reason: orderOffReason
+        await upsertSourceAndReconcile(uid, acc, 'order_n_off', {
+            active: true,
+            reason: orderOffReason,
+            detail: {
+                game_account: acc,
+                remark: accountToRemark.get(acc) || '',
+                threshold: orderOffThreshold,
+                mode: orderOffMode
+            }
         }, {
             source: ORDER_3_OFF_SOURCE,
             operator: 'order_worker',
@@ -694,12 +698,19 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
         added += 1;
     }
     for (const acc of toDelete) {
-        const out = await deleteBlacklistWithGuard(uid, acc, {
+        await upsertSourceAndReconcile(uid, acc, 'order_n_off', {
+            active: false,
+            reason: orderOffReason,
+            detail: {
+                threshold: orderOffThreshold,
+                mode: orderOffMode
+            }
+        }, {
             source: ORDER_3_OFF_SOURCE,
             operator: 'order_worker',
             desc: `auto remove by ${ORDER_3_OFF_SOURCE}`
         });
-        if (out && out.removed) deleted += 1;
+        deleted += 1;
     }
 
     return {

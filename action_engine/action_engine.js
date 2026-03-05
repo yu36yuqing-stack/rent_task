@@ -19,6 +19,11 @@ function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
 
+function isActiveShelfStatus(status) {
+    const s = String(status || '').trim();
+    return s === '上架' || s === '租赁中' || s === '出租中';
+}
+
 async function clearPlatformRestrictReliable({
     userId,
     account,
@@ -112,6 +117,21 @@ function detectConflictsAndBuildSnapshot({
             uhaozu_debug: u ? u.reason : ''
         });
 
+        const isInBlacklist = blacklistAccounts.has(String(acc));
+        if (isInBlacklist) {
+            console.log(`[Blacklist] 命中黑名单账号: ${acc}`);
+            if (y && isActiveShelfStatus(statY)) {
+                actions.push({ type: 'off_y', item: y, reason: '黑名单命中，强制下架悠悠' });
+            }
+            if (u && isActiveShelfStatus(statU)) {
+                actions.push({ type: 'off_u', item: u, reason: '黑名单命中，强制下架U号租' });
+            }
+            if (z && isActiveShelfStatus(statZ)) {
+                actions.push({ type: 'off_z', item: z, reason: '黑名单命中，强制下架租号王' });
+            }
+            continue;
+        }
+
         // 规则逻辑：
         // 1. 任意一个平台为 "租赁中"，则其他所有 "上架" 的平台必须 "下架"。
         const anyRenting = (statY === '租赁中') || (statU === '租赁中') || (statZ === '租赁中');
@@ -127,13 +147,9 @@ function detectConflictsAndBuildSnapshot({
             if (statU === '上架') actions.push({ type: 'off_u', item: u, reason: `检测到出租(Y:${statY}/Z:${statZ})，下架U号租` });
             if (statZ === '上架') actions.push({ type: 'off_z', item: z, reason: `检测到出租(Y:${statY}/U:${statU})，下架租号王` });
         } else {
-            const isInBlacklist = blacklistAccounts.has(String(acc));
-            const isSystemOff = (y && y.reason && y.reason.includes('系统')) || isInBlacklist;
+            const isSystemOff = Boolean(y && y.reason && y.reason.includes('系统'));
 
             if (isSystemOff) {
-                if (isInBlacklist) {
-                    console.log(`[Blacklist] 命中黑名单账号: ${acc}`);
-                }
                 // 如果悠悠或U号租是系统下架，则其他平台也必须下架
                 const reasonMsg = (acc === '3045296464')
                     ? '人工指令强制下架(游戏在线)'

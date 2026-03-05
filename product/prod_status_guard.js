@@ -1,7 +1,6 @@
 const { openDatabase } = require('../database/sqlite_client');
 const { initOrderDb } = require('../database/order_db');
 const { initUserGameAccountDb } = require('../database/user_game_account_db');
-const { upsertUserBlacklistEntry } = require('../database/user_blacklist_db');
 const { getActiveUserById } = require('../database/user_db');
 const {
     initProdRiskEventDb,
@@ -27,6 +26,7 @@ const {
 } = require('./prod_probe_cache_service');
 const { sendDingdingMessage, resolveDingdingAtOptions } = require('../report/dingding/ding_notify');
 const { deleteBlacklistWithGuard, REASON_ONLINE } = require('../blacklist/blacklist_release_guard');
+const { setGuardSourcesByProbeAndReconcile } = require('../blacklist/blacklist_source_gateway');
 
 const ONLINE_PROBE_WINDOW_SEC = 90;
 const ONLINE_PROBE_INTERVAL_SEC = Math.max(60, Number(process.env.ONLINE_PROBE_INTERVAL_SEC || 600));
@@ -427,13 +427,14 @@ async function applyInitialControlForAccount(userId, account, auth, logger) {
     const acc = String(account || '').trim();
     if (!uid || !acc) return { ok: false, error: 'invalid_input' };
     try {
-        await upsertUserBlacklistEntry(uid, {
-            game_account: acc,
-            reason: REASON_ONLINE
+        await setGuardSourcesByProbeAndReconcile(uid, acc, {
+            online: true,
+            forbidden: false,
+            detail: { type: RISK_TYPE_ONLINE_NON_RENTING, step: 'blacklist_add' }
         }, {
-            source: 'prod_guard',
+            source: 'prod_guard_init',
             operator: 'risk_auto',
-            desc: JSON.stringify({ type: RISK_TYPE_ONLINE_NON_RENTING, step: 'blacklist_add' })
+            desc: 'prod guard init control set guard source'
         });
     } catch (e) {
         return { ok: false, error: `blacklist_add_failed:${e.message}` };
@@ -444,6 +445,15 @@ async function applyInitialControlForAccount(userId, account, auth, logger) {
             auth,
             game_name: 'WZRY',
             desc: 'update by prod_status_guard init control'
+        });
+        await setGuardSourcesByProbeAndReconcile(uid, acc, {
+            online: true,
+            forbidden: true,
+            detail: { type: RISK_TYPE_ONLINE_NON_RENTING, step: 'forbidden_enable' }
+        }, {
+            source: 'prod_guard_init',
+            operator: 'risk_auto',
+            desc: 'prod guard init control enable forbidden'
         });
     } catch (e) {
         return { ok: false, error: `forbidden_enable_failed:${e.message}` };

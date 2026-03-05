@@ -11,12 +11,12 @@ const {
 } = require('../database/user_game_account_db');
 const {
     initUserBlacklistDb,
-    listUserBlacklistByUserWithMeta,
-    upsertUserBlacklistEntry
+    listUserBlacklistByUserWithMeta
 } = require('../database/user_blacklist_db');
 const { deleteBlacklistWithGuard } = require('../blacklist/blacklist_release_guard');
 const { manualRemoveBlacklistMode2 } = require('../blacklist/blacklist_manual_remove_v2');
 const { getBlacklistV2Mode, buildProjectedBlacklistByUser } = require('../blacklist/blacklist_reconciler');
+const { setReasonSourceAndReconcile, upsertSourceAndReconcile } = require('../blacklist/blacklist_source_gateway');
 const {
     RESTRICT_REASON,
     initUserPlatformRestrictDb,
@@ -968,18 +968,12 @@ async function handleBlacklistAdd(req, res) {
     const gameAccount = String(body.game_account || '').trim();
     const reason = String(body.reason || '').trim() || '人工下架';
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
-    const out = await upsertUserBlacklistEntry(
-        user.id,
-        {
-            game_account: gameAccount,
-            reason
-        },
-        {
-            source: 'h5',
-            operator: user.account || 'h5_user',
-            desc: 'manual by h5'
-        }
-    );
+    const out = await setReasonSourceAndReconcile(user.id, gameAccount, reason, {
+        source: 'h5',
+        operator: user.account || 'h5_user',
+        desc: 'manual by h5',
+        detail: { trigger: 'h5_manual_add' }
+    });
     return json(res, 200, { ok: true, data: out });
 }
 
@@ -1030,23 +1024,19 @@ async function handleProductMaintenanceToggle(req, res) {
         const now = new Date();
         const p = (n) => String(n).padStart(2, '0');
         const maintainSince = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`;
-        const out = await upsertUserBlacklistEntry(
-            user.id,
-            {
-                game_account: gameAccount,
-                reason: MAINTENANCE_BLACKLIST_REASON
-            },
-            {
-                source: 'h5_maintenance',
-                operator: user.account || 'h5_user',
-                desc: JSON.stringify({
-                    type: 'manual_maintenance',
-                    maintain_since: maintainSince,
-                    operator: user.account || 'h5_user'
-                }),
-                create_date: maintainSince
+        const out = await upsertSourceAndReconcile(user.id, gameAccount, 'manual_maintenance', {
+            active: true,
+            reason: MAINTENANCE_BLACKLIST_REASON,
+            detail: {
+                type: 'manual_maintenance',
+                maintain_since: maintainSince,
+                operator: user.account || 'h5_user'
             }
-        );
+        }, {
+            source: 'h5_maintenance',
+            operator: user.account || 'h5_user',
+            desc: 'manual maintenance by h5'
+        });
         return json(res, 200, { ok: true, data: { ...out, maintenance_enabled: true } });
     }
 

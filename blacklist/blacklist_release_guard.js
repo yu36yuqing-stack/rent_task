@@ -1,8 +1,7 @@
 const {
-    upsertUserBlacklistEntry,
-    hardDeleteUserBlacklistEntry,
     listUserBlacklistByUserWithMeta
 } = require('../database/user_blacklist_db');
+const { listBlacklistSourcesByUserAndAccounts } = require('../database/user_blacklist_source_db');
 const { getActiveUserById } = require('../database/user_db');
 const {
     initProdRiskEventDb,
@@ -19,6 +18,11 @@ const {
     queryOnlineStatusCached,
     queryForbiddenStatusCached
 } = require('../product/prod_probe_cache_service');
+const {
+    upsertSourceAndReconcile,
+    clearSourceAndReconcile,
+    setGuardSourcesByProbeAndReconcile
+} = require('./blacklist_source_gateway');
 
 const REASON_ONLINE = '检测在线';
 const REASON_FORBIDDEN = '禁玩中';
@@ -26,6 +30,7 @@ const DEFAULT_BRIDGE_RISK_TYPE = 'online_non_renting';
 const DEFAULT_BRIDGE_TASK_TYPE = 'sheep_fix';
 const DEFAULT_BRIDGE_BOOTSTRAP_DELAY_SEC = 5;
 const DEFAULT_BRIDGE_MAX_RETRY = 5;
+const ORDER_N_OFF_SOURCE_CANDIDATES = new Set(['order_3_off', 'order_3_off_guard']);
 
 function nowText() {
     const d = new Date();
@@ -136,26 +141,22 @@ async function deleteBlacklistWithGuard(userId, gameAccount, options = {}) {
         guard_error = String(e && e.message ? e.message : e || '').trim();
     }
 
-    const blockReason = online ? REASON_ONLINE : (forbidden ? REASON_FORBIDDEN : '');
+    const guardApply = await setGuardSourcesByProbeAndReconcile(uid, acc, {
+        online,
+        forbidden,
+        detail: {
+            guard_checked,
+            guard_error
+        }
+    }, {
+        source,
+        operator,
+        desc: `${desc || 'delete with guard'};refresh guard source`
+    });
+    const blockReason = guardApply && guardApply.online_active
+        ? REASON_ONLINE
+        : ((guardApply && guardApply.forbidden_active) ? REASON_FORBIDDEN : '');
     if (blockReason) {
-        const now = new Date();
-        const p = (n) => String(n).padStart(2, '0');
-        const createDate = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`;
-        await upsertUserBlacklistEntry(uid, {
-            game_account: acc,
-            reason: blockReason
-        }, {
-            source: `${source}_guard`,
-            operator,
-            desc: JSON.stringify({
-                type: 'release_guard_block',
-                online,
-                forbidden,
-                guard_checked,
-                guard_error
-            }),
-            create_date: createDate
-        });
         let bridge = { bridged: false, reason: 'skipped' };
         try {
             bridge = await bridgeGuardBlockedToRiskTask(uid, acc, options, {
@@ -174,24 +175,67 @@ async function deleteBlacklistWithGuard(userId, gameAccount, options = {}) {
             blocked_reason: blockReason,
             online,
             forbidden,
+            suppressed_by_active_order: Boolean(guardApply && guardApply.suppressed_by_active_order),
+            suppressed_by_recent_end: Boolean(guardApply && guardApply.suppressed_by_recent_end),
             guard_checked,
             guard_error,
             bridge
         };
     }
 
-    const removed = await hardDeleteUserBlacklistEntry(uid, acc, {
-        source,
-        operator,
-        desc,
-        reason_expected: options.reason_expected
-    });
+    const reasonExpected = String(options.reason_expected || '').trim();
+    const sourceExpected = String(options.source_expected || '').trim().toLowerCase();
+    let clearSource = sourceExpected;
+    if (!clearSource) {
+        if (reasonExpected === '冷却期下架') clearSource = 'order_cooldown';
+        else if (/^\d+单下架$/.test(reasonExpected)) clearSource = 'order_n_off';
+        else if (reasonExpected === REASON_ONLINE) clearSource = 'guard_online';
+        else if (reasonExpected === REASON_FORBIDDEN) clearSource = 'guard_forbidden';
+        else if (reasonExpected === '维护中') clearSource = 'manual_maintenance';
+        else if (reasonExpected === '人工下架') clearSource = 'manual_block';
+        else if (reasonExpected === '账号找回') clearSource = 'manual_recover';
+    }
+    if (!clearSource) {
+        if (source === 'order_cooldown') clearSource = 'order_cooldown';
+        else if (ORDER_N_OFF_SOURCE_CANDIDATES.has(source)) clearSource = 'order_n_off';
+        else if (source === 'h5_maintenance') clearSource = 'manual_maintenance';
+        else if (source === 'h5') clearSource = 'manual_block';
+    }
+
+    let removed = false;
     let entryAbsent = false;
     let removeBlockedReason = '';
+    if (clearSource) {
+        const out = await clearSourceAndReconcile(uid, acc, clearSource, {
+            source,
+            operator,
+            desc: desc || `clear source=${clearSource} by guard`,
+            detail: { cleared_by_guard: true }
+        });
+        removed = Boolean(out && out.reconcile && out.reconcile.removed);
+        const activeRows = await listBlacklistSourcesByUserAndAccounts(uid, [acc], { active_only: true });
+        entryAbsent = !Array.isArray(activeRows) || activeRows.length === 0;
+    } else {
+        const activeRows = await listBlacklistSourcesByUserAndAccounts(uid, [acc], { active_only: true });
+        for (const row of (Array.isArray(activeRows) ? activeRows : [])) {
+            const src = String((row && row.source) || '').trim().toLowerCase();
+            if (!src) continue;
+            await clearSourceAndReconcile(uid, acc, src, {
+                source,
+                operator,
+                desc: desc || 'clear all active source by guard',
+                detail: { cleared_by_guard: true, clear_all: true }
+            });
+        }
+        const leftRows = await listBlacklistSourcesByUserAndAccounts(uid, [acc], { active_only: true });
+        entryAbsent = !Array.isArray(leftRows) || leftRows.length === 0;
+        removed = entryAbsent;
+    }
+
     if (!removed) {
         const allEntries = await listUserBlacklistByUserWithMeta(uid);
         const exists = (Array.isArray(allEntries) ? allEntries : []).some((x) => String((x && x.game_account) || '').trim() === acc);
-        entryAbsent = !exists;
+        entryAbsent = !exists || entryAbsent;
         removeBlockedReason = entryAbsent ? '' : 'entry_exists_but_not_removed';
     }
     return {

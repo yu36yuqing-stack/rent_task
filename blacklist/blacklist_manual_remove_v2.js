@@ -13,6 +13,7 @@ const {
     queryOnlineStatusCached,
     queryForbiddenStatusCached
 } = require('../product/prod_probe_cache_service');
+const { setGuardSourcesByProbeAndReconcile } = require('./blacklist_source_gateway');
 
 function sourceReason(source = '') {
     const key = String(source || '').trim().toLowerCase();
@@ -131,27 +132,16 @@ async function manualRemoveBlacklistMode2(userId, gameAccount, options = {}) {
             guard.online = Boolean(onlineRes && onlineRes.online);
             guard.forbidden = Boolean(forbiddenRes && forbiddenRes.enabled);
 
-            await patchSource(uid, acc, 'guard_online', {
-                active: guard.online,
-                reason: sourceReason('guard_online') || '检测在线',
-                priority: sourcePriority('guard_online'),
+            await setGuardSourcesByProbeAndReconcile(uid, acc, {
+                online: guard.online,
+                forbidden: guard.forbidden,
                 detail: {
-                    refreshed_by_manual_remove: true,
-                    online: guard.online
+                    refreshed_by_manual_remove: true
                 }
             }, {
-                desc: `${desc};refresh guard_online by probe`
-            });
-            await patchSource(uid, acc, 'guard_forbidden', {
-                active: guard.forbidden,
-                reason: sourceReason('guard_forbidden') || '禁玩中',
-                priority: sourcePriority('guard_forbidden'),
-                detail: {
-                    refreshed_by_manual_remove: true,
-                    forbidden: guard.forbidden
-                }
-            }, {
-                desc: `${desc};refresh guard_forbidden by probe`
+                source,
+                operator,
+                desc: `${desc};refresh guard sources by probe`
             });
         } catch (e) {
             guard.error = String(e && e.message ? e.message : e || '').trim();
@@ -185,4 +175,3 @@ async function manualRemoveBlacklistMode2(userId, gameAccount, options = {}) {
 module.exports = {
     manualRemoveBlacklistMode2
 };
-

@@ -3,10 +3,9 @@ const { initOrderDb } = require('../database/order_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { getLastSyncTimestamp } = require('../database/order_sync_db');
 const {
-    listUserBlacklistByUserWithMeta,
-    upsertUserBlacklistEntry
+    listUserBlacklistByUserWithMeta
 } = require('../database/user_blacklist_db');
-const { deleteBlacklistWithGuard } = require('../blacklist/blacklist_release_guard');
+const { upsertSourceAndReconcile } = require('../blacklist/blacklist_source_gateway');
 
 const CHANNEL_UUZUHAO = 'uuzuhao';
 const CHANNEL_UHAOZU = 'uhaozu';
@@ -238,9 +237,15 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
             source_channel: meta.channel,
             updated_at_sec: nowSec
         });
-        await upsertUserBlacklistEntry(uid, {
-            game_account: acc,
-            reason: COOLDOWN_REASON
+        await upsertSourceAndReconcile(uid, acc, 'order_cooldown', {
+            active: true,
+            reason: COOLDOWN_REASON,
+            expire_at: new Date(meta.cooldown_until * 1000).toISOString().slice(0, 19).replace('T', ' '),
+            detail: {
+                source_order_no: meta.order_no,
+                source_channel: meta.channel,
+                cooldown_until: meta.cooldown_until
+            }
         }, {
             source: COOLDOWN_SOURCE,
             operator: 'order_worker',
@@ -296,48 +301,40 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
         if (meta.source_order_no) {
             const orderStatus = await getOrderStatusByOrderNo(uid, meta.source_order_no, meta.source_channel);
             if (orderStatus === '已退款') {
-                const out = await deleteBlacklistWithGuard(uid, acc, {
+                await upsertSourceAndReconcile(uid, acc, 'order_cooldown', {
+                    active: false,
+                    reason: COOLDOWN_REASON,
+                    detail: {
+                        released_by: 'refund',
+                        source_order_no: meta.source_order_no
+                    }
+                }, {
                     source: COOLDOWN_SOURCE,
                     operator: 'product_sync',
                     desc: `auto release by refunded order status (${meta.source_order_no})`,
-                    reason_expected: COOLDOWN_REASON
                 });
-                if (out && out.removed) {
-                    released += 1;
-                    released_by_refund += 1;
-                    continue;
-                }
-                if (out && out.blocked) {
-                    guard_blocked += 1;
-                    if (out.bridge && out.bridge.bridged) guard_blocked_bridged += 1;
-                    else {
-                        guard_blocked_bridge_failed += 1;
-                    }
-                    continue;
-                }
+                released += 1;
+                released_by_refund += 1;
+                continue;
             }
         }
         if (nowSec < untilSec) {
             pending += 1;
             continue;
         }
-        const out = await deleteBlacklistWithGuard(uid, acc, {
+        await upsertSourceAndReconcile(uid, acc, 'order_cooldown', {
+            active: false,
+            reason: COOLDOWN_REASON,
+            detail: {
+                released_by: 'cooldown_until',
+                cooldown_until: untilSec
+            }
+        }, {
             source: COOLDOWN_SOURCE,
             operator: 'product_sync',
             desc: 'auto release by cooldown_until',
-            reason_expected: COOLDOWN_REASON
         });
-        if (out && out.removed) {
-            released += 1;
-            continue;
-        }
-        if (out && out.blocked) {
-            guard_blocked += 1;
-            if (out.bridge && out.bridge.bridged) guard_blocked_bridged += 1;
-            else {
-                guard_blocked_bridge_failed += 1;
-            }
-        }
+        released += 1;
     }
 
     return {
