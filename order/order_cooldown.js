@@ -14,7 +14,7 @@ const CHANNEL_ZHW_YUANBAO = 'zuhaowang-yuanbao';
 
 const COOLDOWN_REASON = '冷却期下架';
 const COOLDOWN_SOURCE = 'order_cooldown';
-const COOLDOWN_START_DELAY_SEC = 10 * 60;
+const COOLDOWN_NEAR_END_SEC = 10 * 60;
 const COOLDOWN_END_DELAY_SEC = 10 * 60;
 const COOLDOWN_SYNC_FRESH_WINDOW_SEC = 12 * 60;
 
@@ -230,7 +230,7 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
     const nowSec = Math.floor(Date.now() / 1000);
-    const startDelaySec = Math.max(0, Number(options.start_delay_sec || COOLDOWN_START_DELAY_SEC));
+    const nearEndSec = Math.max(0, Number(options.near_end_sec || COOLDOWN_NEAR_END_SEC));
     const endDelaySec = Math.max(0, Number(options.end_delay_sec || COOLDOWN_END_DELAY_SEC));
     const rentingOrders = await listActiveRentingOrdersByUser(uid);
     const cooldownByAccount = new Map();
@@ -239,7 +239,8 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
         const startSec = parseDateTimeTextToSec(row.start_time);
         const endSec = parseDateTimeTextToSec(row.end_time);
         if (!startSec || !endSec) continue;
-        if (nowSec < startSec + startDelaySec) continue;
+        if (nowSec >= endSec) continue;
+        if ((endSec - nowSec) > nearEndSec) continue;
         const untilSec = endSec + endDelaySec;
         if (untilSec <= nowSec) continue;
         const acc = row.game_account;
@@ -396,7 +397,7 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
 module.exports = {
     COOLDOWN_REASON,
     COOLDOWN_SOURCE,
-    COOLDOWN_START_DELAY_SEC,
+    COOLDOWN_NEAR_END_SEC,
     COOLDOWN_END_DELAY_SEC,
     COOLDOWN_SYNC_FRESH_WINDOW_SEC,
     listAuthorizedOrderPlatforms,
