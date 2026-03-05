@@ -87,10 +87,18 @@ function parseCooldownMetaFromDesc(descText) {
     if (!text) return { cooldown_until: 0, source_order_no: '', source_channel: '' };
     try {
         const obj = JSON.parse(text);
+        const winner = obj && obj.winner_detail && typeof obj.winner_detail === 'object'
+            ? obj.winner_detail
+            : {};
+        const rootCooldownUntil = Number((obj && obj.cooldown_until) || 0);
+        const winnerCooldownUntil = Number((winner && winner.cooldown_until) || 0);
+        const cooldownUntil = rootCooldownUntil > 0 ? rootCooldownUntil : winnerCooldownUntil;
+        const sourceOrderNo = String((obj && obj.source_order_no) || (winner && winner.source_order_no) || '').trim();
+        const sourceChannel = normalizeOrderPlatform(String((obj && obj.source_channel) || (winner && winner.source_channel) || '').trim());
         return {
-            cooldown_until: Number((obj && obj.cooldown_until) || 0),
-            source_order_no: String((obj && obj.source_order_no) || '').trim(),
-            source_channel: normalizeOrderPlatform(String((obj && obj.source_channel) || '').trim())
+            cooldown_until: cooldownUntil,
+            source_order_no: sourceOrderNo,
+            source_channel: sourceChannel
         };
     } catch {
         return { cooldown_until: 0, source_order_no: '', source_channel: '' };
