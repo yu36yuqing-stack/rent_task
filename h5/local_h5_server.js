@@ -214,8 +214,14 @@ function parseCooldownUntilSecFromDesc(descText) {
     if (!raw) return 0;
     try {
         const obj = JSON.parse(raw);
-        const sec = Number((obj && obj.cooldown_until) || 0);
-        return Number.isFinite(sec) && sec > 0 ? sec : 0;
+        const direct = Number((obj && obj.cooldown_until) || 0);
+        if (Number.isFinite(direct) && direct > 0) return direct;
+        const winner = obj && obj.winner_detail && typeof obj.winner_detail === 'object'
+            ? obj.winner_detail
+            : {};
+        const winnerSec = Number((winner && winner.cooldown_until) || 0);
+        if (Number.isFinite(winnerSec) && winnerSec > 0) return winnerSec;
+        return 0;
     } catch {
         return 0;
     }
