@@ -33,7 +33,7 @@ function normalizeMode(input) {
 }
 
 function getBlacklistV2Mode() {
-    return normalizeMode(process.env.BL_V2_MODE || MODE_DUAL_READ_OLD);
+    return MODE_V2;
 }
 
 function getSourceRule(source = '') {

@@ -76,7 +76,7 @@ function normalizeBlacklistV2Mode(input) {
 }
 
 function getBlacklistV2Mode() {
-    return normalizeBlacklistV2Mode(process.env.BL_V2_MODE || BL_MODE_DUAL_READ_OLD);
+    return BL_MODE_V2;
 }
 
 function shouldSyncSourceShadow() {
