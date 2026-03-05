@@ -71,6 +71,13 @@ function inferSourceFromDesc(desc = '', reason = '') {
         if (String(reason || '').trim() === '禁玩中') return 'guard_forbidden';
         return 'guard_online';
     }
+    if (type === 'reconcile_blacklist_v2') {
+        const winnerSource = String((info && info.winner_source) || '').trim().toLowerCase();
+        if (winnerSource && SOURCE_RULES[winnerSource]) return winnerSource;
+        const fallback = reasonFromLegacy(String(reason || '').trim());
+        const byReason = String((fallback && fallback.source) || '').trim().toLowerCase();
+        if (byReason && SOURCE_RULES[byReason]) return byReason;
+    }
     const text = String(desc || '');
     if (text.includes('order_3_off')) return 'order_n_off';
     if (text.includes('maintenance')) return 'manual_maintenance';

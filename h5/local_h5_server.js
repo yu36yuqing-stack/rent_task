@@ -232,8 +232,14 @@ function parseMaintenanceSinceFromDesc(descText) {
     if (!raw) return '';
     try {
         const obj = JSON.parse(raw);
-        const since = String((obj && obj.maintain_since) || '').trim();
-        return since;
+        const direct = String((obj && obj.maintain_since) || '').trim();
+        if (direct) return direct;
+        const winner = obj && obj.winner_detail && typeof obj.winner_detail === 'object'
+            ? obj.winner_detail
+            : {};
+        const winnerSince = String((winner && winner.maintain_since) || '').trim();
+        if (winnerSince) return winnerSince;
+        return '';
     } catch {
         return '';
     }
