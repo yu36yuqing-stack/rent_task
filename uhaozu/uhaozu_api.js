@@ -1,13 +1,19 @@
 const fs = require('fs');
 const path = require('path');
+const {
+    nowText,
+    initUhaozuGoodsAccountCacheDb,
+    listUhaozuResolvedGoodsCache,
+    listUhaozuAccountRoleCache,
+    listUhaozuActiveGoodsDetailFailCache,
+    upsertUhaozuGoodsResolved,
+    upsertUhaozuGoodsDetailFail
+} = require('../database/uhaozu_goods_account_cache_db');
 
 const DEFAULT_UHAOZU_API_BASE = 'https://mapi.uhaozu.com';
 const DEFAULT_UHAOZU_TIMEOUT_MS = 15000;
 const TASK_DIR = path.resolve(__dirname, '..');
 const STATUS_FILE = path.join(TASK_DIR, 'rent_robot_status.json');
-const ACCOUNT_MAP_FILE = path.join(__dirname, 'uhaozu_account_map.json');
-const GOODS_ACCOUNT_CACHE_FILE = path.join(__dirname, 'uhaozu_goods_account_cache.json');
-const GOODS_DETAIL_FAIL_CACHE_FILE = path.join(__dirname, 'uhaozu_goods_detail_fail_cache.json');
 const DEFAULT_GOODS_DETAIL_FAIL_TTL_SEC = 3600;
 
 function buildDefaultHeaders(cookie) {
@@ -107,9 +113,9 @@ function mapStatus(item) {
 }
 
 async function normalizeList(rawList, auth = {}) {
-    const maps = loadAccountMaps();
+    const maps = await loadAccountMaps();
     const { accountByRemark, roleByAccount, entries } = maps;
-    const goodsAccountCache = loadGoodsAccountCache();
+    const goodsAccountCache = await loadGoodsAccountCache();
     const staged = rawList.map(item => {
         const id = String(item.id || item.goodsId || item.productId || '');
         const accountFromApi = String(item.gameAccount || item.accountNo || item.account || '').trim();
@@ -134,7 +140,6 @@ async function normalizeList(rawList, auth = {}) {
     }).filter(i => i.id);
 
     const { fetchedCount, cacheHitCount } = await fillMissingAccountsByGoodsId(staged, goodsAccountCache, auth);
-    persistGoodsAccountCache(goodsAccountCache);
 
     const used = new Set(staged.map(i => i.account).filter(Boolean));
     for (const row of staged) {
@@ -150,11 +155,17 @@ async function normalizeList(rawList, auth = {}) {
     const out = staged.filter(i => i.account);
     for (const row of out) {
         if (row.account && row.roleName) roleByAccount[row.account] = row.roleName;
+        await upsertUhaozuGoodsResolved({
+            goods_id: String(row.id || '').trim(),
+            game_account: String(row.account || '').trim(),
+            role_name: String(row.roleName || '').trim(),
+            game_id: String(row.raw && row.raw.gameId || '').trim(),
+            desc: 'upsert by uhaozu normalize list'
+        });
         delete row.accountFromApi;
         delete row.accountFromCache;
         delete row.roleName;
     }
-    persistAccountMap(roleByAccount);
     console.log(`[UhaozuAPI] 账号补全完成 total=${staged.length} resolved=${out.length} cacheHit=${cacheHitCount} fetched=${fetchedCount}`);
     return out;
 }
@@ -394,16 +405,19 @@ function normalizeText(s) {
         .replace(/[^\p{Script=Han}\p{L}\p{N}]/gu, '');
 }
 
-function loadAccountMaps() {
+async function loadAccountMaps() {
+    await initUhaozuGoodsAccountCacheDb();
     const roleByAccount = {};
 
     try {
-        if (fs.existsSync(ACCOUNT_MAP_FILE)) {
-            const json = JSON.parse(fs.readFileSync(ACCOUNT_MAP_FILE, 'utf8'));
-            if (json && typeof json === 'object') Object.assign(roleByAccount, json);
+        const rows = await listUhaozuAccountRoleCache();
+        for (const row of rows) {
+            const acc = String(row.game_account || '').trim();
+            const role = String(row.role_name || '').trim();
+            if (acc && role) roleByAccount[acc] = role;
         }
     } catch (e) {
-        console.warn(`[UhaozuAPI] 读取账号映射缓存失败: ${e.message}`);
+        console.warn(`[UhaozuAPI] 读取账号映射缓存表失败: ${e.message}`);
     }
 
     try {
@@ -432,44 +446,32 @@ function loadAccountMaps() {
     return { roleByAccount, accountByRemark, entries };
 }
 
-function loadGoodsAccountCache() {
-    try {
-        if (fs.existsSync(GOODS_ACCOUNT_CACHE_FILE)) {
-            const json = JSON.parse(fs.readFileSync(GOODS_ACCOUNT_CACHE_FILE, 'utf8'));
-            if (json && typeof json === 'object') return json;
-        }
-    } catch (e) {
-        console.warn(`[UhaozuAPI] 读取goods-account缓存失败: ${e.message}`);
+async function loadGoodsAccountCache() {
+    await initUhaozuGoodsAccountCacheDb();
+    const rows = await listUhaozuResolvedGoodsCache();
+    const out = {};
+    for (const row of rows) {
+        const goodsId = String(row.goods_id || row.cache_key || '').trim();
+        const gameAccount = String(row.game_account || '').trim();
+        if (!goodsId || !gameAccount) continue;
+        out[goodsId] = gameAccount;
     }
-    return {};
+    return out;
 }
 
-function persistGoodsAccountCache(cache) {
-    try {
-        fs.writeFileSync(GOODS_ACCOUNT_CACHE_FILE, JSON.stringify(cache, null, 2));
-    } catch (e) {
-        console.warn(`[UhaozuAPI] 写入goods-account缓存失败: ${e.message}`);
+async function loadGoodsDetailFailCache() {
+    await initUhaozuGoodsAccountCacheDb();
+    const rows = await listUhaozuActiveGoodsDetailFailCache();
+    const out = {};
+    for (const row of rows) {
+        const goodsId = String(row.goods_id || row.cache_key || '').trim();
+        if (!goodsId) continue;
+        out[goodsId] = {
+            fail_expire_at: String(row.fail_expire_at || '').trim(),
+            reason: String(row.fail_reason || '').trim()
+        };
     }
-}
-
-function loadGoodsDetailFailCache() {
-    try {
-        if (fs.existsSync(GOODS_DETAIL_FAIL_CACHE_FILE)) {
-            const json = JSON.parse(fs.readFileSync(GOODS_DETAIL_FAIL_CACHE_FILE, 'utf8'));
-            if (json && typeof json === 'object') return json;
-        }
-    } catch (e) {
-        console.warn(`[UhaozuAPI] 读取goods-detail失败缓存失败: ${e.message}`);
-    }
-    return {};
-}
-
-function persistGoodsDetailFailCache(cache) {
-    try {
-        fs.writeFileSync(GOODS_DETAIL_FAIL_CACHE_FILE, JSON.stringify(cache, null, 2));
-    } catch (e) {
-        console.warn(`[UhaozuAPI] 写入goods-detail失败缓存失败: ${e.message}`);
-    }
+    return out;
 }
 
 async function fillMissingAccountsByGoodsId(rows, goodsAccountCache, auth = {}) {
@@ -477,9 +479,9 @@ async function fillMissingAccountsByGoodsId(rows, goodsAccountCache, auth = {}) 
     let cacheHitCount = 0;
     let detailHitCount = 0;
     let detailSkipCount = 0;
-    const failCache = loadGoodsDetailFailCache();
-    const nowSec = Math.floor(Date.now() / 1000);
+    const failCache = await loadGoodsDetailFailCache();
     const failTtlSec = Math.max(60, Number(auth.goods_detail_fail_ttl_sec || DEFAULT_GOODS_DETAIL_FAIL_TTL_SEC));
+    const nowValue = nowText();
 
     for (const row of rows) {
         if (row.account) {
@@ -498,7 +500,7 @@ async function fillMissingAccountsByGoodsId(rows, goodsAccountCache, auth = {}) 
         }
 
         const failMeta = failCache[id] && typeof failCache[id] === 'object' ? failCache[id] : null;
-        if (failMeta && Number(failMeta.last_fail_at || 0) > 0 && (nowSec - Number(failMeta.last_fail_at || 0)) < failTtlSec) {
+        if (failMeta && String(failMeta.fail_expire_at || '') > nowValue) {
             detailSkipCount += 1;
             console.log(`[UhaozuAPI] goods detail skip by fail ttl goodsId=${id} ttl_sec=${failTtlSec} gameId=${String(row.raw && row.raw.gameId || '')} gameName=${String(row.raw && row.raw.gameName || '')} roleName=${row.roleName}`);
             continue;
@@ -511,26 +513,39 @@ async function fillMissingAccountsByGoodsId(rows, goodsAccountCache, auth = {}) 
                 row.account = account;
                 if (!row.roleName) row.roleName = String(detail.role_name || '').trim();
                 goodsAccountCache[id] = account;
-                delete failCache[id];
+                await upsertUhaozuGoodsResolved({
+                    goods_id: id,
+                    game_account: account,
+                    role_name: String(row.roleName || '').trim(),
+                    game_id: String(row.raw && row.raw.gameId || detail.game_id || '').trim(),
+                    desc: 'upsert by uhaozu goods detail resolve'
+                });
                 fetchedCount += 1;
                 detailHitCount += 1;
                 console.log(`[UhaozuAPI] goods detail resolve goodsId=${id} gameId=${String(row.raw && row.raw.gameId || detail.game_id || '')} gameName=${String(row.raw && row.raw.gameName || '')} account=${account} roleName=${String(row.roleName || '')}`);
             } else {
-                failCache[id] = {
-                    last_fail_at: nowSec,
-                    reason: 'empty_account'
-                };
+                const failExpireAt = nowText(Date.now() + failTtlSec * 1000);
+                await upsertUhaozuGoodsDetailFail({
+                    goods_id: id,
+                    fail_reason: 'empty_account',
+                    fail_expire_at: failExpireAt,
+                    desc: 'upsert by uhaozu goods detail empty account'
+                });
+                failCache[id] = { fail_expire_at: failExpireAt, reason: 'empty_account' };
                 console.warn(`[UhaozuAPI] goods detail empty goodsId=${id} gameId=${String(row.raw && row.raw.gameId || '')} gameName=${String(row.raw && row.raw.gameName || '')} roleName=${String(row.roleName || '')}`);
             }
         } catch (e) {
-            failCache[id] = {
-                last_fail_at: nowSec,
-                reason: String(e.message || e)
-            };
+            const failExpireAt = nowText(Date.now() + failTtlSec * 1000);
+            await upsertUhaozuGoodsDetailFail({
+                goods_id: id,
+                fail_reason: String(e.message || e),
+                fail_expire_at: failExpireAt,
+                desc: 'upsert by uhaozu goods detail query error'
+            });
+            failCache[id] = { fail_expire_at: failExpireAt, reason: String(e.message || e) };
             console.warn(`[UhaozuAPI] goods detail query失败 goodsId=${id}: ${e.message}`);
         }
     }
-    persistGoodsDetailFailCache(failCache);
     return { fetchedCount, cacheHitCount, detailHitCount, detailSkipCount };
 }
 
@@ -581,14 +596,6 @@ function guessAccountByFuzzy(roleName, entries, usedAccounts) {
 
     if (best.score >= 20 && best.score > second.score) return best.account;
     return '';
-}
-
-function persistAccountMap(roleByAccount) {
-    try {
-        fs.writeFileSync(ACCOUNT_MAP_FILE, JSON.stringify(roleByAccount, null, 2));
-    } catch (e) {
-        console.warn(`[UhaozuAPI] 写入账号映射缓存失败: ${e.message}`);
-    }
 }
 
 // 与 uhaozu_logic.js 保持同样接口（先不替换主集成）
@@ -654,15 +661,12 @@ module.exports = {
         buildListPayload,
         loadAccountMaps,
         loadGoodsAccountCache,
-        persistGoodsAccountCache,
         loadGoodsDetailFailCache,
-        persistGoodsDetailFailCache,
         fillMissingAccountsByGoodsId,
         queryGoodsDetailByGoodsId,
         resolveAccountByRole,
         similarityScore,
         guessAccountByFuzzy,
-        persistAccountMap,
         listGoodsPage,
         listAllGoods,
         findGoodsByAccount,
