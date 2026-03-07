@@ -1,5 +1,3 @@
-const fs = require('fs');
-const path = require('path');
 const {
     nowText,
     initUhaozuGoodsAccountCacheDb,
@@ -12,8 +10,6 @@ const {
 
 const DEFAULT_UHAOZU_API_BASE = 'https://mapi.uhaozu.com';
 const DEFAULT_UHAOZU_TIMEOUT_MS = 15000;
-const TASK_DIR = path.resolve(__dirname, '..');
-const STATUS_FILE = path.join(TASK_DIR, 'rent_robot_status.json');
 const DEFAULT_GOODS_DETAIL_FAIL_TTL_SEC = 3600;
 
 function buildDefaultHeaders(cookie) {
@@ -418,20 +414,6 @@ async function loadAccountMaps() {
         }
     } catch (e) {
         console.warn(`[UhaozuAPI] 读取账号映射缓存表失败: ${e.message}`);
-    }
-
-    try {
-        if (fs.existsSync(STATUS_FILE)) {
-            const status = JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8'));
-            const rows = Array.isArray(status.accounts) ? status.accounts : [];
-            for (const row of rows) {
-                const acc = String(row.account || '').trim();
-                const remark = String(row.remark || '').trim();
-                if (acc && remark) roleByAccount[acc] = remark;
-            }
-        }
-    } catch (e) {
-        console.warn(`[UhaozuAPI] 读取状态快照映射失败: ${e.message}`);
     }
 
     const accountByRemark = {};

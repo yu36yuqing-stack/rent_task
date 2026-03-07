@@ -11,17 +11,7 @@ const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { resolveDisplayNameByRow } = require('../product/display_name');
 
 const TASK_DIR = path.resolve(__dirname, '..');
-const STATUS_FILE = path.join(TASK_DIR, 'rent_robot_status.json');
 const HISTORY_FILE = path.join(TASK_DIR, 'rent_robot_history.jsonl');
-
-function readJson(file, fallback) {
-    try {
-        if (!fs.existsSync(file)) return fallback;
-        return JSON.parse(fs.readFileSync(file, 'utf8'));
-    } catch {
-        return fallback;
-    }
-}
 
 function readHistory() {
     try {
@@ -262,18 +252,7 @@ function buildPayloadForOneUser(accounts, extra = {}) {
 }
 
 async function buildReportPayload() {
-    if (!fs.existsSync(STATUS_FILE)) {
-        return {
-            ok: false,
-            allNormal: false,
-            message: '⚠️ 暂无状态数据 (任务可能未运行)'
-        };
-    }
-
-    const status = readJson(STATUS_FILE, { timestamp: Date.now(), accounts: [] });
     const history = readHistory();
-    const blacklistSet = new Set();
-
     const oneHourAgo = Date.now() - 3600 * 1000;
     const recentRuns = history.filter((h) => h.timestamp > oneHourAgo);
     const runCount = recentRuns.length;
@@ -299,50 +278,18 @@ async function buildReportPayload() {
         }
     }
 
-    const accounts = Array.isArray(status.accounts) ? [...status.accounts] : [];
-    accounts.sort((a, b) => scoreAccount(b) - scoreAccount(a));
-
-    const hhmm = new Date(status.timestamp || Date.now()).toLocaleTimeString('zh-CN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-    });
-
-    const allNormal = accounts.every((acc) => {
-        const y = acc.youpin;
-        const u = acc.uhaozu;
-        const z = acc.zuhaowan;
-        const allUp = y === '上架' && u === '上架' && z === '上架';
-        const allDown = y === '下架' && u === '下架' && z === '下架';
-        const anyRent = [y, u, z].includes('租赁中');
-        const blacklistDown = blacklistSet.has(String(acc.account)) && y !== '上架' && u !== '上架' && z !== '上架';
-        return allUp || allDown || anyRent || blacklistDown || u === '审核失败';
-    });
-
-    const viewAccounts = accounts.map((acc) => {
-        const blacklisted = blacklistSet.has(String(acc.account));
-        let suffix = '';
-        if (blacklisted) suffix = ' 🔸已按黑名单规则下架';
-        else if ([acc.youpin, acc.uhaozu, acc.zuhaowan].includes('租赁中') && acc.youpin !== '上架' && acc.uhaozu !== '上架' && acc.zuhaowan !== '上架') {
-            suffix = ' (已全平台下架)';
-        } else if (acc.uhaozu === '审核失败') {
-            suffix = ` (${acc.uhaozu_debug || 'U号审核失败'})`;
-        }
-        return {
-            ...acc,
-            is_blacklisted: blacklisted,
-            suffix,
-            hint: computeActionHint(acc, blacklisted)
-        };
-    });
-
     return {
-        ok: true,
-        allNormal,
-        hhmm,
+        ok: recentRuns.length > 0,
+        allNormal: true,
+        hhmm: new Date().toLocaleTimeString('zh-CN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        }),
         runCount,
         recentActions,
-        accounts: viewAccounts
+        accounts: [],
+        message: recentRuns.length > 0 ? '' : '⚠️ 暂无运行历史'
     };
 }
 
