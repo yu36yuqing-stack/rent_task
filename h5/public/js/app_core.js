@@ -298,6 +298,7 @@
       productSyncNowBtn: document.getElementById('productSyncNowBtn'),
       orderTotal: document.getElementById('orderTotal'),
       listContainer: document.getElementById('listContainer'),
+      orderGameTabs: document.getElementById('orderGameTabs'),
       orderStatusTabs: document.getElementById('orderStatusTabs'),
       orderSyncNowBtn: document.getElementById('orderSyncNowBtn'),
       orderQuickFilters: document.getElementById('orderQuickFilters'),
@@ -781,6 +782,7 @@
       state.orders.stats = data.stats || { progress: 0, done: 0, done_zero: 0, today_total: 0 };
       state.orders.page = Number(data.page || o.page || 1);
       state.orders.pageSize = Number(data.page_size || o.pageSize || 20);
+      state.orders.game_name = String(data.game_name || o.game_name || 'WZRY').trim() || 'WZRY';
     }
 
     async function loadStatsBoard(options = {}) {

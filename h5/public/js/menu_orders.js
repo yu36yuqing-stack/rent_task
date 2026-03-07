@@ -421,6 +421,11 @@
         clearInterval(o.countdown_timer_id);
         o.countdown_timer_id = 0;
       }
+      const games = [
+        { k: 'WZRY', t: '王者荣耀', icon: '/assets/game_icons/wzry.webp' },
+        { k: '和平精英', t: '和平精英', icon: '/assets/game_icons/hpjy.png' },
+        { k: 'CFM', t: 'CFM枪战王者', icon: '/assets/game_icons/cfm.png' }
+      ];
       const tabs = [
         { k: 'all', t: '全部' },
         { k: 'progress', t: '租赁中' },
@@ -436,6 +441,14 @@
         { k: 'month', t: '本月' },
         { k: 'last30', t: '近30天' }
       ];
+      if (els.orderGameTabs) {
+        els.orderGameTabs.innerHTML = games.map((x) => `
+          <button class="stats-game-tab ${String(o.game_name || 'WZRY') === x.k ? 'active' : ''}" data-order-game="${x.k}" type="button">
+            <span class="game-avatar"><img src="${x.icon}" alt="${x.t}" loading="lazy" decoding="async"></span>
+            <span class="stats-game-tab-text">${x.t}</span>
+          </button>
+        `).join('');
+      }
       els.orderStatusTabs.innerHTML = tabs.map((x) => `
         <button class="orders-tab header-tab ${o.status_filter === x.k ? 'active' : ''}" data-order-status="${x.k}">${x.t}</button>
       `).join('');
@@ -446,7 +459,7 @@
         els.orderSyncNowBtn.disabled = Boolean(o.syncing);
         els.orderSyncNowBtn.textContent = o.syncing ? '同步中...' : '同步订单';
       }
-      els.orderGameHint.textContent = `游戏：${o.game_name || 'WZRY'}（默认） · 汇总：${Number(o.total || 0)}（0收-${Number((o.stats && o.stats.done_zero) || 0)}）`;
+      els.orderGameHint.textContent = `汇总：${Number(o.total || 0)}（0收-${Number((o.stats && o.stats.done_zero) || 0)}）`;
 
       if (!Array.isArray(o.list) || o.list.length === 0) {
         els.orderListContainer.innerHTML = '<div class="panel"><div style="color:#6d7a8a;font-size:13px;">暂无订单数据</div></div>';
@@ -494,6 +507,18 @@
         });
       }
 
+      if (els.orderGameTabs) {
+        Array.from(els.orderGameTabs.querySelectorAll('[data-order-game]')).forEach((n) => {
+          n.addEventListener('click', async () => {
+            const k = String(n.getAttribute('data-order-game') || 'WZRY').trim();
+            if (k === String(o.game_name || 'WZRY')) return;
+            state.orders.game_name = k;
+            state.orders.page = 1;
+            await loadOrders();
+            renderOrdersView();
+          });
+        });
+      }
       Array.from(els.orderStatusTabs.querySelectorAll('[data-order-status]')).forEach((n) => {
         n.addEventListener('click', async () => {
           const k = String(n.getAttribute('data-order-status') || 'all').trim();
