@@ -13,6 +13,7 @@ const {
 
 const DEFAULT_PROBE_CACHE_TTL_SEC = Math.max(1, Number(process.env.PROBE_CACHE_TTL_SEC || 60));
 const FORBIDDEN_ONLY_GAME_ID_1 = String(process.env.FORBIDDEN_ONLY_GAME_ID_1 || '1').trim() !== '0';
+const ONLINE_SUPPORTED_GAME_IDS = new Set(['1', '2']);
 
 function nowText() {
     const d = new Date();
@@ -77,6 +78,24 @@ async function queryOnlineStatusCached(userId, gameAccount, options = {}) {
     if (!acc) throw new Error('game_account 不能为空');
     const profile = await resolveAccountGameProfile(uid, acc, gameName);
     const finalGameName = String(profile.game_name || gameName).trim() || gameName;
+    if (!ONLINE_SUPPORTED_GAME_IDS.has(String(profile.game_id || '').trim())) {
+        const queryTime = nowText();
+        await updateUserGameAccountOnlineProbeSnapshot(uid, acc, {
+            online: false,
+            query_time: queryTime,
+            skipped: true,
+            skip_reason: `online_not_supported_for_game_id_${String(profile.game_id)}`
+        }, String(options.desc || 'skip online query by game_id gate').trim());
+        return {
+            game_account: acc,
+            game_name: finalGameName,
+            online: false,
+            query_time: queryTime,
+            cached: false,
+            skipped: true,
+            skip_reason: `online_not_supported_for_game_id_${String(profile.game_id)}`
+        };
+    }
     const ttlSec = Math.max(1, Number(options.ttl_sec || DEFAULT_PROBE_CACHE_TTL_SEC));
     const nowSec = Math.floor(Date.now() / 1000);
     const forceRefresh = Boolean(options.force_refresh);

@@ -1,4 +1,5 @@
 const CHANNEL_UUZUHAO = 'uuzuhao';
+const { normalizeGameProfile } = require('../common/game_profile');
 
 // 渠道 -> 平台订单表 字段映射定义（后续可按渠道继续扩展）
 const UUZUHAO_ORDER_FIELD_MAPPING = {
@@ -64,10 +65,7 @@ function roundTo2(value) {
 }
 
 function mapGameNameToCanonical(rawName) {
-    const raw = String(rawName || '').trim();
-    if (!raw) return 'WZRY';
-    if (raw === '王者荣耀' || raw.toUpperCase() === 'WZRY') return 'WZRY';
-    return raw;
+    return normalizeGameProfile('', rawName, { preserveUnknown: true }).game_name;
 }
 
 function mapOrderStatusToZh(rawStatus) {
@@ -137,6 +135,7 @@ function calcUhaozuRentHour(rentNum, rentWay) {
 function mapUuzuhaoOrderToUserOrder(raw = {}, options = {}) {
     const gameAccount = String(options.game_account || raw.accountNo || '').trim();
     const roleName = String(options.role_name || raw.remarkName || '').trim();
+    const normalizedGame = normalizeGameProfile(raw.gameId, raw.gameName, { preserveUnknown: true });
     const rentPrice = toNumberSafe(raw.rentPrice, 0);
     const rentHour = toNumberSafe(raw.rentHour, 0);
     const receivableAmount = toNumberSafe(raw.receivableAmount, 0);
@@ -145,8 +144,8 @@ function mapUuzuhaoOrderToUserOrder(raw = {}, options = {}) {
     return {
         channel: CHANNEL_UUZUHAO,
         order_no: String(raw.purchaseOrderNo || '').trim(),
-        game_id: String(raw.gameId ?? '').trim(),
-        game_name: mapGameNameToCanonical(raw.gameName),
+        game_id: normalizedGame.game_id,
+        game_name: normalizedGame.game_name,
         game_account: gameAccount,
         role_name: roleName,
         order_status: mapOrderStatusToZh(raw.orderStatus),
@@ -165,13 +164,14 @@ function mapUuzuhaoOrderToUserOrder(raw = {}, options = {}) {
 function mapUhaozuOrderToOrder(raw = {}, options = {}) {
     const gameAccount = String(options.game_account || '').trim();
     const roleName = String(options.role_name || '').trim();
+    const normalizedGame = normalizeGameProfile(raw.gameId, raw.gameName, { preserveUnknown: true });
     const rentWay = Number(raw.rentWay);
     const rentNum = toNumberSafe(raw.rentNum, 0);
     return {
         channel: 'uhaozu',
         order_no: String(raw.id || '').trim(),
-        game_id: String(raw.gameId ?? '').trim(),
-        game_name: mapGameNameToCanonical(raw.gameName),
+        game_id: normalizedGame.game_id,
+        game_name: normalizedGame.game_name,
         game_account: gameAccount,
         role_name: roleName,
         order_status: mapUhaozuStatus(raw.status),
@@ -189,7 +189,8 @@ function mapZuhaowangOrderToOrder(raw = {}, options = {}) {
     const gameAccount = String(options.game_account || raw.accountNo || '').trim();
     const roleName = String(options.role_name || raw.roleName || raw.remark || '').trim();
     const gameId = String(raw.gameId ?? '').trim();
-    const gameName = raw.gameName || (gameId === '1104466820' ? 'WZRY' : gameId);
+    const gameName = raw.gameName || gameId;
+    const normalizedGame = normalizeGameProfile(gameId, gameName, { preserveUnknown: true });
     const rentHour = parseRentHourModel(raw.rentHourModel);
     const unitPrice = toNumberSafe(raw.unitPrice, 0);
     const income = roundTo2(toNumberSafe(raw.income, 0));
@@ -197,8 +198,8 @@ function mapZuhaowangOrderToOrder(raw = {}, options = {}) {
     return {
         channel: 'zuhaowang',
         order_no: String(raw.orderNo || raw.orderId || '').trim(),
-        game_id: gameId,
-        game_name: mapGameNameToCanonical(gameName),
+        game_id: normalizedGame.game_id,
+        game_name: normalizedGame.game_name,
         game_account: gameAccount,
         role_name: roleName,
         order_status: mapZuhaowangStatus(raw.status),

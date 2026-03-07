@@ -1,26 +1,11 @@
 const { openDatabase } = require('./sqlite_client');
+const {
+    canonicalGameName,
+    canonicalGameId,
+    canonicalGameNameById
+} = require('../common/game_profile');
 
 const PLATFORM_KEYS = new Set(['zuhaowang', 'uhaozu', 'uuzuhao']);
-const GAME_NAME_ALIASES = new Map([
-    ['wzry', 'WZRY'],
-    ['王者荣耀', 'WZRY'],
-    ['王者', 'WZRY'],
-    ['王者荣耀手游', 'WZRY'],
-    ['hpjy', '和平精英'],
-    ['和平', '和平精英'],
-    ['和平精英手游', '和平精英'],
-    ['pubg', '和平精英']
-]);
-const CANONICAL_GAME_ID_BY_NAME = new Map([
-    ['WZRY', '1'],
-    ['和平精英', '2']
-]);
-const CANONICAL_GAME_NAME_BY_ID = new Map([
-    ['1', 'WZRY'],
-    ['2', '和平精英'],
-    ['A2705', 'WZRY'],
-    ['1104466820', 'WZRY']
-]);
 
 function nowText() {
     const d = new Date();
@@ -63,30 +48,6 @@ async function tableColumns(db, tableName) {
 async function tableColumnNamesInOrder(db, tableName) {
     const rows = await all(db, `PRAGMA table_info(${tableName})`);
     return rows.map((row) => String(row.name || ''));
-}
-
-function canonicalGameName(input) {
-    const raw = String(input || '').trim();
-    if (!raw) return 'WZRY';
-    const low = raw.toLowerCase();
-    if (GAME_NAME_ALIASES.has(raw)) return GAME_NAME_ALIASES.get(raw);
-    if (GAME_NAME_ALIASES.has(low)) return GAME_NAME_ALIASES.get(low);
-    return raw;
-}
-
-function canonicalGameId(inputId, inputName) {
-    const rawId = String(inputId || '').trim();
-    if (rawId && CANONICAL_GAME_NAME_BY_ID.has(rawId)) {
-        const name = CANONICAL_GAME_NAME_BY_ID.get(rawId);
-        return String(CANONICAL_GAME_ID_BY_NAME.get(name) || '1');
-    }
-    const name = canonicalGameName(inputName || 'WZRY');
-    return String(CANONICAL_GAME_ID_BY_NAME.get(name) || '1');
-}
-
-function canonicalGameNameById(inputId, inputName) {
-    const id = canonicalGameId(inputId, inputName);
-    return String(CANONICAL_GAME_NAME_BY_ID.get(id) || canonicalGameName(inputName || 'WZRY') || 'WZRY');
 }
 
 function normalizeStatusJson(input) {
@@ -234,6 +195,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
             CASE
                 WHEN TRIM(COALESCE(game_id, '')) <> '' THEN COALESCE(game_id, '1')
                 WHEN COALESCE(game_name, 'WZRY') IN ('和平精英') THEN '2'
+                WHEN COALESCE(game_name, 'WZRY') IN ('CFM', '枪战王者', '穿越火线', '穿越火线手游') THEN '3'
                 ELSE '1'
             END,
             COALESCE(game_name, 'WZRY'),
@@ -283,6 +245,7 @@ async function initUserGameAccountDb() {
                 UPDATE user_game_account
                 SET game_id = CASE
                     WHEN COALESCE(game_name, 'WZRY') IN ('和平精英') THEN '2'
+                    WHEN COALESCE(game_name, 'WZRY') IN ('CFM', '枪战王者', '穿越火线', '穿越火线手游') THEN '3'
                     ELSE '1'
                 END
                 WHERE TRIM(COALESCE(game_id, '')) = ''

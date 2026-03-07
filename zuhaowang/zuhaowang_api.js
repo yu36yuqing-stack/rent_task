@@ -1,6 +1,7 @@
 // 租号王 API 模块 (zuhaowan_api.js)
 const { exec } = require('child_process');
 const { buildEncryptedBody } = require('./toEncryptBody');
+const { normalizeGameProfile } = require('../common/game_profile');
 
 const DEFAULT_SOURCE = 'android';
 
@@ -170,10 +171,8 @@ function mapGoodsStatus(rawStatus) {
 }
 
 function inferGameNameByGameId(gameId) {
-    const gid = String(gameId || '').trim();
-    if (gid === '1104466820') return 'WZRY';
-    if (gid === '1106467070') return '和平精英';
-    return '';
+    const normalized = normalizeGameProfile(gameId, '', { preserveUnknown: true });
+    return normalized.canonical ? normalized.game_name : '';
 }
 
 function buildGoodsEncryptedPayload(payload = {}, auth = {}) {

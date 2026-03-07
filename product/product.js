@@ -10,6 +10,7 @@ const {
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { releaseOrderCooldownBlacklistByUser } = require('../order/order_cooldown');
 const { normalizeZuhaowangAuthPayload } = require('../user/user');
+const { normalizeGameProfile } = require('../common/game_profile');
 
 const PLATFORM_ZHW = 'zuhaowang';
 const PLATFORM_UHZ = 'uhaozu';
@@ -19,34 +20,16 @@ function keyOf(gameId, gameAccount) {
     return `${String(gameId || '1')}::${String(gameAccount || '')}`;
 }
 
-function normalizeGameName(raw) {
-    const v = String(raw || '').trim();
-    if (!v) return 'WZRY';
-    if (v === '王者荣耀' || v.toLowerCase() === 'wzry' || v === '王者') return 'WZRY';
-    return v;
-}
-
 function mapChannelGameToStandard(platform, gameIdRaw, gameNameRaw) {
-    const gid = String(gameIdRaw || '').trim();
-    if (platform === PLATFORM_YYZ) {
-        if (gid === '2') return { game_id: '2', game_name: '和平精英' };
-        return { game_id: '1', game_name: 'WZRY' };
-    }
-    if (platform === PLATFORM_UHZ) {
-        if (gid === 'A2705') return { game_id: '1', game_name: 'WZRY' };
-        if (gid === 'A2706') return { game_id: '2', game_name: '和平精英' };
-        const gn = normalizeGameName(gameNameRaw || '');
-        if (gn === '和平精英') return { game_id: '2', game_name: '和平精英' };
-        return { game_id: '1', game_name: 'WZRY' };
-    }
-    if (platform === PLATFORM_ZHW) {
-        if (gid === '1104466820') return { game_id: '1', game_name: 'WZRY' };
-        if (gid === '1106467070') return { game_id: '2', game_name: '和平精英' };
-        const gn = normalizeGameName(gameNameRaw || '');
-        if (gn === '和平精英') return { game_id: '2', game_name: '和平精英' };
-        return { game_id: '1', game_name: 'WZRY' };
-    }
-    return { game_id: '1', game_name: 'WZRY' };
+    const normalized = normalizeGameProfile(gameIdRaw, gameNameRaw, {
+        preserveUnknown: true,
+        fallbackId: platform === PLATFORM_YYZ ? '1' : '',
+        fallbackName: 'WZRY'
+    });
+    return {
+        game_id: normalized.game_id,
+        game_name: normalized.game_name
+    };
 }
 
 function buildPlatformPrdInfo(platform, row = {}) {

@@ -1,4 +1,5 @@
 const { openDatabase } = require('./sqlite_client');
+const { normalizeGameProfile } = require('../common/game_profile');
 const ORDER_COUNT_TRACE_ENABLED = !['0', 'false', 'no', 'off']
     .includes(String(process.env.ORDER_COUNT_TRACE || 'true').toLowerCase());
 
@@ -128,7 +129,7 @@ async function migrateFromLegacyUserOrderTable(db) {
             String(row.channel || '').trim().toLowerCase(),
             String(row.order_no || '').trim(),
             String(row.game_id ?? '').trim(),
-            String(row.game_name || 'WZRY').trim() || 'WZRY',
+            normalizeGameProfile(row.game_id, row.game_name, { preserveUnknown: true }).game_name,
             String(row.game_account || '').trim(),
             String(row.role_name || '').trim(),
             normalizeOrderStatusForStore(row.order_status),
@@ -227,7 +228,7 @@ async function rebuildOrderTableToTargetSchemaIfNeeded(db) {
             String(row.channel || '').trim().toLowerCase(),
             String(row.order_no || '').trim(),
             String(row.game_id ?? '').trim(),
-            String(row.game_name || 'WZRY').trim() || 'WZRY',
+            normalizeGameProfile(row.game_id, row.game_name, { preserveUnknown: true }).game_name,
             String(row.game_account || '').trim(),
             String(row.role_name || '').trim(),
             normalizeOrderStatusForStore(row.order_status),
@@ -297,6 +298,12 @@ async function initOrderDb() {
         `, [nowText()]);
         await run(db, `
             UPDATE "order"
+            SET game_name = 'CFM', game_id = CASE WHEN TRIM(COALESCE(game_id, '')) = '' THEN '3' ELSE game_id END, modify_date = ?
+            WHERE is_deleted = 0
+              AND COALESCE(game_name, '') IN ('枪战王者', '穿越火线', '穿越火线手游')
+        `, [nowText()]);
+        await run(db, `
+            UPDATE "order"
             SET order_status = CASE
                 WHEN order_status IN ('预约中', '租赁中', '出租中', '已完成', '部分完成', '已撤单', '退款中', '已退款', '结算中', '投诉/撤单')
                     THEN CASE WHEN order_status = '出租中' THEN '租赁中' ELSE order_status END
@@ -341,8 +348,9 @@ function normalizeOrder(input = {}) {
     const userId = Number(input.user_id || 0);
     const channel = String(input.channel || '').trim().toLowerCase();
     const orderNo = String(input.order_no || '').trim();
-    const gameId = String(input.game_id ?? '').trim();
-    const gameName = String(input.game_name || 'WZRY').trim() || 'WZRY';
+    const normalizedGame = normalizeGameProfile(input.game_id, input.game_name, { preserveUnknown: true });
+    const gameId = normalizedGame.game_id;
+    const gameName = normalizedGame.game_name;
     const gameAccount = String(input.game_account || '').trim();
     const roleName = String(input.role_name || '').trim();
     const orderStatus = normalizeOrderStatusForStore(input.order_status);
