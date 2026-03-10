@@ -48,6 +48,9 @@ function renderProfileView() {
 
   const notify = state.profile && state.profile.notify ? state.profile.notify : {};
   const orderOff = state.profile && state.profile.order_off ? state.profile.order_off : {};
+  const loading = Boolean(state.profile && state.profile.loading);
+  const notifySaving = Boolean(state.profile && state.profile.notify_saving);
+  const orderOffSaving = Boolean(state.profile && state.profile.order_off_saving);
 
   if (els.profileAtMode) {
     const mode = String(notify.at_mode || 'none');
@@ -63,14 +66,16 @@ function renderProfileView() {
       els.profileAtModeAll.classList.toggle('active', normalizedMode === 'all');
     }
   }
-  if (els.profileAtMobiles) {
+  const preserveNotifyInput = notifySaving || (typeof document !== 'undefined' && document.activeElement === els.profileAtMobiles);
+  if (els.profileAtMobiles && !preserveNotifyInput) {
     els.profileAtMobiles.value = Array.isArray(notify.at_mobiles) ? notify.at_mobiles.join(',') : '';
   }
   const thresholdRaw = Number(orderOff.threshold);
   const threshold = Number.isFinite(thresholdRaw)
     ? Math.max(1, Math.min(10, Math.floor(thresholdRaw)))
     : 3;
-  if (els.profileOrderOffThreshold) {
+  const preserveThresholdInput = orderOffSaving || (typeof document !== 'undefined' && document.activeElement === els.profileOrderOffThreshold);
+  if (els.profileOrderOffThreshold && !preserveThresholdInput) {
     els.profileOrderOffThreshold.value = String(threshold);
   }
   const orderOffMode = normalizeOrderOffMode(orderOff.mode, ORDER_OFF_MODE_NATURAL_DAY);
@@ -81,10 +86,6 @@ function renderProfileView() {
   if (els.profileOrderOffModeRolling) {
     els.profileOrderOffModeRolling.classList.toggle('active', orderOffMode === ORDER_OFF_MODE_ROLLING_24H);
   }
-
-  const loading = Boolean(state.profile && state.profile.loading);
-  const notifySaving = Boolean(state.profile && state.profile.notify_saving);
-  const orderOffSaving = Boolean(state.profile && state.profile.order_off_saving);
 
   if (els.profileNotifySaveBtn) {
     els.profileNotifySaveBtn.disabled = loading || notifySaving;
