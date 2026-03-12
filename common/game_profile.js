@@ -14,8 +14,8 @@ const GAME_PROFILES = [
     {
         canonical_id: '3',
         canonical_name: 'CFM',
-        ids: ['3'],
-        names: ['CFM', 'cfm', '枪战王者', 'CFM枪战王者', '穿越火线', '穿越火线手游']
+        ids: ['3', 'A2804', '1104512706'],
+        names: ['CFM', 'cfm', '枪战王者', 'CFM枪战王者', '穿越火线', '穿越火线手游', '手游版CF']
     }
 ];
 

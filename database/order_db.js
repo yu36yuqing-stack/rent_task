@@ -298,9 +298,12 @@ async function initOrderDb() {
         `, [nowText()]);
         await run(db, `
             UPDATE "order"
-            SET game_name = 'CFM', game_id = CASE WHEN TRIM(COALESCE(game_id, '')) = '' THEN '3' ELSE game_id END, modify_date = ?
+            SET game_name = 'CFM', game_id = '3', modify_date = ?
             WHERE is_deleted = 0
-              AND COALESCE(game_name, '') IN ('枪战王者', '穿越火线', '穿越火线手游')
+              AND (
+                  COALESCE(game_name, '') IN ('枪战王者', '穿越火线', '穿越火线手游', '手游版CF', '1104512706')
+                  OR COALESCE(game_id, '') IN ('3', 'A2804', '1104512706')
+              )
         `, [nowText()]);
         await run(db, `
             UPDATE "order"

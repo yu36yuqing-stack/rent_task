@@ -36,6 +36,7 @@ const {
     mapUhaozuOrderToOrder,
     mapZuhaowangOrderToOrder
 } = require('./order_mapping');
+const { normalizeGameProfile } = require('../common/game_profile');
 
 const CHANNEL_UHAOZU = 'uhaozu';
 const CHANNEL_ZHW = 'zuhaowang';
@@ -199,7 +200,9 @@ function normalizeOrderListOptions(options = {}) {
     const statusFilter = (statusFilterRaw === 'progress' || statusFilterRaw === 'refund' || statusFilterRaw === 'done' || statusFilterRaw === 'all')
         ? statusFilterRaw
         : 'all';
-    const gameName = String(options.game_name || options.gameName || 'WZRY').trim() || 'WZRY';
+    const gameName = normalizeGameProfile('', String(options.game_name || options.gameName || 'WZRY').trim() || 'WZRY', {
+        preserveUnknown: true
+    }).game_name;
     return { page, pageSize, quickFilter, statusFilter, gameName };
 }
 
