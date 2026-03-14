@@ -47,8 +47,19 @@ exit \$code
 EOF
 echo "[OK] 宿主机已提交并推送"
 
-echo "[Step 3/5] 重启宿主机 H5 服务并做健康检查..."
-REMOTE_H5_CMD="cd '${REMOTE_DIR}' && pkill -f 'h5/local_h5_server.js' || true; lsof -tiTCP:8080 -sTCP:LISTEN | xargs -I{} kill -9 {} || true; nohup /usr/local/bin/node '${REMOTE_DIR}h5/local_h5_server.js' > log/h5_local_server.log 2>&1 & sleep 2; curl -fsS http://127.0.0.1:8080/api/ping"
+echo "[Step 3/5] 重启宿主机常驻服务并做健康检查..."
+REMOTE_H5_CMD="cd '${REMOTE_DIR}' && \
+pkill -f 'h5/local_h5_server.js' || true; \
+pkill -f 'rent_robot_main.js' || true; \
+pkill -f 'order/order_worker.js' || true; \
+pkill -f 'stats/order_stats_worker.js' || true; \
+lsof -tiTCP:8080 -sTCP:LISTEN | xargs -I{} kill -9 {} || true; \
+sleep 8; \
+if ! curl -fsS http://127.0.0.1:8080/api/ping >/dev/null 2>&1; then \
+  nohup /usr/local/bin/node '${REMOTE_DIR}h5/local_h5_server.js' > log/h5_local_server.log 2>&1 & \
+  sleep 2; \
+fi; \
+curl -fsS http://127.0.0.1:8080/api/ping"
 /usr/bin/expect <<EOF
 set timeout -1
 spawn ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new ${REMOTE_USER}@${REMOTE_HOST} "${REMOTE_H5_CMD}"
@@ -63,7 +74,7 @@ catch wait result
 set code [lindex \$result 3]
 exit \$code
 EOF
-echo "[OK] 宿主机 H5 已重启并通过 /api/ping 健康检查"
+echo "[OK] 宿主机常驻服务已触发重启，H5 已通过 /api/ping 健康检查"
 
 echo "[Step 4/5] 本机对齐 GitHub(${REMOTE_BRANCH})..."
 cd "$REPO_DIR"
