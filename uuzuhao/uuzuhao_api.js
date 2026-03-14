@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { normalizeGameProfile } = require('../common/game_profile');
 
 const API_BASE = 'https://acctrade-api.youpin898.com';
 const TIMEOUT_MS = 15000;
@@ -10,13 +11,6 @@ const PATH_GAME_ONLINE = '/api/youpin/rent-connector/product/v1/game/online';
 const PATH_FORBIDDEN_PLAY = '/api/youpin/rent-connector/product/v1/forbidden/play';
 const PATH_ORDER_LIST = '/api/youpin/rent-connector/order/v1/list';
 const PATH_ORDER_DETAIL = '/api/youpin/rent-connector/order/v1/detail';
-
-const GAME_ID_BY_NAME = {
-    WZRY: 1,
-    王者荣耀: 1,
-    HPJY: 2,
-    和平精英: 2
-};
 
 function toSignValue(value) {
     if (value === null || value === undefined) return '';
@@ -239,8 +233,12 @@ async function youpinOnShelf(_page, account, options = {}) {
 }
 
 function resolveGameIdByName(gameName = 'WZRY') {
-    const key = String(gameName || 'WZRY').trim().toUpperCase();
-    const gameId = Number(GAME_ID_BY_NAME[key] || 0);
+    const profile = normalizeGameProfile('', gameName, {
+        preserveUnknown: false,
+        fallbackId: '1',
+        fallbackName: 'WZRY'
+    });
+    const gameId = Number(profile.game_id || 0);
     if (!gameId) throw new Error(`uuzuhao 不支持的 game_name: ${gameName}`);
     return gameId;
 }

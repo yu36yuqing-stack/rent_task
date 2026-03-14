@@ -30,7 +30,7 @@ EOF
 echo "[OK] 回传完成"
 
 echo "[Step 2/5] 宿主机提交并推送 GitHub..."
-REMOTE_GIT_CMD="cd '${REMOTE_DIR}' && git add -A && if git diff --cached --quiet; then echo '\\[INFO\\] no changes to commit'; else git commit -m '${COMMIT_MSG}'; fi && git push origin ${REMOTE_BRANCH}"
+REMOTE_GIT_CMD="cd '${REMOTE_DIR}' && git add -A -- . ':(exclude)database/*.db' ':(exclude)database/*.db-journal' ':(exclude)database/*.db-wal' ':(exclude)database/*.db-shm' ':(exclude)*.log' && if git diff --cached --quiet; then echo '\\[INFO\\] no changes to commit'; else git commit -m '${COMMIT_MSG}'; fi && git push origin ${REMOTE_BRANCH}"
 /usr/bin/expect <<EOF
 set timeout -1
 spawn ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new ${REMOTE_USER}@${REMOTE_HOST} "${REMOTE_GIT_CMD}"
