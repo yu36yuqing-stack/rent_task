@@ -60,6 +60,18 @@ function resolveUserDingding(user = {}) {
     };
 }
 
+function isExpectedMismatch(row = {}) {
+    const legacyReason = String((row && row.legacy_reason) || '').trim();
+    const projectedReason = String((row && row.projected_reason) || '').trim();
+    const projectedSource = String((row && row.projected_source) || '').trim();
+
+    // 新链路先产生冷却期 source、旧黑名单稍后再投影是预期过程，不做巡检告警。
+    if (!legacyReason && projectedReason === '冷却期下架' && projectedSource === 'order_cooldown') {
+        return true;
+    }
+    return false;
+}
+
 async function notifyMismatch(user, mismatchResult, mode, logger = console) {
     const ding = resolveUserDingding(user);
     if (!ding.webhook) {
@@ -127,13 +139,18 @@ async function runBlacklistInspectorOnce(options = {}) {
             if (!uid) continue;
             try {
                 const cmp = await compareLegacyAndProjectedByUser(uid);
-                const mismatch = Array.isArray(cmp.mismatch) ? cmp.mismatch : [];
+                const mismatch = (Array.isArray(cmp.mismatch) ? cmp.mismatch : []).filter((row) => !isExpectedMismatch(row));
                 if (mismatch.length > 0) {
                     usersMismatch += 1;
                     accountsMismatch += mismatch.length;
                     if (INSPECTOR_ALERT_ENABLE) {
                         try {
-                            const out = await notifyMismatch(user, cmp, mode, logger);
+                            const out = await notifyMismatch(user, {
+                                ...cmp,
+                                mismatch,
+                                legacy_total: Number(cmp.legacy_total || 0),
+                                projected_total: Number(cmp.projected_total || 0)
+                            }, mode, logger);
                             if (out && out.sent) alertsSent += 1;
                         } catch (e) {
                             errors.push(`alert_failed user=${uid} ${String(e && e.message ? e.message : e || 'unknown')}`);

@@ -1,4 +1,4 @@
-const { openDatabase } = require('./sqlite_client');
+const { openRuntimeDatabase } = require('./sqlite_client');
 const LOCK_TABLE = 'lock_db';
 
 function nowText() {
@@ -26,7 +26,7 @@ function get(db, sql, params = []) {
 }
 
 async function initLockDb() {
-    const db = openDatabase();
+    const db = openRuntimeDatabase();
     try {
         await run(db, `
             CREATE TABLE IF NOT EXISTS ${LOCK_TABLE} (
@@ -55,7 +55,7 @@ async function tryAcquireLock(lockKey, leaseSec = 1800, owner = '') {
     const untilSec = nowSec + lease;
     if (!key) throw new Error('lock_key 不能为空');
 
-    const db = openDatabase();
+    const db = openRuntimeDatabase();
     try {
         await run(db, 'BEGIN IMMEDIATE TRANSACTION');
         const row = await get(db, `
@@ -100,7 +100,7 @@ async function releaseLock(lockKey, owner = '') {
     const key = String(lockKey || '').trim();
     if (!key) return false;
 
-    const db = openDatabase();
+    const db = openRuntimeDatabase();
     try {
         const r = await run(db, `
             UPDATE ${LOCK_TABLE}

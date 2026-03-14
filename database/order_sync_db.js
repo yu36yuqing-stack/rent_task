@@ -1,4 +1,4 @@
-const { openDatabase } = require('./sqlite_client');
+const { openRuntimeDatabase } = require('./sqlite_client');
 
 function nowText() {
     const d = new Date();
@@ -25,7 +25,7 @@ function get(db, sql, params = []) {
 }
 
 async function initOrderSyncDb() {
-    const db = openDatabase();
+    const db = openRuntimeDatabase();
     try {
         await run(db, `
             ALTER TABLE user_order_sync_state RENAME TO order_sync_state
@@ -57,7 +57,7 @@ async function getLastSyncTimestamp(userId, channel) {
     if (!uid) throw new Error('user_id 不合法');
     if (!ch) throw new Error('channel 不能为空');
 
-    const db = openDatabase();
+    const db = openRuntimeDatabase();
     try {
         const row = await get(db, `
             SELECT last_sync_ts
@@ -80,7 +80,7 @@ async function setLastSyncTimestamp(userId, channel, ts, desc = '') {
     if (!ch) throw new Error('channel 不能为空');
     if (!Number.isFinite(syncTs) || syncTs <= 0) throw new Error('last_sync_ts 不合法');
 
-    const db = openDatabase();
+    const db = openRuntimeDatabase();
     try {
         const row = await get(db, `
             SELECT id

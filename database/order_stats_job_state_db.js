@@ -1,4 +1,4 @@
-const { openDatabase } = require('./sqlite_client');
+const { openRuntimeDatabase } = require('./sqlite_client');
 
 function nowText() {
     const d = new Date();
@@ -25,7 +25,7 @@ function get(db, sql, params = []) {
 }
 
 async function initOrderStatsJobStateDb() {
-    const db = openDatabase();
+    const db = openRuntimeDatabase();
     try {
         await run(db, `
             CREATE TABLE IF NOT EXISTS order_stats_job_state (
@@ -52,7 +52,7 @@ async function getLastRunDate(jobKey) {
     const key = String(jobKey || '').trim();
     if (!key) throw new Error('job_key 不能为空');
 
-    const db = openDatabase();
+    const db = openRuntimeDatabase();
     try {
         const row = await get(db, `
             SELECT last_run_date
@@ -73,7 +73,7 @@ async function setLastRunDate(jobKey, dateText, desc = '') {
     if (!key) throw new Error('job_key 不能为空');
     if (!day) throw new Error('dateText 不能为空');
 
-    const db = openDatabase();
+    const db = openRuntimeDatabase();
     try {
         const row = await get(db, `
             SELECT id

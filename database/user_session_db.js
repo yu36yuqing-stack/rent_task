@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { openDatabase } = require('./sqlite_client');
+const { openRuntimeDatabase } = require('./sqlite_client');
 
 function nowText() {
     const d = new Date();
@@ -26,7 +26,7 @@ function get(db, sql, params = []) {
 }
 
 async function initUserSessionDb() {
-    const db = openDatabase();
+    const db = openRuntimeDatabase();
     try {
         await run(db, `
             CREATE TABLE IF NOT EXISTS user_session (
@@ -69,7 +69,7 @@ async function createRefreshSession(userId, refreshToken, ttlSec, desc = '') {
     const expireAt = new Date(Date.now() + Number(ttlSec || 0) * 1000).toISOString();
     const hash = tokenHash(refreshToken);
 
-    const db = openDatabase();
+    const db = openRuntimeDatabase();
     try {
         await run(db, `
             INSERT INTO user_session
@@ -84,7 +84,7 @@ async function createRefreshSession(userId, refreshToken, ttlSec, desc = '') {
 async function verifyRefreshSession(refreshToken) {
     await initUserSessionDb();
     const hash = tokenHash(refreshToken);
-    const db = openDatabase();
+    const db = openRuntimeDatabase();
     try {
         const row = await get(db, `
             SELECT * FROM user_session
@@ -103,7 +103,7 @@ async function verifyRefreshSession(refreshToken) {
 async function revokeRefreshSession(refreshToken) {
     await initUserSessionDb();
     const hash = tokenHash(refreshToken);
-    const db = openDatabase();
+    const db = openRuntimeDatabase();
     try {
         const r = await run(db, `
             UPDATE user_session

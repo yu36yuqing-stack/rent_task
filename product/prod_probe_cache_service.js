@@ -12,7 +12,6 @@ const {
 } = require('../uuzuhao/uuzuhao_api');
 
 const DEFAULT_PROBE_CACHE_TTL_SEC = Math.max(1, Number(process.env.PROBE_CACHE_TTL_SEC || 60));
-const FORBIDDEN_ONLY_GAME_ID_1 = String(process.env.FORBIDDEN_ONLY_GAME_ID_1 || '1').trim() !== '0';
 const ONLINE_SUPPORTED_GAME_IDS = new Set(['1', '2']);
 
 function nowText() {
@@ -147,23 +146,6 @@ async function queryForbiddenStatusCached(userId, gameAccount, options = {}) {
     const forceRefresh = Boolean(options.force_refresh);
     const profile = await resolveAccountGameProfile(uid, acc, gameName);
     const finalGameName = String(profile.game_name || gameName).trim() || gameName;
-    if (FORBIDDEN_ONLY_GAME_ID_1 && String(profile.game_id || '1') !== '1') {
-        const queryTime = nowText();
-        await updateUserGameAccountForbiddenProbeSnapshot(uid, acc, {
-            enabled: false,
-            query_time: queryTime
-        }, String(options.desc || 'skip forbidden query by game_id gate').trim());
-        return {
-            game_account: acc,
-            game_name: finalGameName,
-            enabled: false,
-            query_time: queryTime,
-            type: 1,
-            cached: false,
-            skipped: true,
-            skip_reason: `forbidden_not_supported_for_game_id_${String(profile.game_id)}`
-        };
-    }
 
     if (!forceRefresh) {
         const cached = await getUserGameAccountProbeSnapshotsByUserAndAccount(uid, acc);
@@ -211,22 +193,6 @@ async function setForbiddenPlayWithSnapshot(userId, gameAccount, enabled, option
     if (!acc) throw new Error('game_account 不能为空');
     const profile = await resolveAccountGameProfile(uid, acc, gameName);
     const finalGameName = String(profile.game_name || gameName).trim() || gameName;
-    if (FORBIDDEN_ONLY_GAME_ID_1 && String(profile.game_id || '1') !== '1') {
-        const queryTime = nowText();
-        await updateUserGameAccountForbiddenProbeSnapshot(uid, acc, {
-            enabled: false,
-            query_time: queryTime
-        }, String(options.desc || 'skip forbidden set by game_id gate').trim());
-        return {
-            game_account: acc,
-            game_name: finalGameName,
-            enabled: false,
-            query_time: queryTime,
-            type: 2,
-            skipped: true,
-            skip_reason: `forbidden_not_supported_for_game_id_${String(profile.game_id)}`
-        };
-    }
     const auth = options.auth && typeof options.auth === 'object'
         ? options.auth
         : await resolveUuzuhaoAuthByUser(uid);
