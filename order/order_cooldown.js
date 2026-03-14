@@ -2,6 +2,7 @@ const { openDatabase } = require('../database/sqlite_client');
 const { initOrderDb } = require('../database/order_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { getLastSyncTimestamp } = require('../database/order_sync_db');
+const { listBlacklistSourcesByUser } = require('../database/user_blacklist_source_db');
 const {
     listUserBlacklistByUserWithMeta
 } = require('../database/user_blacklist_db');
@@ -103,6 +104,20 @@ function parseCooldownMetaFromDesc(descText) {
     } catch {
         return { cooldown_until: 0, source_order_no: '', source_channel: '' };
     }
+}
+
+function parseCooldownMetaFromSourceRow(row = {}) {
+    const detail = row && row.detail && typeof row.detail === 'object' ? row.detail : {};
+    const sourceOrderNo = String(detail.source_order_no || '').trim();
+    const sourceChannel = normalizeOrderPlatform(String(detail.source_channel || '').trim());
+    const detailCooldownUntil = Number(detail.cooldown_until || 0);
+    const expireAtSec = parseDateTimeTextToSec(String(row.expire_at || '').trim());
+    const cooldownUntil = detailCooldownUntil > 0 ? detailCooldownUntil : expireAtSec;
+    return {
+        cooldown_until: cooldownUntil,
+        source_order_no: sourceOrderNo,
+        source_channel: sourceChannel
+    };
 }
 
 async function getOrderStatusByOrderNo(userId, orderNo, channel = '') {
@@ -325,7 +340,30 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
     }
 
     const current = await listUserBlacklistByUserWithMeta(uid);
-    const cooldownRows = current.filter((x) => String(x.reason || '').trim() === COOLDOWN_REASON);
+    const legacyCooldownRows = current.filter((x) => String(x.reason || '').trim() === COOLDOWN_REASON);
+    const sourceRows = (await listBlacklistSourcesByUser(uid, { active_only: true }))
+        .filter((x) => String(x.source || '').trim() === COOLDOWN_SOURCE);
+    const releaseCandidates = new Map();
+
+    for (const row of sourceRows) {
+        const acc = String(row.game_account || '').trim();
+        if (!acc) continue;
+        releaseCandidates.set(acc, {
+            game_account: acc,
+            source_row: row,
+            legacy_row: null
+        });
+    }
+    for (const row of legacyCooldownRows) {
+        const acc = String(row.game_account || '').trim();
+        if (!acc || releaseCandidates.has(acc)) continue;
+        releaseCandidates.set(acc, {
+            game_account: acc,
+            source_row: null,
+            legacy_row: row
+        });
+    }
+
     let released = 0;
     let released_by_refund = 0;
     let pending = 0;
@@ -333,10 +371,16 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
     let guard_blocked = 0;
     let guard_blocked_bridged = 0;
     let guard_blocked_bridge_failed = 0;
-    for (const row of cooldownRows) {
-        const acc = String(row.game_account || '').trim();
+    for (const candidate of releaseCandidates.values()) {
+        const acc = String(candidate.game_account || '').trim();
         if (!acc) continue;
-        const meta = parseCooldownMetaFromDesc(row.desc);
+        const sourceMeta = candidate.source_row ? parseCooldownMetaFromSourceRow(candidate.source_row) : null;
+        const legacyMeta = candidate.legacy_row ? parseCooldownMetaFromDesc(candidate.legacy_row.desc) : null;
+        const meta = {
+            cooldown_until: Number((sourceMeta && sourceMeta.cooldown_until) || (legacyMeta && legacyMeta.cooldown_until) || 0),
+            source_order_no: String((sourceMeta && sourceMeta.source_order_no) || (legacyMeta && legacyMeta.source_order_no) || '').trim(),
+            source_channel: String((sourceMeta && sourceMeta.source_channel) || (legacyMeta && legacyMeta.source_channel) || '').trim()
+        };
         let untilSec = Number(meta.cooldown_until || 0);
         if (!untilSec && meta.source_order_no) {
             const endTime = await getOrderEndTimeByOrderNo(uid, meta.source_order_no, meta.source_channel);
@@ -391,7 +435,7 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
         reason: COOLDOWN_REASON,
         source: COOLDOWN_SOURCE,
         freshness,
-        total_cooldown_rows: cooldownRows.length,
+        total_cooldown_rows: releaseCandidates.size,
         released,
         released_by_refund,
         pending,
