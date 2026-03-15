@@ -202,7 +202,7 @@
         query_status: '',
         query_text: ''
       },
-      moreOpsSheet: { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false },
+      moreOpsSheet: { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false },
       activeActionSheet: '',
       purchaseSheet: {
         open: false,
@@ -360,6 +360,7 @@
       moreOpsSheet: document.getElementById('moreOpsSheet'),
       moreOpsSheetTitle: document.getElementById('moreOpsSheetTitle'),
       moreOpsForbiddenBtn: document.getElementById('moreOpsForbiddenBtn'),
+      moreOpsProdGuardBtn: document.getElementById('moreOpsProdGuardBtn'),
       moreOpsMaintenanceBtn: document.getElementById('moreOpsMaintenanceBtn'),
       moreOpsPurchaseBtn: document.getElementById('moreOpsPurchaseBtn'),
       moreOpsCloseBtn: document.getElementById('moreOpsCloseBtn'),
@@ -1286,6 +1287,15 @@
       closeMoreOpsSheet();
       openForbiddenSheet(item);
     });
+    if (els.moreOpsProdGuardBtn) {
+      els.moreOpsProdGuardBtn.addEventListener('click', () => {
+        const account = String((state.moreOpsSheet || {}).account || '').trim();
+        if (!account) return;
+        const item = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
+        if (!item) return;
+        void toggleProdGuard(item);
+      });
+    }
     if (els.moreOpsMaintenanceBtn) {
       els.moreOpsMaintenanceBtn.addEventListener('click', () => {
         const account = String((state.moreOpsSheet || {}).account || '').trim();

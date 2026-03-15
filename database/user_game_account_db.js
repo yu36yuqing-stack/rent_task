@@ -112,6 +112,7 @@ function rowToAccount(row = {}) {
     }
     let onlineProbeSnapshot = {};
     let forbiddenProbeSnapshot = {};
+    let accountSwitch = {};
     try {
         onlineProbeSnapshot = JSON.parse(String(row.online_probe_snapshot || '{}')) || {};
     } catch {
@@ -122,6 +123,12 @@ function rowToAccount(row = {}) {
     } catch {
         forbiddenProbeSnapshot = {};
     }
+    try {
+        accountSwitch = JSON.parse(String(row.switch || '{}')) || {};
+        if (!accountSwitch || typeof accountSwitch !== 'object' || Array.isArray(accountSwitch)) accountSwitch = {};
+    } catch {
+        accountSwitch = {};
+    }
     return {
         id: Number(row.id || 0),
         user_id: Number(row.user_id || 0),
@@ -131,6 +138,7 @@ function rowToAccount(row = {}) {
         game_name: canonicalGameNameById(row.game_id, row.game_name),
         channel_status: channelStatus,
         channel_prd_info: channelPrdInfo,
+        switch: accountSwitch,
         online_probe_snapshot: onlineProbeSnapshot,
         forbidden_probe_snapshot: forbiddenProbeSnapshot,
         purchase_price: Number(row.purchase_price || 0),
@@ -151,6 +159,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
         'game_name',
         'channel_status',
         'channel_prd_info',
+        'switch',
         'online_probe_snapshot',
         'forbidden_probe_snapshot',
         'purchase_price',
@@ -175,6 +184,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
             game_name TEXT NOT NULL DEFAULT 'WZRY',
             channel_status TEXT NOT NULL DEFAULT '{}',
             channel_prd_info TEXT NOT NULL DEFAULT '{}',
+            switch TEXT NOT NULL DEFAULT '{}',
             online_probe_snapshot TEXT NOT NULL DEFAULT '{}',
             forbidden_probe_snapshot TEXT NOT NULL DEFAULT '{}',
             purchase_price REAL NOT NULL DEFAULT 0,
@@ -186,7 +196,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
     `);
     await run(db, `
         INSERT INTO user_game_account
-        (id, user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, modify_date, is_deleted, desc)
+        (id, user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, switch, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, modify_date, is_deleted, desc)
         SELECT
             id,
             user_id,
@@ -201,6 +211,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
             COALESCE(game_name, 'WZRY'),
             COALESCE(channel_status, '{}'),
             COALESCE(channel_prd_info, '{}'),
+            COALESCE("switch", '{}'),
             COALESCE(online_probe_snapshot, '{}'),
             COALESCE(forbidden_probe_snapshot, '{}'),
             COALESCE(purchase_price, 0),
@@ -226,6 +237,7 @@ async function initUserGameAccountDb() {
                 game_name TEXT NOT NULL DEFAULT 'WZRY',
                 channel_status TEXT NOT NULL DEFAULT '{}',
                 channel_prd_info TEXT NOT NULL DEFAULT '{}',
+                switch TEXT NOT NULL DEFAULT '{}',
                 online_probe_snapshot TEXT NOT NULL DEFAULT '{}',
                 forbidden_probe_snapshot TEXT NOT NULL DEFAULT '{}',
                 purchase_price REAL NOT NULL DEFAULT 0,
@@ -253,6 +265,9 @@ async function initUserGameAccountDb() {
         }
         if (!cols.has('channel_prd_info')) {
             await run(db, `ALTER TABLE user_game_account ADD COLUMN channel_prd_info TEXT NOT NULL DEFAULT '{}'`);
+        }
+        if (!cols.has('switch')) {
+            await run(db, `ALTER TABLE user_game_account ADD COLUMN "switch" TEXT NOT NULL DEFAULT '{}'`);
         }
         if (!cols.has('purchase_price')) {
             await run(db, `ALTER TABLE user_game_account ADD COLUMN purchase_price REAL NOT NULL DEFAULT 0`);
@@ -292,10 +307,34 @@ function parseJsonObject(raw) {
     }
 }
 
+function normalizeAccountSwitch(raw) {
+    const out = raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? raw
+        : parseJsonObject(raw);
+    const next = {};
+    for (const [key, value] of Object.entries(out)) {
+        const cfg = value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+        if (!cfg) continue;
+        const label = String(cfg.label || '').trim();
+        const hasEnabled = cfg.enabled !== undefined;
+        next[key] = {
+            label: label || key,
+            enabled: hasEnabled ? Boolean(cfg.enabled) : true
+        };
+    }
+    return next;
+}
+
+function mergeAccountSwitch(baseRaw, patchRaw) {
+    const base = normalizeAccountSwitch(baseRaw);
+    const patch = normalizeAccountSwitch(patchRaw);
+    return { ...base, ...patch };
+}
+
 async function compactCanonicalGameNames(db) {
     const rows = await all(db, `
         SELECT id, user_id, game_account, game_id, game_name, account_remark, channel_status, channel_prd_info
-             , online_probe_snapshot, forbidden_probe_snapshot
+             , "switch", online_probe_snapshot, forbidden_probe_snapshot
         FROM user_game_account
         WHERE is_deleted = 0
         ORDER BY id ASC
@@ -319,9 +358,11 @@ async function compactCanonicalGameNames(db) {
         let accountRemark = '';
         let onlineProbeSnapshot = {};
         let forbiddenProbeSnapshot = {};
+        let accountSwitch = {};
         for (const row of list) {
             mergedStatus = { ...mergedStatus, ...parseJsonObject(row.channel_status) };
             mergedPrdInfo = { ...mergedPrdInfo, ...parseJsonObject(row.channel_prd_info) };
+            accountSwitch = { ...accountSwitch, ...normalizeAccountSwitch(row.switch) };
             const onlineOne = parseJsonObject(row.online_probe_snapshot);
             if (Object.keys(onlineOne).length > 0) onlineProbeSnapshot = onlineOne;
             const forbiddenOne = parseJsonObject(row.forbidden_probe_snapshot);
@@ -340,17 +381,18 @@ async function compactCanonicalGameNames(db) {
         }
 
         await run(db, `
-            UPDATE user_game_account
-            SET game_id = ?, game_name = ?, account_remark = ?, channel_status = ?, channel_prd_info = ?,
-                online_probe_snapshot = ?, forbidden_probe_snapshot = ?, modify_date = ?
-            WHERE id = ?
-        `, [
+                UPDATE user_game_account
+                SET game_id = ?, game_name = ?, account_remark = ?, channel_status = ?, channel_prd_info = ?,
+                    "switch" = ?, online_probe_snapshot = ?, forbidden_probe_snapshot = ?, modify_date = ?
+                WHERE id = ?
+            `, [
             keeper.game_id,
             keeper.game_name,
             accountRemark,
-            JSON.stringify(mergedStatus),
-            JSON.stringify(mergedPrdInfo),
-            JSON.stringify(onlineProbeSnapshot),
+                JSON.stringify(mergedStatus),
+                JSON.stringify(mergedPrdInfo),
+                JSON.stringify(accountSwitch),
+                JSON.stringify(onlineProbeSnapshot),
             JSON.stringify(forbiddenProbeSnapshot),
             nowText(),
             Number(keeper.id)
@@ -374,6 +416,7 @@ async function upsertUserGameAccount(input = {}) {
     const hasPurchaseDate = /^\d{4}-\d{2}-\d{2}$/.test(purchaseDateRaw);
     const nextStatus = normalizeStatusJson(input.channel_status || {});
     const nextPrdInfo = normalizePrdInfoJson(input.channel_prd_info || {});
+    const nextSwitch = normalizeAccountSwitch(input.switch || {});
     const desc = String(input.desc || '').trim();
 
     if (!userId) throw new Error('user_id 不合法');
@@ -417,6 +460,7 @@ async function upsertUserGameAccount(input = {}) {
                 }
                 const mergedStatus = { ...deletedStatus, ...nextStatus };
                 const mergedPrdInfo = { ...deletedPrdInfo, ...nextPrdInfo };
+                const mergedSwitch = mergeAccountSwitch(deletedRow.switch, nextSwitch);
                 const mergedRemark = accountRemark || String(deletedRow.account_remark || '');
                 const mergedPurchasePrice = hasPurchasePrice ? purchasePriceRaw : Number(deletedRow.purchase_price || 0);
                 const mergedPurchaseDate = hasPurchaseDate ? purchaseDateRaw : String(deletedRow.purchase_date || '').slice(0, 10);
@@ -425,7 +469,7 @@ async function upsertUserGameAccount(input = {}) {
                 await run(db, `
                     UPDATE user_game_account
                     SET game_id = ?, game_name = ?, account_remark = ?, channel_status = ?, channel_prd_info = ?,
-                        online_probe_snapshot = ?, forbidden_probe_snapshot = ?,
+                        "switch" = ?, online_probe_snapshot = ?, forbidden_probe_snapshot = ?,
                         purchase_price = ?, purchase_date = ?, modify_date = ?, is_deleted = 0, desc = ?
                     WHERE id = ?
                 `, [
@@ -434,6 +478,7 @@ async function upsertUserGameAccount(input = {}) {
                     mergedRemark,
                     JSON.stringify(mergedStatus),
                     JSON.stringify(mergedPrdInfo),
+                    JSON.stringify(mergedSwitch),
                     JSON.stringify(mergedOnlineSnapshot),
                     JSON.stringify(mergedForbiddenSnapshot),
                     mergedPurchasePrice,
@@ -447,8 +492,8 @@ async function upsertUserGameAccount(input = {}) {
                 const finalGameName = hintedGameName;
                 await run(db, `
                     INSERT INTO user_game_account
-                    (user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, modify_date, is_deleted, desc)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, '{}', '{}', ?, ?, ?, 0, ?)
+                    (user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, "switch", online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, modify_date, is_deleted, desc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', '{}', ?, ?, ?, 0, ?)
                 `, [
                     userId,
                     gameAccount,
@@ -457,6 +502,7 @@ async function upsertUserGameAccount(input = {}) {
                     finalGameName,
                     JSON.stringify(nextStatus),
                     JSON.stringify(nextPrdInfo),
+                    JSON.stringify(nextSwitch),
                     hasPurchasePrice ? purchasePriceRaw : 0,
                     hasPurchaseDate ? purchaseDateRaw : '',
                     nowText(),
@@ -484,13 +530,14 @@ async function upsertUserGameAccount(input = {}) {
             }
             const mergedStatus = { ...currentStatus, ...nextStatus };
             const mergedPrdInfo = { ...currentPrdInfo, ...nextPrdInfo };
+            const mergedSwitch = mergeAccountSwitch(row.switch, nextSwitch);
             const mergedRemark = accountRemark || String(row.account_remark || '');
             const mergedPurchasePrice = hasPurchasePrice ? purchasePriceRaw : Number(row.purchase_price || 0);
             const mergedPurchaseDate = hasPurchaseDate ? purchaseDateRaw : String(row.purchase_date || '').slice(0, 10);
             await run(db, `
                 UPDATE user_game_account
                 SET game_id = ?, game_name = ?, account_remark = ?, channel_status = ?, channel_prd_info = ?,
-                    purchase_price = ?, purchase_date = ?, modify_date = ?, desc = ?
+                    "switch" = ?, purchase_price = ?, purchase_date = ?, modify_date = ?, desc = ?
                 WHERE id = ?
             `, [
                 finalGameId,
@@ -498,6 +545,7 @@ async function upsertUserGameAccount(input = {}) {
                 mergedRemark,
                 JSON.stringify(mergedStatus),
                 JSON.stringify(mergedPrdInfo),
+                JSON.stringify(mergedSwitch),
                 mergedPurchasePrice,
                 mergedPurchaseDate,
                 nowText(),
@@ -587,6 +635,7 @@ async function softDeleteEmptyAccountsByUser(userId) {
                 ...parseJsonObject(deletedRow.channel_prd_info),
                 ...parseJsonObject(row.channel_prd_info)
             };
+            const mergedSwitch = mergeAccountSwitch(deletedRow.switch, row.switch);
             const rowPurchasePrice = Number(row.purchase_price || 0);
             const deletedPurchasePrice = Number(deletedRow.purchase_price || 0);
             const mergedPurchasePrice = Number.isFinite(rowPurchasePrice) && rowPurchasePrice > 0
@@ -611,13 +660,14 @@ async function softDeleteEmptyAccountsByUser(userId) {
             await run(db, `
                 UPDATE user_game_account
                 SET account_remark = ?, channel_status = ?, channel_prd_info = ?,
-                    online_probe_snapshot = ?, forbidden_probe_snapshot = ?,
+                    "switch" = ?, online_probe_snapshot = ?, forbidden_probe_snapshot = ?,
                     purchase_price = ?, purchase_date = ?, modify_date = ?, desc = ?
                 WHERE id = ?
             `, [
                 mergedRemark,
                 JSON.stringify(mergedStatus),
                 JSON.stringify(mergedPrdInfo),
+                JSON.stringify(mergedSwitch),
                 JSON.stringify(mergedOnlineSnapshot),
                 JSON.stringify(mergedForbiddenSnapshot),
                 mergedPurchasePrice,
@@ -905,6 +955,40 @@ async function updateUserGameAccountForbiddenProbeSnapshot(userId, gameAccount, 
     }
 }
 
+async function updateUserGameAccountSwitchByUserAndAccount(userId, gameAccount, patchSwitch = {}, desc = '') {
+    await initUserGameAccountDb();
+    const uid = Number(userId || 0);
+    const acc = String(gameAccount || '').trim();
+    if (!uid) throw new Error('user_id 不合法');
+    if (!acc) throw new Error('game_account 不能为空');
+    const nextPatch = normalizeAccountSwitch(patchSwitch);
+    const db = openDatabase();
+    try {
+        const row = await get(db, `
+            SELECT id, "switch", desc
+            FROM user_game_account
+            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            ORDER BY id DESC
+            LIMIT 1
+        `, [uid, acc]);
+        if (!row) throw new Error(`找不到账号: ${acc}`);
+        const merged = mergeAccountSwitch(row.switch, nextPatch);
+        await run(db, `
+            UPDATE user_game_account
+            SET "switch" = ?, modify_date = ?, desc = ?
+            WHERE id = ?
+        `, [
+            JSON.stringify(merged),
+            nowText(),
+            String(desc || row.desc || '').trim(),
+            Number(row.id)
+        ]);
+        return merged;
+    } finally {
+        db.close();
+    }
+}
+
 module.exports = {
     PLATFORM_KEYS,
     initUserGameAccountDb,
@@ -915,8 +999,10 @@ module.exports = {
     listOwnersByGameAccounts,
     listAccountRemarksByUserAndAccounts,
     updateUserGameAccountPurchaseByUserAndAccount,
+    updateUserGameAccountSwitchByUserAndAccount,
     getLatestUserGameAccountByUserAndAccount,
     getUserGameAccountProbeSnapshotsByUserAndAccount,
     updateUserGameAccountOnlineProbeSnapshot,
-    updateUserGameAccountForbiddenProbeSnapshot
+    updateUserGameAccountForbiddenProbeSnapshot,
+    normalizeAccountSwitch
 };

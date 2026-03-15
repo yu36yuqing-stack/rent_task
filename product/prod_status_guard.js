@@ -144,6 +144,13 @@ function collectOnlineAccounts(accounts = []) {
     });
 }
 
+function isProdGuardEnabledByAccount(account = {}) {
+    const sw = account && account.switch && typeof account.switch === 'object' ? account.switch : {};
+    const cfg = sw.prod_guard && typeof sw.prod_guard === 'object' ? sw.prod_guard : {};
+    if (cfg.enabled === undefined) return true;
+    return Boolean(cfg.enabled);
+}
+
 function buildProductRentingGuardDetail(account = {}) {
     const info = account && account.channel_prd_info && typeof account.channel_prd_info === 'object'
         ? account.channel_prd_info
@@ -378,7 +385,7 @@ async function probeProdOnlineStatus(user, accounts = [], options = {}) {
         return { ok: true, skipped: true, reason: 'out_of_probe_window' };
     }
 
-    const list = Array.isArray(accounts) ? accounts : [];
+    const list = (Array.isArray(accounts) ? accounts : []).filter((x) => isProdGuardEnabledByAccount(x));
     if (list.length === 0) return { ok: true, skipped: true, reason: 'empty_accounts' };
     let auth = null;
     try {
@@ -470,7 +477,7 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
     if (!isProdGuardEnabledByUser(user)) return { ok: true, skipped: true, reason: 'prod_guard_disabled_by_user_switch', queued: 0 };
     const uid = Number((user && user.id) || 0);
     if (!uid) return { ok: false, skipped: true, reason: 'invalid_user', queued: 0 };
-    const list = Array.isArray(badAccounts) ? badAccounts : [];
+    const list = (Array.isArray(badAccounts) ? badAccounts : []).filter((x) => isProdGuardEnabledByAccount(x));
     if (list.length === 0) return { ok: true, skipped: true, reason: 'empty_accounts', queued: 0 };
     let auth = null;
     try {

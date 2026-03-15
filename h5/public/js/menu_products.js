@@ -175,33 +175,88 @@
       }
     }
 
+    async function toggleProdGuard(item) {
+      const account = String(item && item.game_account || '').trim();
+      if (!account) return;
+      const enabled = Boolean(item && item.prod_guard_enabled);
+      const nextEnabled = !enabled;
+      const actionText = nextEnabled ? '开启在线风控' : '关闭在线风控';
+      if (!nextEnabled) {
+        const ok = window.confirm('关闭后将不再检测该账号在线状态，也不再触发在线风控，是否继续？');
+        if (!ok) return;
+      }
+      try {
+        state.moreOpsSheet.prod_guard_loading = true;
+        renderMoreOpsSheet();
+        const out = await request('/api/products/account-switch/toggle', {
+          method: 'POST',
+          body: JSON.stringify({
+            game_account: account,
+            switch_key: 'prod_guard',
+            enabled: nextEnabled
+          })
+        });
+        const savedEnabled = Boolean(out && out.data && out.data.prod_guard_enabled);
+        const savedSwitch = out && out.data && out.data.switch && typeof out.data.switch === 'object'
+          ? out.data.switch
+          : {};
+        if (!savedEnabled) delete state.onlineStatusMap[account];
+        state.list = (state.list || []).map((x) => {
+          if (String(x && x.game_account || '').trim() !== account) return x;
+          return {
+            ...x,
+            switch: savedSwitch,
+            prod_guard_enabled: savedEnabled
+          };
+        });
+        closeMoreOpsSheet();
+        await loadList();
+        renderList();
+        showToast(savedEnabled ? '已开启在线风控' : '已关闭在线风控');
+      } catch (e) {
+        alert(e.message || `${actionText}失败`);
+      } finally {
+        state.moreOpsSheet.prod_guard_loading = false;
+        renderMoreOpsSheet();
+      }
+    }
+
     async function queryStatus(item) {
       const account = String(item && item.game_account || '').trim();
       const gameName = String(item && item.game_name || 'WZRY').trim() || 'WZRY';
+      const prodGuardEnabled = item && item.prod_guard_enabled === undefined ? true : Boolean(item && item.prod_guard_enabled);
       if (!account) return;
-      state.onlineLoadingMap[account] = true;
       state.forbiddenLoadingMap[account] = true;
+      if (prodGuardEnabled) state.onlineLoadingMap[account] = true;
       renderOnlinePart(account);
       renderForbiddenPart(account);
       try {
         const [onlineRes, forbiddenRes] = await Promise.all([
-          request('/api/products/online', {
-            method: 'POST',
-            body: JSON.stringify({ game_account: account, game_name: gameName })
-          }),
+          prodGuardEnabled
+            ? request('/api/products/online', {
+              method: 'POST',
+              body: JSON.stringify({ game_account: account, game_name: gameName })
+            })
+            : Promise.resolve(null),
           request('/api/products/forbidden/query', {
             method: 'POST',
             body: JSON.stringify({ game_account: account, game_name: gameName })
           })
         ]);
-        const online = Boolean(onlineRes && onlineRes.data && onlineRes.data.online);
-        const tag = online ? '在线' : '离线';
         const forbiddenEnabled = Boolean(forbiddenRes && forbiddenRes.data && forbiddenRes.data.enabled);
         const hit = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
-        state.onlineStatusMap[account] = tag;
         if (hit) {
-          hit.online_tag = tag;
-          hit.online_query_time = String((onlineRes && onlineRes.data && onlineRes.data.query_time) || '').trim();
+          if (prodGuardEnabled) {
+            const online = Boolean(onlineRes && onlineRes.data && onlineRes.data.online);
+            const tag = online ? '在线' : '离线';
+            state.onlineStatusMap[account] = tag;
+            hit.online_tag = tag;
+            hit.online_query_time = String((onlineRes && onlineRes.data && onlineRes.data.query_time) || '').trim();
+          } else {
+            delete state.onlineStatusMap[account];
+            hit.online_tag = '';
+            hit.online_query_time = '';
+          }
           hit.forbidden_status = forbiddenEnabled ? '禁玩中' : '未禁玩';
           hit.forbidden_query_time = String((forbiddenRes && forbiddenRes.data && forbiddenRes.data.query_time) || '').trim();
         }
@@ -394,22 +449,30 @@
       const handling = Boolean(state.forbiddenLoadingMap[account]);
       const maintenanceLoading = Boolean(state.moreOpsSheet.maintenance_loading);
       const maintenanceEnabled = Boolean(state.moreOpsSheet.maintenance_enabled);
+      const prodGuardLoading = Boolean(state.moreOpsSheet.prod_guard_loading);
+      const prodGuardEnabled = state.moreOpsSheet.prod_guard_enabled === undefined ? true : Boolean(state.moreOpsSheet.prod_guard_enabled);
       els.moreOpsSheetTitle.textContent = `更多操作 · ${name || '当前账号'}`;
-      els.moreOpsForbiddenBtn.disabled = querying || handling || maintenanceLoading;
+      els.moreOpsForbiddenBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+      if (els.moreOpsProdGuardBtn) {
+        els.moreOpsProdGuardBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+        els.moreOpsProdGuardBtn.textContent = prodGuardLoading
+          ? '处理中...'
+          : (prodGuardEnabled ? '关闭在线风控' : '开启在线风控');
+      }
       if (els.moreOpsMaintenanceBtn) {
-        els.moreOpsMaintenanceBtn.disabled = querying || handling || maintenanceLoading;
+        els.moreOpsMaintenanceBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
         els.moreOpsMaintenanceBtn.textContent = maintenanceLoading
           ? '处理中...'
           : (maintenanceEnabled ? '结束维护' : '开启维护');
       }
-      els.moreOpsPurchaseBtn.disabled = querying || handling || maintenanceLoading;
-      els.moreOpsCloseBtn.disabled = querying || handling || maintenanceLoading;
+      els.moreOpsPurchaseBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+      els.moreOpsCloseBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
       els.moreOpsForbiddenBtn.textContent = handling ? '处理中...' : '处理禁玩';
     }
 
     function closeActionSheets() {
       state.activeActionSheet = '';
-      state.moreOpsSheet = { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false };
+      state.moreOpsSheet = { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false };
       state.forbiddenSheet = {
         open: false,
         account: '',
@@ -429,7 +492,7 @@
     function openForbiddenSheet(item) {
       const account = String(item && item.game_account || '').trim();
       if (!account) return;
-      state.moreOpsSheet = { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false };
+      state.moreOpsSheet = { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false };
       state.activeActionSheet = 'forbidden';
       renderMoreOpsSheet();
       state.forbiddenSheet = {
@@ -487,7 +550,9 @@
         account,
         role_name: String(item && (item.role_name || item.game_account) || '').trim(),
         maintenance_enabled: Boolean(item && item.blacklisted && isMaintenanceReason(item.blacklist_reason)),
-        maintenance_loading: false
+        maintenance_loading: false,
+        prod_guard_enabled: item && item.prod_guard_enabled === undefined ? true : Boolean(item && item.prod_guard_enabled),
+        prod_guard_loading: false
       };
       renderForbiddenSheet();
       renderMoreOpsSheet();
@@ -495,7 +560,7 @@
 
     function closeMoreOpsSheet() {
       if (state.activeActionSheet === 'more') state.activeActionSheet = '';
-      state.moreOpsSheet = { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false };
+      state.moreOpsSheet = { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false };
       renderMoreOpsSheet();
     }
 

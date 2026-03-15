@@ -7,7 +7,8 @@ const { initUserDb, verifyUserLogin, getActiveUserById, updateUserNotifyConfigBy
 const {
     initUserGameAccountDb,
     listUserGameAccounts,
-    updateUserGameAccountPurchaseByUserAndAccount
+    updateUserGameAccountPurchaseByUserAndAccount,
+    updateUserGameAccountSwitchByUserAndAccount
 } = require('../database/user_game_account_db');
 const {
     initUserBlacklistDb,
@@ -16,7 +17,7 @@ const {
 const { deleteBlacklistWithGuard } = require('../blacklist/blacklist_release_guard');
 const { manualRemoveBlacklistMode2 } = require('../blacklist/blacklist_manual_remove_v2');
 const { getBlacklistV2Mode, buildProjectedBlacklistByUser } = require('../blacklist/blacklist_reconciler');
-const { setReasonSourceAndReconcile, upsertSourceAndReconcile } = require('../blacklist/blacklist_source_gateway');
+const { setReasonSourceAndReconcile, upsertSourceAndReconcile, clearSourceAndReconcile } = require('../blacklist/blacklist_source_gateway');
 const {
     RESTRICT_REASON,
     initUserPlatformRestrictDb,
@@ -50,11 +51,13 @@ const {
 const { runFullUserPipeline } = require('../pipeline/user_pipeline');
 const {
     initProdRiskEventDb,
-    listRiskEventsByUser
+    listRiskEventsByUser,
+    resolveOpenRiskEvent
 } = require('../database/prod_risk_event_db');
 const {
     initProdGuardTaskDb,
-    listGuardTasksByUser
+    listGuardTasksByUser,
+    updateGuardTaskStatus
 } = require('../database/prod_guard_task_db');
 const {
     buildPlatformStatusNorm,
@@ -335,6 +338,61 @@ function isRentingByChannelStatus(channelStatus) {
     return ['uuzuhao', 'uhaozu', 'zuhaowang'].some((k) => String(s[k] || '').trim() === '租赁中');
 }
 
+function normalizeAccountSwitch(raw) {
+    const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const out = {};
+    for (const [key, value] of Object.entries(src)) {
+        const cfg = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+        const label = String(cfg.label || '').trim();
+        out[key] = {
+            label: label || key,
+            enabled: cfg.enabled === undefined ? true : Boolean(cfg.enabled)
+        };
+    }
+    return out;
+}
+
+function resolveProdGuardSwitch(raw) {
+    const sw = normalizeAccountSwitch(raw);
+    const cfg = sw.prod_guard && typeof sw.prod_guard === 'object'
+        ? sw.prod_guard
+        : { label: '在线风控', enabled: true };
+    return {
+        label: String(cfg.label || '在线风控').trim() || '在线风控',
+        enabled: cfg.enabled === undefined ? true : Boolean(cfg.enabled)
+    };
+}
+
+async function cleanupProdGuardStateByAccount(userId, gameAccount) {
+    const uid = Number(userId || 0);
+    const acc = String(gameAccount || '').trim();
+    if (!uid || !acc) return;
+    await clearSourceAndReconcile(uid, acc, 'guard_online', {
+        operator: 'h5',
+        desc: 'disable prod_guard by h5'
+    });
+    await clearSourceAndReconcile(uid, acc, 'guard_forbidden', {
+        operator: 'h5',
+        desc: 'disable prod_guard by h5'
+    });
+    const taskRows = await listGuardTasksByUser(uid, { page: 1, page_size: 500 });
+    for (const task of (taskRows && Array.isArray(taskRows.list) ? taskRows.list : [])) {
+        if (String((task && task.game_account) || '').trim() !== acc) continue;
+        if (String((task && task.status) || '').trim() !== 'pending' && String((task && task.status) || '').trim() !== 'watching') continue;
+        await updateGuardTaskStatus(task.id, {
+            status: 'done',
+            blacklist_applied: 0,
+            forbidden_applied: 0,
+            last_error: '',
+            desc: 'skip_by_account_switch_prod_guard_disabled'
+        });
+    }
+    await resolveOpenRiskEvent(uid, acc, 'online_non_renting', {
+        status: 'ignored',
+        desc: 'skip_by_account_switch_prod_guard_disabled'
+    });
+}
+
 async function listAllAccountsByUser(userId) {
     let page = 1;
     const pageSize = 200;
@@ -547,8 +605,10 @@ async function handleProducts(req, res, urlObj) {
         const forbiddenSnapshot = x.forbidden_probe_snapshot && typeof x.forbidden_probe_snapshot === 'object'
             ? x.forbidden_probe_snapshot
             : {};
+        const accountSwitch = normalizeAccountSwitch(x.switch);
+        const prodGuardSwitch = resolveProdGuardSwitch(accountSwitch);
         const onlineLabelRaw = String(onlineSnapshot.label || '').trim();
-        const onlineTag = onlineLabelRaw === '在线' || onlineLabelRaw === '离线'
+        const onlineTag = prodGuardSwitch.enabled && (onlineLabelRaw === '在线' || onlineLabelRaw === '离线')
             ? onlineLabelRaw
             : '';
         const forbiddenLabelRaw = String(forbiddenSnapshot.label || '').trim();
@@ -568,9 +628,11 @@ async function handleProducts(req, res, urlObj) {
             renting_order_end_time: String(((rentingWindowMap[acc] || {}).end_time) || '').trim(),
             renting_order_count: Number(((rentingWindowMap[acc] || {}).count) || 0),
             online_tag: onlineTag,
-            online_query_time: String(onlineSnapshot.query_time || '').trim(),
+            online_query_time: prodGuardSwitch.enabled ? String(onlineSnapshot.query_time || '').trim() : '',
             forbidden_status: forbiddenLabelRaw,
             forbidden_query_time: String(forbiddenSnapshot.query_time || '').trim(),
+            switch: accountSwitch,
+            prod_guard_enabled: Boolean(prodGuardSwitch.enabled),
             blacklisted: Boolean(bl),
             blacklist_reason: bl ? bl.reason : '',
             blacklist_create_date: bl ? bl.create_date : '',
@@ -1230,6 +1292,38 @@ async function handleProductPurchaseConfig(req, res) {
     });
 }
 
+async function handleProductAccountSwitchToggle(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const gameAccount = String(body.game_account || '').trim();
+    const switchKey = String(body.switch_key || '').trim();
+    const enabledRaw = body.enabled;
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    if (switchKey !== 'prod_guard') return json(res, 400, { ok: false, message: 'switch_key 不支持' });
+    if (enabledRaw === undefined || enabledRaw === null || enabledRaw === '') {
+        return json(res, 400, { ok: false, message: 'enabled 不能为空' });
+    }
+    const enabled = enabledRaw === true || String(enabledRaw).trim().toLowerCase() === 'true';
+    const nextSwitch = await updateUserGameAccountSwitchByUserAndAccount(user.id, gameAccount, {
+        prod_guard: {
+            label: '在线风控',
+            enabled
+        }
+    }, 'toggle account switch by h5');
+    if (!enabled) {
+        await cleanupProdGuardStateByAccount(user.id, gameAccount);
+    }
+    const prodGuard = resolveProdGuardSwitch(nextSwitch);
+    return json(res, 200, {
+        ok: true,
+        data: {
+            game_account: gameAccount,
+            switch: nextSwitch,
+            prod_guard_enabled: Boolean(prodGuard.enabled)
+        }
+    });
+}
+
 async function handleRiskCenterList(req, res, urlObj) {
     const user = await requireAuth(req);
     const page = normalizePage(urlObj.searchParams.get('page'), 1);
@@ -1398,6 +1492,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/play') return await handleProductForbiddenPlay(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/query') return await handleProductForbiddenQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/purchase-config') return await handleProductPurchaseConfig(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/products/account-switch/toggle') return await handleProductAccountSwitchToggle(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/risk-center/events') return await handleRiskCenterList(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/add') return await handleBlacklistAdd(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/remove') return await handleBlacklistRemove(req, res);

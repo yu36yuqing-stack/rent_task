@@ -225,6 +225,7 @@ function toReportAccountFromUserGameRow(row, blacklistSet = new Set(), blacklist
         youpin: String(status.uuzuhao || ''),
         uhaozu: String(status.uhaozu || ''),
         zuhaowan: String(status.zuhaowang || ''),
+        switch: row && row.switch && typeof row.switch === 'object' ? row.switch : {},
         channel_prd_info: prdInfo,
         uhaozu_debug: '',
         is_blacklisted: blacklisted,
