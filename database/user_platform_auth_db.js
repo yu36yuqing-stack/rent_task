@@ -22,6 +22,43 @@ const PLATFORM_AUTH_RULES = {
         requiredKeys: ['app_key', 'app_secret']
     }
 };
+const UHAOZU_DEFAULT_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
+    Accept: 'application/json, text/plain, */*',
+    'Accept-Encoding': 'gzip, deflate, br, zstd',
+    tml: '{"platform":"20","terminal":"0"}',
+    'sec-ch-ua-platform': '"macOS"',
+    'sec-ch-ua': '"Not:A-Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"',
+    'sec-ch-ua-mobile': '?0',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Content-Type': 'application/json;charset=UTF-8',
+    Origin: 'https://b.uhaozu.com',
+    'Sec-Fetch-Site': 'same-site',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Dest': 'empty',
+    Referer: 'https://b.uhaozu.com/order',
+    'Accept-Language': 'zh-CN,zh;q=0.9'
+};
+const UHAOZU_HEADER_NAME_MAP = {
+    'user-agent': 'User-Agent',
+    accept: 'Accept',
+    'accept-encoding': 'Accept-Encoding',
+    tml: 'tml',
+    'sec-ch-ua-platform': 'sec-ch-ua-platform',
+    'sec-ch-ua': 'sec-ch-ua',
+    'sec-ch-ua-mobile': 'sec-ch-ua-mobile',
+    'x-requested-with': 'X-Requested-With',
+    'content-type': 'Content-Type',
+    origin: 'Origin',
+    'sec-fetch-site': 'Sec-Fetch-Site',
+    'sec-fetch-mode': 'Sec-Fetch-Mode',
+    'sec-fetch-dest': 'Sec-Fetch-Dest',
+    referer: 'Referer',
+    'accept-language': 'Accept-Language',
+    'cache-control': 'Cache-Control',
+    pragma: 'Pragma',
+    connection: 'Connection'
+};
 
 function nowText() {
     const d = new Date();
@@ -141,8 +178,37 @@ function normalizeZuhaowangAuthPayloadForStorage(payloadObj = {}) {
     };
 }
 
+function normalizeUhaozuHeaders(raw = {}, fallback = {}) {
+    const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const out = { ...(fallback && typeof fallback === 'object' ? fallback : {}) };
+    for (const [key, value] of Object.entries(src)) {
+        const name = UHAOZU_HEADER_NAME_MAP[String(key || '').trim().toLowerCase()];
+        if (!name) continue;
+        const text = String(value || '').trim();
+        if (!text) continue;
+        out[name] = text;
+    }
+    return out;
+}
+
+function normalizeUhaozuAuthPayloadForStorage(payloadObj = {}) {
+    const raw = payloadObj && typeof payloadObj === 'object' && !Array.isArray(payloadObj) ? payloadObj : {};
+    const cookie = String(raw.cookie || '').trim();
+    const defaultHeaders = normalizeUhaozuHeaders(raw.default_headers, UHAOZU_DEFAULT_HEADERS);
+    const legacyOrderHeaders = normalizeUhaozuHeaders(raw.order_headers);
+    const mergedHeaders = normalizeUhaozuHeaders(legacyOrderHeaders, defaultHeaders);
+    const out = {
+        cookie,
+        default_headers: mergedHeaders
+    };
+    const orderListPath = String(raw.order_list_path || '').trim();
+    if (orderListPath) out.order_list_path = orderListPath;
+    return out;
+}
+
 function normalizePlatformAuthPayload(platform, payloadObj = {}) {
     if (platform === 'zuhaowang') return normalizeZuhaowangAuthPayloadForStorage(payloadObj);
+    if (platform === 'uhaozu') return normalizeUhaozuAuthPayloadForStorage(payloadObj);
     return payloadObj;
 }
 
@@ -251,6 +317,28 @@ async function migrateZuhaowangPayloadToYuanbaoOnly(db) {
     }
 }
 
+async function migrateUhaozuPayloadToDefaultHeaders(db) {
+    const rows = await all(db, `
+        SELECT id, auth_payload
+        FROM user_platform_auth
+        WHERE is_deleted = 0
+          AND platform = 'uhaozu'
+    `);
+
+    for (const row of rows) {
+        const parsed = parseStoredPayload(row.auth_payload);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+        const normalized = normalizeUhaozuAuthPayloadForStorage(parsed);
+        const nextPayload = JSON.stringify(normalized);
+        if (nextPayload === String(row.auth_payload || '')) continue;
+        await run(db, `
+            UPDATE user_platform_auth
+            SET auth_payload = ?, modify_date = ?
+            WHERE id = ?
+        `, [nextPayload, nowText(), Number(row.id)]);
+    }
+}
+
 function isExpired(expireAt) {
     const value = String(expireAt || '').trim();
     if (!value) return false;
@@ -305,6 +393,7 @@ async function initUserPlatformAuthDb() {
         `);
         await migrateAuthPayloadToPlaintext(db);
         await migrateZuhaowangPayloadToYuanbaoOnly(db);
+        await migrateUhaozuPayloadToDefaultHeaders(db);
     } finally {
         db.close();
     }

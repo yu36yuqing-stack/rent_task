@@ -3,6 +3,7 @@ const {
     upsertUserPlatformAuth,
     listUserPlatformAuth
 } = require('../../database/user_platform_auth_db');
+const { upsertUhaozuAuthFromCurl } = require('../../user/platform_auth_import_service');
 
 const CHANNEL_CONFIG = [
     {
@@ -135,6 +136,20 @@ function createAuthBff(deps = {}) {
         return json(res, 200, { ok: true, data: row });
     }
 
+    async function handleUpsertPlatformAuthFromCurl(req, res) {
+        const user = await requireAuth(req);
+        const body = await readJsonBody(req);
+        const platform = String(body.platform || '').trim();
+        if (platform !== 'uhaozu') {
+            throw new Error('当前仅支持 U号租 curl 导入');
+        }
+        const curl = String(body.curl || '').trim();
+        const row = await upsertUhaozuAuthFromCurl(user.id, curl, {
+            desc: String(body.desc || 'h5 uhaozu curl auth upsert').trim()
+        });
+        return json(res, 200, { ok: true, data: row });
+    }
+
     async function init() {
         await initUserPlatformAuthDb();
     }
@@ -142,7 +157,8 @@ function createAuthBff(deps = {}) {
     return {
         init,
         handleGetPlatformAuthList,
-        handleUpsertPlatformAuth
+        handleUpsertPlatformAuth,
+        handleUpsertPlatformAuthFromCurl
     };
 }
 

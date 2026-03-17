@@ -1022,6 +1022,26 @@
       color: #b5423b;
     }
 
+    .auth-curl-textarea {
+      width: 100%;
+      min-height: 180px;
+      resize: vertical;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid #c8d8ea;
+      background: #fff;
+      color: #17324d;
+      font: 500 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .auth-curl-textarea:focus {
+      outline: none;
+      border-color: #2c79d6;
+      box-shadow: 0 0 0 3px rgba(44, 121, 214, 0.14);
+    }
+
     .sheet-query-result {
       font-size: 12px;
       line-height: 1;

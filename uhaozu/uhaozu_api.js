@@ -11,40 +11,58 @@ const {
 const DEFAULT_UHAOZU_API_BASE = 'https://mapi.uhaozu.com';
 const DEFAULT_UHAOZU_TIMEOUT_MS = 15000;
 const DEFAULT_GOODS_DETAIL_FAIL_TTL_SEC = 3600;
-
-function buildDefaultHeaders(cookie) {
-    return {
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
-    'Accept': 'application/json, text/plain, */*',
-    'Accept-Encoding': 'gzip, deflate, br, zstd',
-    'tml': '{"platform":"20","terminal":"0"}',
-    'sec-ch-ua-platform': '"macOS"',
-    'sec-ch-ua': '"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"',
-    'sec-ch-ua-mobile': '?0',
-    'X-Requested-With': 'XMLHttpRequest',
-    'Content-Type': 'application/json;charset=UTF-8',
-    'Origin': 'https://b.uhaozu.com',
-    'Sec-Fetch-Site': 'same-site',
-    'Sec-Fetch-Mode': 'cors',
-    'Sec-Fetch-Dest': 'empty',
-    'Referer': 'https://b.uhaozu.com/goods',
-    'Accept-Language': 'zh-CN,zh;q=0.9',
-    'Cookie': cookie
+const UHAOZU_HEADER_NAME_MAP = {
+    'user-agent': 'User-Agent',
+    accept: 'Accept',
+    'accept-encoding': 'Accept-Encoding',
+    tml: 'tml',
+    'sec-ch-ua-platform': 'sec-ch-ua-platform',
+    'sec-ch-ua': 'sec-ch-ua',
+    'sec-ch-ua-mobile': 'sec-ch-ua-mobile',
+    'x-requested-with': 'X-Requested-With',
+    'content-type': 'Content-Type',
+    origin: 'Origin',
+    'sec-fetch-site': 'Sec-Fetch-Site',
+    'sec-fetch-mode': 'Sec-Fetch-Mode',
+    'sec-fetch-dest': 'Sec-Fetch-Dest',
+    referer: 'Referer',
+    'accept-language': 'Accept-Language',
+    'cache-control': 'Cache-Control',
+    pragma: 'Pragma',
+    connection: 'Connection'
 };
+
+function normalizeHeaderOverrides(raw = {}) {
+    const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const out = {};
+    for (const [key, value] of Object.entries(src)) {
+        const name = UHAOZU_HEADER_NAME_MAP[String(key || '').trim().toLowerCase()];
+        if (!name) continue;
+        const text = String(value || '').trim();
+        if (!text) continue;
+        out[name] = text;
+    }
+    return out;
 }
 
-function buildOrderHeaders(cookie) {
+function buildDefaultHeaders(cookie, auth = {}) {
     return {
-        ...buildDefaultHeaders(cookie),
-        Referer: 'https://b.uhaozu.com/order'
+        ...normalizeHeaderOverrides(auth.default_headers),
+        Cookie: cookie
     };
+}
+
+function buildOrderHeaders(cookie, auth = {}) {
+    return buildDefaultHeaders(cookie, auth);
 }
 
 function resolveAuth(auth = {}) {
     const cfg = {
         api_base: String(auth.api_base || DEFAULT_UHAOZU_API_BASE),
         timeout_ms: Number(auth.timeout_ms || DEFAULT_UHAOZU_TIMEOUT_MS),
-        cookie: String(auth.cookie || '').trim()
+        cookie: String(auth.cookie || '').trim(),
+        default_headers: normalizeHeaderOverrides(auth.default_headers),
+        order_list_path: String(auth.order_list_path || '').trim()
     };
     if (!cfg.cookie) throw new Error('uhaozu cookie 未配置');
     return cfg;
@@ -216,7 +234,7 @@ function buildListPayload(page, pageSize, overrides = {}) {
 
 async function listGoodsPage(page = 1, pageSize = 30, overrides = {}, auth = {}) {
     const cfg = resolveAuth(auth);
-    const headers = buildDefaultHeaders(cfg.cookie);
+    const headers = buildDefaultHeaders(cfg.cookie, cfg);
     const v = formatV();
     const url = `${cfg.api_base}/merchants/goods/list?v=${v}`;
     const payload = buildListPayload(page, pageSize, overrides);
@@ -260,8 +278,8 @@ function extractOrderListAndMeta(json = {}) {
 
 async function listOrderPage(pageNum = 1, pageSize = 30, overrides = {}, auth = {}) {
     const cfg = resolveAuth(auth);
-    const headers = buildOrderHeaders(cfg.cookie);
-    const path = String(overrides.__path || auth.order_list_path || '/merchants/order/submit/orderList').trim();
+    const headers = buildOrderHeaders(cfg.cookie, cfg);
+    const path = String(overrides.__path || cfg.order_list_path || '/merchants/order/submit/orderList').trim();
     const url = `${cfg.api_base}${path}`;
     const payload = buildOrderListPayload(pageNum, pageSize, overrides);
     const json = await requestJson(url, {
@@ -332,7 +350,7 @@ async function listAllGoods(pageSize = 30, auth = {}) {
 
 async function queryGoodsDetailByGoodsId(goodsId, auth = {}) {
     const cfg = resolveAuth(auth);
-    const headers = buildDefaultHeaders(cfg.cookie);
+    const headers = buildDefaultHeaders(cfg.cookie, cfg);
     const id = String(goodsId);
     const url = `${cfg.api_base}/merchants/goods/modify/query/${encodeURIComponent(id)}`;
     const json = await requestJson(url, {
@@ -368,7 +386,7 @@ async function findGoodsByAccount(account, auth = {}) {
 
 async function callUnshelf(goodsId, auth = {}) {
     const cfg = resolveAuth(auth);
-    const headers = buildDefaultHeaders(cfg.cookie);
+    const headers = buildDefaultHeaders(cfg.cookie, cfg);
     const url = `${cfg.api_base}/merchants/goods/unShelves/${encodeURIComponent(String(goodsId))}`;
     const json = await requestJson(url, {
         method: 'POST',
@@ -383,7 +401,7 @@ async function callUnshelf(goodsId, auth = {}) {
 
 async function callShelf(goodsId, auth = {}) {
     const cfg = resolveAuth(auth);
-    const headers = buildDefaultHeaders(cfg.cookie);
+    const headers = buildDefaultHeaders(cfg.cookie, cfg);
     const id = String(goodsId);
     const url = `${cfg.api_base}/api/goods/shelves/${encodeURIComponent(id)}`;
     const json = await requestJson(url, {

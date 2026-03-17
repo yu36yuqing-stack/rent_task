@@ -348,10 +348,10 @@
         </div>
         <div id="authUhaozuResult" class="sheet-result"></div>
       </div>
-      <p class="auth-uuzuhao-hint">请输入 U号租 cookie。</p>
+      <p class="auth-uuzuhao-hint">请粘贴浏览器复制出的完整 U号租 curl。程序会提取用户级请求头和授权 Cookie，并用于该用户的全部 U号租请求。</p>
       <div class="field" style="margin-top:0;">
-        <label for="authUhaozuCookie">Cookie</label>
-        <input id="authUhaozuCookie" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="请输入 cookie">
+        <label for="authUhaozuCurl">完整 curl</label>
+        <textarea id="authUhaozuCurl" class="auth-curl-textarea" rows="8" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="请粘贴完整 curl 命令"></textarea>
       </div>
       <div class="sheet-actions">
         <button id="authUhaozuSaveBtn" class="sheet-btn">保存</button>

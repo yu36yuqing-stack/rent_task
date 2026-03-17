@@ -388,7 +388,7 @@
       authUhaozuSheet: document.getElementById('authUhaozuSheet'),
       authUhaozuTitle: document.getElementById('authUhaozuTitle'),
       authUhaozuResult: document.getElementById('authUhaozuResult'),
-      authUhaozuCookie: document.getElementById('authUhaozuCookie'),
+      authUhaozuCurl: document.getElementById('authUhaozuCurl'),
       authUhaozuSaveBtn: document.getElementById('authUhaozuSaveBtn'),
       authUhaozuCloseBtn: document.getElementById('authUhaozuCloseBtn'),
       globalLoading: document.getElementById('globalLoading')
@@ -543,7 +543,7 @@
         saving: false,
         error: ''
       };
-      if (els.authUhaozuCookie) els.authUhaozuCookie.value = '';
+      if (els.authUhaozuCurl) els.authUhaozuCurl.value = '';
       renderAuthUhaozuSheet();
     }
 
@@ -556,15 +556,15 @@
         saving: false,
         error: ''
       };
-      if (els.authUhaozuCookie) els.authUhaozuCookie.value = '';
+      if (els.authUhaozuCurl) els.authUhaozuCurl.value = '';
       renderAuthUhaozuSheet();
     }
 
     async function submitAuthUhaozu() {
       if (!state.authCookieEditor || state.authCookieEditor.saving) return;
-      const cookie = String((els.authUhaozuCookie && els.authUhaozuCookie.value) || '').trim();
-      if (!cookie) {
-        state.authCookieEditor.error = 'cookie 不能为空';
+      const curl = String((els.authUhaozuCurl && els.authUhaozuCurl.value) || '').trim();
+      if (!curl) {
+        state.authCookieEditor.error = 'curl 不能为空';
         renderAuthUhaozuSheet();
         return;
       }
@@ -572,14 +572,12 @@
       state.authCookieEditor.error = '';
       renderAuthUhaozuSheet();
       try {
-        await request('/api/auth/platforms/upsert', {
+        await request('/api/auth/platforms/upsert-from-curl', {
           method: 'POST',
           body: JSON.stringify({
             platform: 'uhaozu',
-            auth_type: 'cookie',
-            auth_payload: { cookie },
-            auth_status: 'valid',
-            desc: 'h5 uhaozu auth upsert'
+            curl,
+            desc: 'h5 uhaozu curl auth upsert'
           })
         });
         await loadAuthManage();

@@ -1499,6 +1499,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/products/maintenance/toggle') return await handleProductMaintenanceToggle(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/auth/platforms') return await authBff.handleGetPlatformAuthList(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/auth/platforms/upsert') return await authBff.handleUpsertPlatformAuth(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/auth/platforms/upsert-from-curl') return await authBff.handleUpsertPlatformAuthFromCurl(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/ping') return json(res, 200, { ok: true, ts: Date.now() });
 
             if ((req.method === 'GET' || req.method === 'HEAD') && tryServeStatic(req, urlObj, res)) return;
