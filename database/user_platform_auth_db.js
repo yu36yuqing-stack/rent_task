@@ -59,6 +59,21 @@ const UHAOZU_HEADER_NAME_MAP = {
     pragma: 'Pragma',
     connection: 'Connection'
 };
+const UHAOZU_ORDER_DETAIL_HEADER_NAME_MAP = {
+    accept: 'Accept',
+    'accept-language': 'Accept-Language',
+    connection: 'Connection',
+    'sec-fetch-dest': 'Sec-Fetch-Dest',
+    'sec-fetch-mode': 'Sec-Fetch-Mode',
+    'sec-fetch-site': 'Sec-Fetch-Site',
+    'sec-fetch-user': 'Sec-Fetch-User',
+    'upgrade-insecure-requests': 'Upgrade-Insecure-Requests',
+    'user-agent': 'User-Agent',
+    'sec-ch-ua': 'sec-ch-ua',
+    'sec-ch-ua-mobile': 'sec-ch-ua-mobile',
+    'sec-ch-ua-platform': 'sec-ch-ua-platform',
+    cookie: 'Cookie'
+};
 
 function nowText() {
     const d = new Date();
@@ -191,16 +206,33 @@ function normalizeUhaozuHeaders(raw = {}, fallback = {}) {
     return out;
 }
 
+function normalizeUhaozuOrderDetailHeaders(raw = {}, fallback = {}) {
+    const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const out = { ...(fallback && typeof fallback === 'object' ? fallback : {}) };
+    for (const [key, value] of Object.entries(src)) {
+        const name = UHAOZU_ORDER_DETAIL_HEADER_NAME_MAP[String(key || '').trim().toLowerCase()];
+        if (!name) continue;
+        const text = String(value || '').trim();
+        if (!text) continue;
+        out[name] = text;
+    }
+    return out;
+}
+
 function normalizeUhaozuAuthPayloadForStorage(payloadObj = {}) {
     const raw = payloadObj && typeof payloadObj === 'object' && !Array.isArray(payloadObj) ? payloadObj : {};
     const cookie = String(raw.cookie || '').trim();
     const defaultHeaders = normalizeUhaozuHeaders(raw.default_headers, UHAOZU_DEFAULT_HEADERS);
     const legacyOrderHeaders = normalizeUhaozuHeaders(raw.order_headers);
     const mergedHeaders = normalizeUhaozuHeaders(legacyOrderHeaders, defaultHeaders);
+    const orderDetailHeaders = normalizeUhaozuOrderDetailHeaders(raw.order_detail_headers);
     const out = {
         cookie,
         default_headers: mergedHeaders
     };
+    if (Object.keys(orderDetailHeaders).length > 0) {
+        out.order_detail_headers = orderDetailHeaders;
+    }
     const orderListPath = String(raw.order_list_path || '').trim();
     if (orderListPath) out.order_list_path = orderListPath;
     return out;

@@ -15,6 +15,7 @@ const { initOrderSyncDb } = require('./order_sync_db');
 const { initOrderStatsDailyDb } = require('./order_stats_daily_db');
 const { initOrderStatsJobStateDb } = require('./order_stats_job_state_db');
 const { initOrderComplaintDb } = require('./order_complaint_db');
+const { initOrderDetailDb } = require('./order_detail_db');
 const { initLockDb } = require('./lock_db');
 
 function run(db, sql, params = []) {
@@ -47,6 +48,7 @@ async function main() {
     await initOrderStatsDailyDb();
     await initOrderStatsJobStateDb();
     await initOrderComplaintDb();
+    await initOrderDetailDb();
     await initLockDb();
 
     const mainDb = openMainDatabase();

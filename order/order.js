@@ -5,9 +5,17 @@ const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const {
     initOrderDb,
     upsertOrder,
+    getOrderByKey,
+    updateOrderRecAmount,
     listTodayPaidOrderCountByAccounts,
     listRolling24hPaidOrderCountByAccounts
 } = require('../database/order_db');
+const {
+    initOrderDetailDb,
+    upsertOrderDetail,
+    getOrderDetailByOrder,
+    listPendingUhaozuOrderDetailsByUser
+} = require('../database/order_detail_db');
 const { getLastSyncTimestamp, setLastSyncTimestamp } = require('../database/order_sync_db');
 const { getUserRuleByName } = require('../database/user_rule_db');
 const {
@@ -21,7 +29,7 @@ const { initOrderComplaintDb, upsertOrderComplaint, getOrderComplaintByOrder } =
 const { sendDingdingMessage, resolveDingdingAtOptions } = require('../report/dingding/ding_notify');
 const { buildComplaintFirstHitText } = require('../report/dingding/ding_style');
 const { listAllOrders, getOrderDetail } = require('../uuzuhao/uuzuhao_api');
-const { listAllOrderPages } = require('../uhaozu/uhaozu_api');
+const { listAllOrderPages, getOrderDetailPage, parseUhaozuOrderDetailHtml } = require('../uhaozu/uhaozu_api');
 const { getOrderListByEncryptedPayload } = require('../zuhaowang/zuhaowang_api');
 const { listAllUserGameAccountsByUser } = require('../product/product');
 const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('../database/user_db');
@@ -332,6 +340,27 @@ async function getOrderComplaintDetailByUser(userId, options = {}) {
     return getOrderComplaintByOrder(uid, channel, orderNo);
 }
 
+async function getOrderDetailViewByUser(userId, options = {}) {
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+    const channel = String(options.channel || '').trim().toLowerCase();
+    const orderNo = String(options.order_no || options.orderNo || '').trim();
+    if (!channel) throw new Error('channel 不能为空');
+    if (!orderNo) throw new Error('order_no 不能为空');
+    const order = await getOrderByKey(uid, channel, orderNo);
+    let detail = await getOrderDetailByOrder(uid, channel, orderNo);
+    if (!detail && channel === CHANNEL_UHAOZU && shouldSyncUhaozuOrderDetailByStatus(order && order.order_status)) {
+        try {
+            detail = await fetchAndStoreUhaozuOrderDetailByOrder(uid, orderNo, {
+                desc: 'fetch on demand by h5 order detail'
+            });
+        } catch (e) {
+            console.warn(`[OrderSync][uhaozu][detail_on_demand] user_id=${uid} order_no=${orderNo} failed=${String(e && e.message ? e.message : e)}`);
+        }
+    }
+    return { order, detail };
+}
+
 function shouldTriggerOrderSyncNow(options = {}) {
     const now = options.now instanceof Date ? options.now : new Date();
     const intervalMin = Math.max(1, Number(options.interval_min || 5));
@@ -413,6 +442,98 @@ function normalizeOrderPlatform(platform) {
     if (p === CHANNEL_UHAOZU) return CHANNEL_UHAOZU;
     if (p === CHANNEL_ZHW || p === CHANNEL_ZHW_YUANBAO) return CHANNEL_ZHW;
     return '';
+}
+
+function shouldSyncUhaozuOrderDetailByStatus(status) {
+    const text = String(status || '').trim();
+    return text === '已完成' || text === '部分完成';
+}
+
+async function fetchAndStoreUhaozuOrderDetailByOrder(userId, orderNo, options = {}) {
+    const uid = Number(userId || 0);
+    const no = String(orderNo || '').trim();
+    if (!uid) throw new Error('user_id 不合法');
+    if (!no) throw new Error('order_no 不能为空');
+    const order = await getOrderByKey(uid, CHANNEL_UHAOZU, no);
+    if (!order) throw new Error('订单不存在');
+    if (!shouldSyncUhaozuOrderDetailByStatus(order.order_status)) {
+        throw new Error('当前订单状态无需拉取详情');
+    }
+    const auth = await resolveUhaozuAuthByUser(uid);
+    const html = await getOrderDetailPage(no, auth);
+    const detail = parseUhaozuOrderDetailHtml(html);
+    await upsertOrderDetail({
+        user_id: uid,
+        channel: CHANNEL_UHAOZU,
+        order_no: no,
+        order_detail_no: no,
+        detail_status: detail.detail_status,
+        actual_rent_amount: detail.actual_rent_amount,
+        service_fee_amount: detail.service_fee_amount,
+        net_rent_amount: detail.net_rent_amount,
+        complete_time: detail.complete_time,
+        complaint_result_text: detail.complaint_result_text,
+        detail_html: html,
+        detail_snapshot: detail,
+        detail_query_time: toDateTimeText(new Date()),
+        desc: String(options.desc || 'fetch single uhaozu order detail').trim()
+    });
+    if (Number.isFinite(Number(detail.net_rent_amount))) {
+        await updateOrderRecAmount(uid, CHANNEL_UHAOZU, no, Number(detail.net_rent_amount), 'rewrite rec_amount by uhaozu order detail');
+    }
+    return getOrderDetailByOrder(uid, CHANNEL_UHAOZU, no);
+}
+
+async function syncUhaozuCompletedOrderDetails(userId, auth, orderNos = [], options = {}) {
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+    await initOrderDetailDb();
+    const pendingRows = await listPendingUhaozuOrderDetailsByUser(uid, orderNos);
+    let fetched = 0;
+    let updated = 0;
+    let recAmountRewritten = 0;
+    let failed = 0;
+    for (const row of pendingRows) {
+        const orderNo = String(row.order_no || '').trim();
+        if (!orderNo) continue;
+        try {
+            const html = await getOrderDetailPage(orderNo, auth);
+            const detail = parseUhaozuOrderDetailHtml(html);
+            await upsertOrderDetail({
+                user_id: uid,
+                channel: CHANNEL_UHAOZU,
+                order_no: orderNo,
+                order_detail_no: orderNo,
+                detail_status: detail.detail_status,
+                actual_rent_amount: detail.actual_rent_amount,
+                service_fee_amount: detail.service_fee_amount,
+                net_rent_amount: detail.net_rent_amount,
+                complete_time: detail.complete_time,
+                complaint_result_text: detail.complaint_result_text,
+                detail_html: html,
+                detail_snapshot: detail,
+                detail_query_time: toDateTimeText(new Date()),
+                desc: String(options.desc || 'sync by order/uhaozu detail').trim()
+            });
+            fetched += 1;
+            updated += 1;
+            if (Number.isFinite(Number(detail.net_rent_amount))) {
+                await updateOrderRecAmount(uid, CHANNEL_UHAOZU, orderNo, Number(detail.net_rent_amount), 'rewrite rec_amount by uhaozu order detail');
+                recAmountRewritten += 1;
+            }
+        } catch (e) {
+            failed += 1;
+            console.warn(`[OrderSync][uhaozu][detail] user_id=${uid} order_no=${orderNo} failed=${String(e && e.message ? e.message : e)}`);
+        }
+    }
+    console.log(`[OrderSync][uhaozu][detail] user_id=${uid} pending=${pendingRows.length} fetched=${fetched} updated=${updated} rec_rewritten=${recAmountRewritten} failed=${failed}`);
+    return {
+        pending: pendingRows.length,
+        fetched,
+        updated,
+        rec_amount_rewritten: recAmountRewritten,
+        failed
+    };
 }
 
 async function listAuthorizedOrderPlatforms(userId) {
@@ -954,6 +1075,7 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
     let upserted = 0;
     let linked = 0;
     let unlinked = 0;
+    const completedOrderNos = [];
     for (const raw of orderList) {
         const goodsId = String(raw.goodsId || '').trim();
         const ref = productIndex.get(goodsId) || { game_account: '', role_name: '' };
@@ -966,8 +1088,12 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
             ...mapped,
             desc: String(options.desc || 'sync by order/uhaozu')
         });
+        if (shouldSyncUhaozuOrderDetailByStatus(mapped.order_status)) completedOrderNos.push(mapped.order_no);
         upserted += 1;
     }
+    const detailSync = await syncUhaozuCompletedOrderDetails(uid, auth, completedOrderNos, {
+        desc: String(options.desc || 'sync by order/uhaozu detail')
+    });
     await setLastSyncTimestamp(uid, CHANNEL_UHAOZU, nowSec, 'order sync watermark');
     console.log(`[OrderSync][uhaozu] user_id=${uid} upserted=${upserted} linked=${linked} unlinked=${unlinked} set_last_sync_ts=${nowSec}`);
 
@@ -985,6 +1111,7 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
         upserted,
         linked,
         unlinked,
+        detail_sync: detailSync,
         mapping: UHAOZU_ORDER_FIELD_MAPPING
     };
 }
@@ -1309,6 +1436,7 @@ module.exports = {
     syncOrdersForAllUsers,
     listOrdersForUser,
     getOrderComplaintDetailByUser,
+    getOrderDetailViewByUser,
     resolveUuzuhaoAuthByUser,
     resolveUhaozuAuthByUser,
     resolveZuhaowangAuthByUser,

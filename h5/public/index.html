@@ -84,6 +84,13 @@
       <div id="orderComplaintContainer"></div>
     </section>
 
+    <section id="orderDetailView" class="hidden order-complaint-view">
+      <div class="order-complaint-head">
+        <button id="orderDetailBackBtn" class="btn btn-ghost">返回订单列表</button>
+      </div>
+      <div id="orderDetailContainer"></div>
+    </section>
+
     <section id="statsView" class="hidden stats-view">
       <div id="statsGameTabs" class="stats-game-tabs"></div>
       <div id="statsPeriods" class="stats-periods"></div>
@@ -348,13 +355,22 @@
         </div>
         <div id="authUhaozuResult" class="sheet-result"></div>
       </div>
-      <p class="auth-uuzuhao-hint">请粘贴浏览器复制出的完整 U号租 curl。程序会提取用户级请求头和授权 Cookie，并用于该用户的全部 U号租请求。</p>
+      <p class="auth-uuzuhao-hint">请粘贴浏览器复制出的完整 U号租 curl。订单列表 curl 用于保存基础授权；订单详情 curl 会额外保存到详情专用请求头，并用于拉取订单详情页。</p>
       <div class="field" style="margin-top:0;">
-        <label for="authUhaozuCurl">完整 curl</label>
-        <textarea id="authUhaozuCurl" class="auth-curl-textarea" rows="8" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="请粘贴完整 curl 命令"></textarea>
+        <label for="authUhaozuCurl">订单列表 curl</label>
+        <textarea id="authUhaozuCurl" class="auth-curl-textarea" rows="8" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="请粘贴 U号租订单列表的完整 curl"></textarea>
+        <div class="sheet-actions sheet-actions-inline">
+          <button id="authUhaozuMainSaveBtn" class="sheet-btn">保存订单列表授权</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="authUhaozuDetailCurl">订单详情 curl</label>
+        <textarea id="authUhaozuDetailCurl" class="auth-curl-textarea" rows="8" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="可选：请粘贴 U号租订单详情页的完整 curl"></textarea>
+        <div class="sheet-actions sheet-actions-inline">
+          <button id="authUhaozuDetailSaveBtn" class="sheet-btn">保存订单详情授权</button>
+        </div>
       </div>
       <div class="sheet-actions">
-        <button id="authUhaozuSaveBtn" class="sheet-btn">保存</button>
         <button id="authUhaozuCloseBtn" class="sheet-btn">关闭抽屉</button>
       </div>
     </div>

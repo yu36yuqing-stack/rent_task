@@ -1479,6 +1479,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/products/sync') return await handleProductSyncNow(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/orders') return await handleOrders(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/orders/complaint') return await orderBff.handleGetOrderComplaint(req, res, urlObj);
+            if (req.method === 'GET' && urlObj.pathname === '/api/orders/detail') return await orderBff.handleGetOrderDetail(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/orders/sync') return await handleOrderSyncNow(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/dashboard') return await handleStatsDashboard(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/calendar') return await handleStatsCalendar(req, res, urlObj);

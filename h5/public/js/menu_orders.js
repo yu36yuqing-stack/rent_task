@@ -177,6 +177,30 @@
       render();
     }
 
+    async function openOrderDetailView(channel, orderNo, order) {
+      state.orders.detail_view = {
+        open: true,
+        loading: true,
+        error: '',
+        order_no: orderNo,
+        channel,
+        order: order || null,
+        detail: null
+      };
+      history.pushState({ h5_sub_view: 'order_detail', channel, order_no: orderNo }, '', window.location.href);
+      render();
+      try {
+        const out = await request(`/api/orders/detail?channel=${encodeURIComponent(channel)}&order_no=${encodeURIComponent(orderNo)}`);
+        state.orders.detail_view.loading = false;
+        state.orders.detail_view.order = out && out.data ? out.data.order : (order || null);
+        state.orders.detail_view.detail = out && out.data ? out.data.detail : null;
+      } catch (e) {
+        state.orders.detail_view.loading = false;
+        state.orders.detail_view.error = String(e && e.message ? e.message : '订单详情拉取失败');
+      }
+      render();
+    }
+
     function renderOrderComplaintView() {
       const c = (state.orders && state.orders.complaint_detail) || {};
       if (!els.orderComplaintContainer) return;
@@ -415,6 +439,57 @@
       }
     }
 
+    function renderOrderDetailView() {
+      const c = (state.orders && state.orders.detail_view) || {};
+      if (!els.orderDetailContainer) return;
+      if (els.orderDetailBackBtn) {
+        els.orderDetailBackBtn.onclick = () => {
+          if (window.history.length > 1) {
+            window.history.back();
+            return;
+          }
+          state.orders.detail_view.open = false;
+          render();
+        };
+      }
+      if (c.loading) {
+        els.orderDetailContainer.innerHTML = '<div class="panel"><div style="color:#6d7a8a;font-size:13px;">订单详情加载中...</div></div>';
+        return;
+      }
+      if (c.error) {
+        els.orderDetailContainer.innerHTML = `<div class="panel"><div style="color:#bb2d3b;font-size:13px;">${textOrDash(c.error)}</div></div>`;
+        return;
+      }
+      if (!c.detail || !c.order) {
+        els.orderDetailContainer.innerHTML = '<div class="panel"><div style="color:#6d7a8a;font-size:13px;">该订单暂无详情</div></div>';
+        return;
+      }
+      const order = c.order || {};
+      const detail = c.detail || {};
+      const snapshot = detail.detail_snapshot && typeof detail.detail_snapshot === 'object' ? detail.detail_snapshot : {};
+      const netAmount = Number(detail.net_rent_amount || snapshot.net_rent_amount || 0);
+      const actualAmount = Number(detail.actual_rent_amount || snapshot.actual_rent_amount || 0);
+      const feeAmount = Number(detail.service_fee_amount || snapshot.service_fee_amount || 0);
+      els.orderDetailContainer.innerHTML = `
+        <div class="order-complaint-card">
+          <p class="order-complaint-title">订单详情</p>
+          <div class="order-complaint-grid">
+            <div class="order-complaint-row"><span class="order-complaint-label">订单号</span><span class="order-complaint-value">${textOrDash(order.order_no)}</span></div>
+            <div class="order-complaint-row"><span class="order-complaint-label">渠道</span><span class="order-complaint-value">${textOrDash(order.channel)}</span></div>
+            <div class="order-complaint-row"><span class="order-complaint-label">订单状态</span><span class="order-complaint-value">${textOrDash(detail.detail_status || order.order_status)}</span></div>
+            <div class="order-complaint-row"><span class="order-complaint-label">角色</span><span class="order-complaint-value">${textOrDash(order.role_name || order.game_account)}</span></div>
+            <div class="order-complaint-row"><span class="order-complaint-label">订单金额</span><span class="order-complaint-value">¥${Number(order.order_amount || 0).toFixed(2)}</span></div>
+            <div class="order-complaint-row"><span class="order-complaint-label">实收租金</span><span class="order-complaint-value">¥${actualAmount.toFixed(2)}</span></div>
+            <div class="order-complaint-row"><span class="order-complaint-label">订单手续费</span><span class="order-complaint-value">¥${feeAmount.toFixed(2)}</span></div>
+            <div class="order-complaint-row"><span class="order-complaint-label">结余租金</span><span class="order-complaint-value">¥${netAmount.toFixed(2)}</span></div>
+            <div class="order-complaint-row"><span class="order-complaint-label">完成时间</span><span class="order-complaint-value">${textOrDash(detail.complete_time)}</span></div>
+            <div class="order-complaint-row"><span class="order-complaint-label">详情抓取时间</span><span class="order-complaint-value">${textOrDash(detail.detail_query_time)}</span></div>
+            <div class="order-complaint-row order-complaint-row-full"><span class="order-complaint-label">处理结果</span><span class="order-complaint-value">${textOrDash(detail.complaint_result_text)}</span></div>
+          </div>
+        </div>
+      `;
+    }
+
     function renderOrdersView() {
       const o = state.orders || {};
       if (o.countdown_timer_id) {
@@ -474,6 +549,9 @@
               <span class="order-id-label">No.${item.order_no || '-'}</span>
               <button class="order-copy-btn" data-order-copy="${item.order_no || ''}">复制</button>
               ${item.has_complaint ? `<button class="order-complaint-btn" data-order-complaint="${item.order_no || ''}" data-order-channel="${item.channel || ''}">投诉详情</button>` : ''}
+              ${(String(item.channel || '').trim().toLowerCase() === 'uhaozu' && (String(item.order_status || '').trim() === '已完成' || String(item.order_status || '').trim() === '部分完成'))
+                ? `<button class="order-complaint-btn" data-order-detail="${item.order_no || ''}" data-order-detail-channel="${item.channel || ''}">查看详情</button>`
+                : ''}
             </div>
             <div class="order-card-line">${formatOrderTimeRange(item)}</div>
             <div class="order-card-line">渠道：${item.channel || '-'} · 账号：${item.game_account || '-'}</div>
@@ -503,6 +581,20 @@
               return String(x.order_no || '').trim() === orderNo && String(x.channel || '').trim().toLowerCase() === channel;
             }) || null;
             await openOrderComplaintDetail(channel, orderNo, order);
+          });
+        });
+        Array.from(els.orderListContainer.querySelectorAll('[data-order-detail]')).forEach((n) => {
+          n.addEventListener('click', async () => {
+            const orderNo = String(n.getAttribute('data-order-detail') || '').trim();
+            const channel = String(n.getAttribute('data-order-detail-channel') || '').trim().toLowerCase();
+            if (!orderNo || !channel) {
+              showToast('订单参数不完整');
+              return;
+            }
+            const order = (Array.isArray(o.list) ? o.list : []).find((x) => {
+              return String(x.order_no || '').trim() === orderNo && String(x.channel || '').trim().toLowerCase() === channel;
+            }) || null;
+            await openOrderDetailView(channel, orderNo, order);
           });
         });
       }
@@ -549,6 +641,11 @@
 
     window.addEventListener('popstate', () => {
       if (state.currentMenu !== 'orders') return;
+      if (state.orders && state.orders.detail_view && state.orders.detail_view.open) {
+        state.orders.detail_view.open = false;
+        render();
+        return;
+      }
       if (state.orders && state.orders.complaint_detail && state.orders.complaint_detail.open) {
         state.orders.complaint_detail.preview_image_url = '';
         state.orders.complaint_detail.open = false;

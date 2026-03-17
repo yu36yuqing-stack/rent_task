@@ -31,6 +31,21 @@ const UHAOZU_HEADER_NAME_MAP = {
     pragma: 'Pragma',
     connection: 'Connection'
 };
+const UHAOZU_ORDER_DETAIL_HEADER_NAME_MAP = {
+    accept: 'Accept',
+    'accept-language': 'Accept-Language',
+    connection: 'Connection',
+    'sec-fetch-dest': 'Sec-Fetch-Dest',
+    'sec-fetch-mode': 'Sec-Fetch-Mode',
+    'sec-fetch-site': 'Sec-Fetch-Site',
+    'sec-fetch-user': 'Sec-Fetch-User',
+    'upgrade-insecure-requests': 'Upgrade-Insecure-Requests',
+    'user-agent': 'User-Agent',
+    'sec-ch-ua': 'sec-ch-ua',
+    'sec-ch-ua-mobile': 'sec-ch-ua-mobile',
+    'sec-ch-ua-platform': 'sec-ch-ua-platform',
+    cookie: 'Cookie'
+};
 
 function normalizeHeaderOverrides(raw = {}) {
     const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
@@ -54,6 +69,19 @@ function buildDefaultHeaders(cookie, auth = {}) {
 
 function buildOrderHeaders(cookie, auth = {}) {
     return buildDefaultHeaders(cookie, auth);
+}
+
+function normalizeOrderDetailHeaderOverrides(raw = {}) {
+    const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const out = {};
+    for (const [key, value] of Object.entries(src)) {
+        const name = UHAOZU_ORDER_DETAIL_HEADER_NAME_MAP[String(key || '').trim().toLowerCase()];
+        if (!name) continue;
+        const text = String(value || '').trim();
+        if (!text) continue;
+        out[name] = text;
+    }
+    return out;
 }
 
 function resolveAuth(auth = {}) {
@@ -97,6 +125,87 @@ async function requestJson(url, options = {}, timeoutMs = DEFAULT_UHAOZU_TIMEOUT
     } finally {
         clearTimeout(timer);
     }
+}
+
+async function requestText(url, options = {}, timeoutMs = DEFAULT_UHAOZU_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(url, { ...options, signal: controller.signal });
+        const text = await res.text();
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+        }
+        return text;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+function buildOrderDetailHeaders(cookie, auth = {}) {
+    const defaultHeaders = normalizeHeaderOverrides(auth.default_headers);
+    const detailHeaders = normalizeOrderDetailHeaderOverrides(auth.order_detail_headers);
+    return {
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': defaultHeaders['Accept-Language'] || 'zh-CN,zh;q=0.9',
+        Connection: 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-User': '?1',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Site': 'none',
+        'User-Agent': defaultHeaders['User-Agent'] || 'Mozilla/5.0',
+        'sec-ch-ua': defaultHeaders['sec-ch-ua'] || '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
+        'sec-ch-ua-mobile': defaultHeaders['sec-ch-ua-mobile'] || '?0',
+        'sec-ch-ua-platform': defaultHeaders['sec-ch-ua-platform'] || '"macOS"',
+        ...detailHeaders,
+        Cookie: detailHeaders.Cookie || cookie
+    };
+}
+
+function stripHtml(value = '') {
+    return String(value || '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function extractFirstAmountByLabel(html, label) {
+    const re = new RegExp(`<label>\\s*${label}\\s*：\\s*<\\/label>[\\s\\S]*?<span>[\\s\\S]*?<em[^>]*>([-+]?\\d+(?:\\.\\d+)?)<\\/em>`, 'i');
+    const m = String(html || '').match(re);
+    return m ? Number(m[1]) : 0;
+}
+
+function extractFirstTextByLabel(html, label) {
+    const re = new RegExp(`<label>\\s*${label}\\s*：\\s*<\\/label>\\s*<span>([\\s\\S]*?)<\\/span>`, 'i');
+    const m = String(html || '').match(re);
+    return m ? stripHtml(m[1]) : '';
+}
+
+function normalizePartialDateTime(value = '', baseDateText = '') {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    if (/^\d{4}-\d{2}-\d{2} /.test(text)) return text.slice(0, 19);
+    const baseYear = String(baseDateText || '').slice(0, 4) || String(new Date().getFullYear());
+    if (/^\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) return `${baseYear}-${text}`;
+    return text;
+}
+
+function parseUhaozuOrderDetailHtml(html = '') {
+    const src = String(html || '');
+    const detailStatus = stripHtml((src.match(/<span class="order-status">[\s\S]*?<span class="gray">([\s\S]*?)<\/span>/i) || [])[1] || '');
+    const createDate = extractFirstTextByLabel(src, '创建时间');
+    const completeTime = normalizePartialDateTime(extractFirstTextByLabel(src, '完成时间'), createDate);
+    const complaintResultText = stripHtml((src.match(/<span>\s*处理结果：<\/span>\s*<em[^>]*>([\s\S]*?)<\/em>/i) || [])[1] || '');
+    return {
+        detail_status: detailStatus,
+        actual_rent_amount: extractFirstAmountByLabel(src, '实收租金'),
+        service_fee_amount: extractFirstAmountByLabel(src, '订单手续费'),
+        net_rent_amount: extractFirstAmountByLabel(src, '结余租金'),
+        complete_time: completeTime,
+        complaint_result_text: complaintResultText
+    };
 }
 
 function isApiSuccess(json) {
@@ -301,6 +410,17 @@ async function listOrderPage(pageNum = 1, pageSize = 30, overrides = {}, auth = 
         throw new Error(`U号租订单接口返回计数对象而非列表，请确认 order_list_path。当前 path=${path}`);
     }
     return json;
+}
+
+async function getOrderDetailPage(orderDetailNo, auth = {}) {
+    const cfg = resolveAuth(auth);
+    const no = String(orderDetailNo || '').trim();
+    if (!no) throw new Error('order_detail_no 不能为空');
+    const url = `https://www.uhaozu.com/order/usercenter/sellerOrderAccount/${encodeURIComponent(no)}`;
+    return requestText(url, {
+        method: 'GET',
+        headers: buildOrderDetailHeaders(cfg.cookie, cfg)
+    }, cfg.timeout_ms);
 }
 
 async function listAllOrderPages(pageSize = 30, overrides = {}, auth = {}) {
@@ -648,11 +768,14 @@ module.exports = {
     uhaozuOnShelf,
     listOrderPage,
     listAllOrderPages,
+    getOrderDetailPage,
+    parseUhaozuOrderDetailHtml,
 
     // 便于单测/诊断
     _internals: {
         formatV,
         requestJson,
+        requestText,
         isApiSuccess,
         mapStatus,
         normalizeText,
@@ -673,7 +796,9 @@ module.exports = {
         callUnshelf,
         callShelf,
         buildOrderHeaders,
+        buildOrderDetailHeaders,
         buildOrderListPayload,
-        extractOrderListAndMeta
+        extractOrderListAndMeta,
+        parseUhaozuOrderDetailHtml
     }
 };

@@ -124,6 +124,15 @@
           order: null,
           data: null,
           preview_image_url: ''
+        },
+        detail_view: {
+          open: false,
+          loading: false,
+          error: '',
+          order_no: '',
+          channel: '',
+          order: null,
+          detail: null
         }
       },
       statsBoard: {
@@ -154,7 +163,8 @@
         loading: false
       },
       authManage: {
-        channels: []
+        channels: [],
+        rows: []
       },
       authEditor: {
         open: false,
@@ -167,7 +177,7 @@
         open: false,
         platform: '',
         title: '',
-        saving: false,
+        saving: '',
         error: ''
       },
       userRules: {
@@ -312,6 +322,9 @@
       riskPageInfo: document.getElementById('riskPageInfo'),
       orderComplaintBackBtn: document.getElementById('orderComplaintBackBtn'),
       orderComplaintContainer: document.getElementById('orderComplaintContainer'),
+      orderDetailView: document.getElementById('orderDetailView'),
+      orderDetailBackBtn: document.getElementById('orderDetailBackBtn'),
+      orderDetailContainer: document.getElementById('orderDetailContainer'),
       orderPrevPage: document.getElementById('orderPrevPage'),
       orderNextPage: document.getElementById('orderNextPage'),
       orderPageInfo: document.getElementById('orderPageInfo'),
@@ -389,7 +402,9 @@
       authUhaozuTitle: document.getElementById('authUhaozuTitle'),
       authUhaozuResult: document.getElementById('authUhaozuResult'),
       authUhaozuCurl: document.getElementById('authUhaozuCurl'),
-      authUhaozuSaveBtn: document.getElementById('authUhaozuSaveBtn'),
+      authUhaozuDetailCurl: document.getElementById('authUhaozuDetailCurl'),
+      authUhaozuMainSaveBtn: document.getElementById('authUhaozuMainSaveBtn'),
+      authUhaozuDetailSaveBtn: document.getElementById('authUhaozuDetailSaveBtn'),
       authUhaozuCloseBtn: document.getElementById('authUhaozuCloseBtn'),
       globalLoading: document.getElementById('globalLoading')
     };
@@ -519,10 +534,15 @@
       const opened = Boolean(state.authCookieEditor && state.authCookieEditor.open);
       if (!els.authUhaozuSheet) return;
       els.authUhaozuSheet.classList.toggle('hidden', !opened);
-      if (els.authUhaozuSaveBtn) {
-        const saving = Boolean(state.authCookieEditor && state.authCookieEditor.saving);
-        els.authUhaozuSaveBtn.disabled = saving;
-        els.authUhaozuSaveBtn.textContent = saving ? '保存中...' : '保存';
+      if (els.authUhaozuMainSaveBtn) {
+        const savingMain = String((state.authCookieEditor && state.authCookieEditor.saving) || '') === 'main';
+        els.authUhaozuMainSaveBtn.disabled = Boolean(state.authCookieEditor && state.authCookieEditor.saving);
+        els.authUhaozuMainSaveBtn.textContent = savingMain ? '保存中...' : '保存订单列表授权';
+      }
+      if (els.authUhaozuDetailSaveBtn) {
+        const savingDetail = String((state.authCookieEditor && state.authCookieEditor.saving) || '') === 'detail';
+        els.authUhaozuDetailSaveBtn.disabled = Boolean(state.authCookieEditor && state.authCookieEditor.saving);
+        els.authUhaozuDetailSaveBtn.textContent = savingDetail ? '保存中...' : '保存订单详情授权';
       }
       if (els.authUhaozuResult) {
         const msg = String((state.authCookieEditor && state.authCookieEditor.error) || '').trim();
@@ -540,35 +560,53 @@
         open: false,
         platform: '',
         title: '',
-        saving: false,
+        saving: '',
         error: ''
       };
       if (els.authUhaozuCurl) els.authUhaozuCurl.value = '';
+      if (els.authUhaozuDetailCurl) els.authUhaozuDetailCurl.value = '';
       renderAuthUhaozuSheet();
     }
 
     function openAuthUhaozuSheet(channel) {
       const authorized = Boolean(channel && channel.authorized);
+      const rows = (state.authManage && Array.isArray(state.authManage.rows)) ? state.authManage.rows : [];
+      const row = rows.find((item) => String((item && item.platform) || '').trim() === 'uhaozu') || null;
+      const payload = row && row.auth_payload && typeof row.auth_payload === 'object' ? row.auth_payload : {};
       state.authCookieEditor = {
         open: true,
         platform: 'uhaozu',
         title: authorized ? '修改U号租授权' : '新增U号租授权',
-        saving: false,
+        saving: '',
         error: ''
       };
-      if (els.authUhaozuCurl) els.authUhaozuCurl.value = '';
+      if (els.authUhaozuCurl) {
+        const mainPayload = {};
+        if (payload.cookie) mainPayload.cookie = payload.cookie;
+        if (payload.default_headers && typeof payload.default_headers === 'object') mainPayload.default_headers = payload.default_headers;
+        if (payload.order_list_path) mainPayload.order_list_path = payload.order_list_path;
+        els.authUhaozuCurl.value = Object.keys(mainPayload).length ? JSON.stringify(mainPayload, null, 2) : '';
+      }
+      if (els.authUhaozuDetailCurl) {
+        const detailPayload = payload.order_detail_headers && typeof payload.order_detail_headers === 'object'
+          ? payload.order_detail_headers
+          : {};
+        els.authUhaozuDetailCurl.value = Object.keys(detailPayload).length ? JSON.stringify(detailPayload, null, 2) : '';
+      }
       renderAuthUhaozuSheet();
     }
 
-    async function submitAuthUhaozu() {
+    async function submitAuthUhaozu(target) {
       if (!state.authCookieEditor || state.authCookieEditor.saving) return;
-      const curl = String((els.authUhaozuCurl && els.authUhaozuCurl.value) || '').trim();
-      if (!curl) {
-        state.authCookieEditor.error = 'curl 不能为空';
+      const mode = String(target || '').trim() === 'detail' ? 'detail' : 'main';
+      const curl = mode === 'main' ? String((els.authUhaozuCurl && els.authUhaozuCurl.value) || '').trim() : '';
+      const orderDetailCurl = mode === 'detail' ? String((els.authUhaozuDetailCurl && els.authUhaozuDetailCurl.value) || '').trim() : '';
+      if (!curl && !orderDetailCurl) {
+        state.authCookieEditor.error = mode === 'main' ? '请输入订单列表 curl' : '请输入订单详情 curl';
         renderAuthUhaozuSheet();
         return;
       }
-      state.authCookieEditor.saving = true;
+      state.authCookieEditor.saving = mode;
       state.authCookieEditor.error = '';
       renderAuthUhaozuSheet();
       try {
@@ -577,15 +615,16 @@
           body: JSON.stringify({
             platform: 'uhaozu',
             curl,
+            order_detail_curl: orderDetailCurl,
             desc: 'h5 uhaozu curl auth upsert'
           })
         });
         await loadAuthManage();
         render();
         closeAuthUhaozuSheet();
-        showToast('U号租授权已保存');
+        showToast(mode === 'main' ? '订单列表授权已保存' : '订单详情授权已保存');
       } catch (e) {
-        state.authCookieEditor.saving = false;
+        state.authCookieEditor.saving = '';
         state.authCookieEditor.error = e.message || '授权保存失败';
         renderAuthUhaozuSheet();
       }
@@ -831,9 +870,10 @@
     }
 
     async function loadAuthManage() {
-      const data = await request('/api/auth/platforms');
+      const data = await request('/api/auth/platforms?with_payload=1');
       const channels = Array.isArray(data.data) ? data.data : [];
-      state.authManage = { channels };
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      state.authManage = { channels, rows };
     }
 
     async function loadOrderOffThresholdRule() {
@@ -927,14 +967,16 @@
       const showProducts = loggedIn && state.currentMenu === 'products';
       const showOrders = loggedIn && state.currentMenu === 'orders';
       const showOrderComplaint = showOrders && Boolean(state.orders && state.orders.complaint_detail && state.orders.complaint_detail.open);
+      const showOrderDetail = showOrders && Boolean(state.orders && state.orders.detail_view && state.orders.detail_view.open);
       const showRisk = loggedIn && state.currentMenu === 'risk';
       const showStats = loggedIn && state.currentMenu === 'stats';
       const showAuth = loggedIn && state.currentMenu === 'auth';
       const showProfile = loggedIn && state.currentMenu === 'profile';
       els.listView.classList.toggle('hidden', !showProducts);
-      els.orderView.classList.toggle('hidden', !showOrders || showOrderComplaint);
+      els.orderView.classList.toggle('hidden', !showOrders || showOrderComplaint || showOrderDetail);
       if (els.riskView) els.riskView.classList.toggle('hidden', !showRisk);
       if (els.orderComplaintView) els.orderComplaintView.classList.toggle('hidden', !showOrderComplaint);
+      if (els.orderDetailView) els.orderDetailView.classList.toggle('hidden', !showOrderDetail);
       els.statsView.classList.toggle('hidden', !showStats);
       els.authView.classList.toggle('hidden', !showAuth);
       if (els.profileView) els.profileView.classList.toggle('hidden', !showProfile);
@@ -965,7 +1007,8 @@
         }
         if (showProducts) renderList();
         if (showOrders && showOrderComplaint) renderOrderComplaintView();
-        if (showOrders && !showOrderComplaint) renderOrdersView();
+        if (showOrders && showOrderDetail) renderOrderDetailView();
+        if (showOrders && !showOrderComplaint && !showOrderDetail) renderOrdersView();
         if (showRisk) renderRiskCenterView();
         if (showStats) renderStatsView();
         if (showAuth) renderAuthView();
@@ -1071,12 +1114,12 @@
         list: [],
         loading: false
       };
-      state.authManage = { channels: [] };
+      state.authManage = { channels: [], rows: [] };
       state.authEditor = {
         open: false,
         platform: '',
         title: '',
-        saving: false,
+        saving: '',
         error: ''
       };
       state.authCookieEditor = {
@@ -1105,6 +1148,7 @@
       };
       state.orders.syncing = false;
       state.orders.complaint_detail = { open: false, loading: false, error: '', order_no: '', channel: '', order: null, data: null, preview_image_url: '' };
+      state.orders.detail_view = { open: false, loading: false, error: '', order_no: '', channel: '', order: null, detail: null };
       render();
     });
 
@@ -1331,8 +1375,11 @@
         if (e.target === els.authUuzuhaoSheet) closeAuthUuzuhaoSheet();
       });
     }
-    if (els.authUhaozuSaveBtn) {
-      els.authUhaozuSaveBtn.addEventListener('click', () => submitAuthUhaozu());
+    if (els.authUhaozuMainSaveBtn) {
+      els.authUhaozuMainSaveBtn.addEventListener('click', () => submitAuthUhaozu('main'));
+    }
+    if (els.authUhaozuDetailSaveBtn) {
+      els.authUhaozuDetailSaveBtn.addEventListener('click', () => submitAuthUhaozu('detail'));
     }
     if (els.authUhaozuCloseBtn) {
       els.authUhaozuCloseBtn.addEventListener('click', () => closeAuthUhaozuSheet());
@@ -1407,6 +1454,7 @@
         }
         if (key === 'orders') {
           state.orders.complaint_detail = { open: false, loading: false, error: '', order_no: '', channel: '', order: null, data: null, preview_image_url: '' };
+          state.orders.detail_view = { open: false, loading: false, error: '', order_no: '', channel: '', order: null, detail: null };
           render();
           (async () => {
             try {

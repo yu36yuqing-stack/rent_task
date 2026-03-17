@@ -1,5 +1,5 @@
-const { upsertUserPlatformAuth } = require('../database/user_platform_auth_db');
-const { listOrderPage } = require('../uhaozu/uhaozu_api');
+const { upsertUserPlatformAuth, listUserPlatformAuth } = require('../database/user_platform_auth_db');
+const { listOrderPage, _internals } = require('../uhaozu/uhaozu_api');
 const UHAOZU_DEFAULT_BASE_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
     Accept: 'application/json, text/plain, */*',
@@ -36,6 +36,21 @@ const UHAOZU_HEADER_NAME_MAP = {
     'cache-control': 'Cache-Control',
     pragma: 'Pragma',
     connection: 'Connection'
+};
+const UHAOZU_ORDER_DETAIL_HEADER_NAME_MAP = {
+    accept: 'Accept',
+    'accept-language': 'Accept-Language',
+    connection: 'Connection',
+    'sec-fetch-dest': 'Sec-Fetch-Dest',
+    'sec-fetch-mode': 'Sec-Fetch-Mode',
+    'sec-fetch-site': 'Sec-Fetch-Site',
+    'sec-fetch-user': 'Sec-Fetch-User',
+    'upgrade-insecure-requests': 'Upgrade-Insecure-Requests',
+    'user-agent': 'User-Agent',
+    'sec-ch-ua': 'sec-ch-ua',
+    'sec-ch-ua-mobile': 'sec-ch-ua-mobile',
+    'sec-ch-ua-platform': 'sec-ch-ua-platform',
+    cookie: 'Cookie'
 };
 
 function parseCurlString(input) {
@@ -128,6 +143,21 @@ function buildUhaozuDefaultHeaders(headers = {}) {
     return merged;
 }
 
+function buildUhaozuOrderDetailHeaders(meta = {}) {
+    const headers = meta && meta.headers && typeof meta.headers === 'object' ? meta.headers : {};
+    const merged = {};
+    for (const [rawKey, rawValue] of Object.entries(headers)) {
+        const canonical = UHAOZU_ORDER_DETAIL_HEADER_NAME_MAP[String(rawKey || '').trim().toLowerCase()];
+        if (!canonical) continue;
+        const next = String(rawValue || '').trim();
+        if (!next) continue;
+        merged[canonical] = next;
+    }
+    const cookie = String(meta.cookie || '').trim();
+    if (cookie) merged.Cookie = cookie;
+    return merged;
+}
+
 function parseUhaozuCurlAuthPayload(curlText = '') {
     const meta = extractCurlMeta(curlText);
     const url = String(meta.url || '').trim();
@@ -163,6 +193,31 @@ function parseUhaozuCurlAuthPayload(curlText = '') {
     };
 }
 
+function parseUhaozuOrderDetailCurlPayload(curlText = '') {
+    const meta = extractCurlMeta(curlText);
+    const url = String(meta.url || '').trim();
+    if (!/www\.uhaozu\.com/i.test(url)) {
+        throw new Error('curl 不是 U号租订单详情页面请求');
+    }
+    if (!/\/order\/usercenter\/sellerOrderAccount\/\d+/i.test(url)) {
+        throw new Error('请粘贴 U号租订单详情页面的 curl');
+    }
+    const cookie = String(meta.cookie || '').trim();
+    if (!cookie) throw new Error('curl 中未找到 Cookie');
+    if (!/(^|;\s*)uid=/.test(cookie)) {
+        throw new Error('Cookie 缺少 uid');
+    }
+    if (!/(^|;\s*)JSESSIONID=/.test(cookie)) {
+        throw new Error('Cookie 缺少 JSESSIONID');
+    }
+    const orderDetailHeaders = buildUhaozuOrderDetailHeaders(meta);
+    const matched = url.match(/sellerOrderAccount\/(\d+)/i);
+    return {
+        order_detail_no: matched ? String(matched[1] || '').trim() : '',
+        order_detail_headers: orderDetailHeaders
+    };
+}
+
 async function validateUhaozuAuthPayload(authPayload = {}) {
     const now = new Date();
     const start = new Date(now.getTime() - 24 * 3600 * 1000);
@@ -175,17 +230,56 @@ async function validateUhaozuAuthPayload(authPayload = {}) {
     }, authPayload);
 }
 
+async function validateUhaozuOrderDetailPayload(authPayload = {}, orderDetailNo = '') {
+    const no = String(orderDetailNo || '').trim();
+    if (!no) throw new Error('订单详情 curl 中未找到订单号');
+    const html = await _internals.requestText(`https://www.uhaozu.com/order/usercenter/sellerOrderAccount/${encodeURIComponent(no)}`, {
+        method: 'GET',
+        headers: _internals.buildOrderDetailHeaders(String(authPayload.cookie || '').trim(), authPayload)
+    }, Number(authPayload.timeout_ms || 15000));
+    if (!/订单详情/.test(html)) {
+        throw new Error('订单详情页校验失败');
+    }
+}
+
 async function upsertUhaozuAuthFromCurl(userId, curlText, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 非法');
-    const parsed = parseUhaozuCurlAuthPayload(curlText);
-    await validateUhaozuAuthPayload(parsed.auth_payload);
+    const mainCurl = String(curlText || '').trim();
+    const detailCurl = String(options.order_detail_curl || '').trim();
+    if (!mainCurl && !detailCurl) {
+        throw new Error('至少需要提供一份 U号租 curl');
+    }
+    const existingRows = await listUserPlatformAuth(uid, { with_payload: true });
+    const existing = (existingRows || []).find((row) => String(row.platform || '').trim() === 'uhaozu') || null;
+    const existingPayload = existing && existing.auth_payload && typeof existing.auth_payload === 'object' ? existing.auth_payload : {};
+    const parsed = mainCurl ? parseUhaozuCurlAuthPayload(mainCurl) : null;
+    const parsedDetail = detailCurl ? parseUhaozuOrderDetailCurlPayload(detailCurl) : null;
+    const nextPayload = {
+        ...(existingPayload || {}),
+        ...((parsed && parsed.auth_payload) || {})
+    };
+    if (parsedDetail && parsedDetail.order_detail_headers) {
+        nextPayload.order_detail_headers = parsedDetail.order_detail_headers;
+        if (!String(nextPayload.cookie || '').trim()) {
+            nextPayload.cookie = String(parsedDetail.order_detail_headers.Cookie || '').trim();
+        }
+    }
+    if (!String(nextPayload.cookie || '').trim()) {
+        throw new Error('U号租 cookie 未配置，请先粘贴订单列表 curl');
+    }
+    if (mainCurl) {
+        await validateUhaozuAuthPayload(nextPayload);
+    }
+    if (detailCurl) {
+        await validateUhaozuOrderDetailPayload(nextPayload, parsedDetail.order_detail_no);
+    }
     const row = await upsertUserPlatformAuth({
         user_id: uid,
         platform: 'uhaozu',
-        auth_type: parsed.auth_type,
-        auth_payload: parsed.auth_payload,
-        auth_status: parsed.auth_status,
+        auth_type: 'cookie',
+        auth_payload: nextPayload,
+        auth_status: 'valid',
         expire_at: '',
         desc: String(options.desc || 'h5 uhaozu curl auth upsert').trim()
     });
@@ -195,7 +289,10 @@ async function upsertUhaozuAuthFromCurl(userId, curlText, options = {}) {
 module.exports = {
     extractCurlMeta,
     buildUhaozuDefaultHeaders,
+    buildUhaozuOrderDetailHeaders,
     parseUhaozuCurlAuthPayload,
+    parseUhaozuOrderDetailCurlPayload,
     validateUhaozuAuthPayload,
+    validateUhaozuOrderDetailPayload,
     upsertUhaozuAuthFromCurl
 };

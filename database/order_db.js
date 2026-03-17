@@ -456,6 +456,51 @@ async function upsertOrder(input = {}) {
     }
 }
 
+async function getOrderByKey(userId, channel, orderNo) {
+    await initOrderDb();
+    const uid = Number(userId || 0);
+    const ch = String(channel || '').trim().toLowerCase();
+    const no = String(orderNo || '').trim();
+    if (!uid) throw new Error('user_id 不合法');
+    if (!ch) throw new Error('channel 不能为空');
+    if (!no) throw new Error('order_no 不能为空');
+    const db = openDatabase();
+    try {
+        return await get(db, `
+            SELECT *
+            FROM "order"
+            WHERE user_id = ? AND channel = ? AND order_no = ? AND is_deleted = 0
+            LIMIT 1
+        `, [uid, ch, no]);
+    } finally {
+        db.close();
+    }
+}
+
+async function updateOrderRecAmount(userId, channel, orderNo, recAmount, desc = '') {
+    await initOrderDb();
+    const uid = Number(userId || 0);
+    const ch = String(channel || '').trim().toLowerCase();
+    const no = String(orderNo || '').trim();
+    const amount = toMoney2(recAmount);
+    if (!uid) throw new Error('user_id 不合法');
+    if (!ch) throw new Error('channel 不能为空');
+    if (!no) throw new Error('order_no 不能为空');
+    const db = openDatabase();
+    try {
+        await run(db, `
+            UPDATE "order"
+            SET rec_amount = ?, modify_date = ?, desc = CASE
+                WHEN ? <> '' THEN ?
+                ELSE desc
+            END
+            WHERE user_id = ? AND channel = ? AND order_no = ? AND is_deleted = 0
+        `, [amount, nowText(), String(desc || '').trim(), String(desc || '').trim(), uid, ch, no]);
+    } finally {
+        db.close();
+    }
+}
+
 async function listOrders(userId, page = 1, pageSize = 50) {
     await initOrderDb();
     const uid = Number(userId || 0);
@@ -694,6 +739,8 @@ async function listRentingOrderWindowByAccounts(userId, gameAccounts = []) {
 module.exports = {
     initOrderDb,
     upsertOrder,
+    getOrderByKey,
+    updateOrderRecAmount,
     listOrders,
     listTodayOrderCountByAccounts,
     listTodayPaidOrderCountByAccounts,

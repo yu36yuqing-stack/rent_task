@@ -1024,7 +1024,7 @@
 
     .auth-curl-textarea {
       width: 100%;
-      min-height: 180px;
+      min-height: 220px;
       resize: vertical;
       padding: 12px 14px;
       border-radius: 12px;
@@ -1040,6 +1040,11 @@
       outline: none;
       border-color: #2c79d6;
       box-shadow: 0 0 0 3px rgba(44, 121, 214, 0.14);
+    }
+
+    .sheet-actions-inline {
+      justify-content: flex-start;
+      margin-top: 10px;
     }
 
     .sheet-query-result {

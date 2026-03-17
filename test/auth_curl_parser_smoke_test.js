@@ -1,8 +1,11 @@
 const {
     parseUhaozuCurlAuthPayload,
     extractCurlMeta,
-    buildUhaozuDefaultHeaders
+    buildUhaozuDefaultHeaders,
+    parseUhaozuOrderDetailCurlPayload,
+    buildUhaozuOrderDetailHeaders
 } = require('../user/platform_auth_import_service');
+const { _internals } = require('../uhaozu/uhaozu_api');
 
 function assertEqual(actual, expected, msg) {
     if (actual !== expected) {
@@ -54,6 +57,38 @@ const headers = buildUhaozuDefaultHeaders(meta.headers);
 assertEqual(headers['Cache-Control'], 'no-cache', 'headers cache-control override');
 assertEqual(headers.Referer, 'https://b.uhaozu.com/order', 'headers referer');
 
+const detailCurl = `curl 'https://www.uhaozu.com/order/usercenter/sellerOrderAccount/122377087088' \\
+  -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7' \\
+  -H 'Accept-Language: zh-CN,zh;q=0.9' \\
+  -H 'Connection: keep-alive' \\
+  -H 'Sec-Fetch-Dest: document' \\
+  -H 'Sec-Fetch-Mode: navigate' \\
+  -H 'Sec-Fetch-Site: none' \\
+  -H 'Sec-Fetch-User: ?1' \\
+  -H 'Upgrade-Insecure-Requests: 1' \\
+  -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36' \\
+  -H 'sec-ch-ua: \"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"' \\
+  -H 'sec-ch-ua-mobile: ?0' \\
+  -H 'sec-ch-ua-platform: \"macOS\"' \\
+  -b 'foo=1; JSESSIONID=detail123; uid=detail-user; oRiskDeviceCode=abc; bar=2'`;
+
+const parsedDetail = parseUhaozuOrderDetailCurlPayload(detailCurl);
+assertEqual(parsedDetail.order_detail_no, '122377087088', 'detail order no');
+assertEqual(parsedDetail.order_detail_headers.Cookie, 'foo=1; JSESSIONID=detail123; uid=detail-user; oRiskDeviceCode=abc; bar=2', 'detail cookie');
+assertEqual(parsedDetail.order_detail_headers.Connection, 'keep-alive', 'detail connection');
+assertEqual(parsedDetail.order_detail_headers['Upgrade-Insecure-Requests'], '1', 'detail uir');
+
+const detailHeaders = buildUhaozuOrderDetailHeaders(extractCurlMeta(detailCurl));
+assertEqual(detailHeaders.Cookie, 'foo=1; JSESSIONID=detail123; uid=detail-user; oRiskDeviceCode=abc; bar=2', 'build detail cookie');
+
+const runtimeDetailHeaders = _internals.buildOrderDetailHeaders(parsed.auth_payload.cookie, {
+    ...parsed.auth_payload,
+    order_detail_headers: parsedDetail.order_detail_headers
+});
+assertEqual(runtimeDetailHeaders.Cookie, 'foo=1; JSESSIONID=detail123; uid=detail-user; oRiskDeviceCode=abc; bar=2', 'runtime uses detail cookie');
+assertEqual(runtimeDetailHeaders['Upgrade-Insecure-Requests'], '1', 'runtime uses detail navigation header');
+assertEqual(runtimeDetailHeaders['User-Agent'], 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36', 'runtime uses detail user-agent');
+
 assertThrows(
     () => parseUhaozuCurlAuthPayload(`curl 'https://example.com' -b 'uid=1; JSESSIONID=2'`),
     /不是 U号租商家后台请求/,
@@ -64,6 +99,12 @@ assertThrows(
     () => parseUhaozuCurlAuthPayload(`curl 'https://mapi.uhaozu.com/merchants/order/submit/orderList' -b 'uid=1'`),
     /JSESSIONID/,
     'reject missing jsession'
+);
+
+assertThrows(
+    () => parseUhaozuOrderDetailCurlPayload(`curl 'https://www.uhaozu.com/order/usercenter/sellerOrderAccount/122377087088' -b 'uid=1'`),
+    /JSESSIONID/,
+    'reject detail missing jsession'
 );
 
 console.log('auth_curl_parser_smoke_test passed');

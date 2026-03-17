@@ -145,6 +145,7 @@ function createAuthBff(deps = {}) {
         }
         const curl = String(body.curl || '').trim();
         const row = await upsertUhaozuAuthFromCurl(user.id, curl, {
+            order_detail_curl: String(body.order_detail_curl || '').trim(),
             desc: String(body.desc || 'h5 uhaozu curl auth upsert').trim()
         });
         return json(res, 200, { ok: true, data: row });
