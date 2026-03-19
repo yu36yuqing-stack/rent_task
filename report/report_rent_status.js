@@ -213,14 +213,22 @@ function isAccountNormalByAuthorizedPlatforms(acc, authorizedPlatforms = []) {
     return allUp || allDown || anyRent || hasReviewFail || Boolean(acc.is_blacklisted);
 }
 
+function accountKeyOf(gameId, account) {
+    return `${String(gameId || '1').trim() || '1'}::${String(account || '').trim()}`;
+}
+
 function toReportAccountFromUserGameRow(row, blacklistSet = new Set(), blacklistReasonMap = {}) {
     const status = row && typeof row.channel_status === 'object' ? row.channel_status : {};
     const prdInfo = row && typeof row.channel_prd_info === 'object' ? row.channel_prd_info : {};
     const account = String(row.game_account || '').trim();
-    const blacklisted = blacklistSet.has(account);
-    const reason = String((blacklistReasonMap && blacklistReasonMap[account]) || '').trim() || '黑名单';
+    const gameId = String((row && row.game_id) || '1').trim() || '1';
+    const identityKey = accountKeyOf(gameId, account);
+    const blacklisted = blacklistSet.has(identityKey);
+    const reason = String((blacklistReasonMap && blacklistReasonMap[identityKey]) || '').trim() || '黑名单';
     return {
         account,
+        game_id: gameId,
+        game_name: String((row && row.game_name) || 'WZRY').trim() || 'WZRY',
         remark: resolveDisplayNameByRow(row, account),
         youpin: String(status.uuzuhao || ''),
         uhaozu: String(status.uhaozu || ''),

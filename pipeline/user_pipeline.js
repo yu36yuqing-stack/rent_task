@@ -11,20 +11,26 @@ const { reconcileOrder3OffBlacklistByUser } = require('../order/order');
 const { loadUserBlacklistSet, loadUserBlacklistReasonMap } = require('../user/user');
 const { executeUserActionsIfNeeded } = require('../action_engine/action_engine');
 
+function accountKeyOf(gameId, account) {
+    return `${String(gameId || '1').trim() || '1'}::${String(account || '').trim()}`;
+}
+
 function applyActionResultToRows(rows = [], actions = []) {
     if (!Array.isArray(rows) || rows.length === 0) return;
     if (!Array.isArray(actions) || actions.length === 0) return;
     const rowMap = new Map();
     for (const row of rows) {
         const acc = String((row && row.game_account) || '').trim();
+        const gid = String((row && row.game_id) || '1').trim() || '1';
         if (!acc) continue;
-        rowMap.set(acc, row);
+        rowMap.set(accountKeyOf(gid, acc), row);
     }
     for (const act of actions) {
         const type = String((act && act.type) || '').trim();
         const acc = String((act && act.item && act.item.account) || '').trim();
+        const gid = String((act && act.item && act.item.game_id) || '1').trim() || '1';
         if (!type || !acc) continue;
-        const row = rowMap.get(acc);
+        const row = rowMap.get(accountKeyOf(gid, acc));
         if (!row) continue;
         const cs = row.channel_status && typeof row.channel_status === 'object' ? row.channel_status : {};
         if (type === 'off_y') cs.uuzuhao = '下架';

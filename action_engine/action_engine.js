@@ -15,6 +15,10 @@ const {
     listPlatformRestrictByUserAndAccounts
 } = require('../database/user_platform_restrict_db');
 
+function accountKeyOf(gameId, account) {
+    return `${String(gameId || '1').trim() || '1'}::${String(account || '').trim()}`;
+}
+
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
@@ -90,17 +94,38 @@ function detectConflictsAndBuildSnapshot({
     };
     const actions = [];
 
-    const allAccounts = new Set([
-        ...youpinData.map(i => i.account),
-        ...uhaozuData.map(i => i.account),
-        ...zhwData.map(i => i.account)
-    ]);
-    console.log(`[Step] 账号合并完成，总账号数=${allAccounts.size}`);
+    const identityMap = new Map();
+    const upsertByIdentity = (item = {}, platform) => {
+        const acc = String(item.account || '').trim();
+        const gid = String(item.game_id || '1').trim() || '1';
+        if (!acc) return;
+        const key = accountKeyOf(gid, acc);
+        const cur = identityMap.get(key) || {
+            key,
+            account: acc,
+            game_id: gid,
+            game_name: String(item.game_name || 'WZRY').trim() || 'WZRY',
+            youpin: null,
+            uhaozu: null,
+            zhw: null
+        };
+        if (platform === 'uuzuhao') cur.youpin = item;
+        else if (platform === 'uhaozu') cur.uhaozu = item;
+        else if (platform === 'zuhaowang') cur.zhw = item;
+        identityMap.set(key, cur);
+    };
+    for (const item of youpinData) upsertByIdentity(item, 'uuzuhao');
+    for (const item of uhaozuData) upsertByIdentity(item, 'uhaozu');
+    for (const item of zhwData) upsertByIdentity(item, 'zuhaowang');
 
-    for (const acc of allAccounts) {
-        const y = youpinData.find(i => i.account === acc);
-        const u = uhaozuData.find(i => i.account === acc);
-        const z = zhwData.find(i => i.account === acc);
+    console.log(`[Step] 账号合并完成，总账号数=${identityMap.size}`);
+
+    for (const one of identityMap.values()) {
+        const acc = String(one.account || '').trim();
+        const identityKey = String(one.key || accountKeyOf(one.game_id, acc));
+        const y = one.youpin;
+        const u = one.uhaozu;
+        const z = one.zhw;
 
         const statY = y ? y.status : '未找到';
         const statU = u ? u.status : '未找到';
@@ -109,6 +134,8 @@ function detectConflictsAndBuildSnapshot({
         const remark = y ? y.remark : (z ? z.roleName : (u ? u.id : acc));
 
         snapshot.accounts.push({
+            game_id: String(one.game_id || '1').trim() || '1',
+            game_name: String(one.game_name || 'WZRY').trim() || 'WZRY',
             account: acc,
             remark,
             youpin: statY,
@@ -117,9 +144,9 @@ function detectConflictsAndBuildSnapshot({
             uhaozu_debug: u ? u.reason : ''
         });
 
-        const isInBlacklist = blacklistAccounts.has(String(acc));
+        const isInBlacklist = blacklistAccounts.has(identityKey);
         if (isInBlacklist) {
-            console.log(`[Blacklist] 命中黑名单账号: ${acc}`);
+            console.log(`[Blacklist] 命中黑名单账号: ${identityKey}`);
             if (y && isActiveShelfStatus(statY)) {
                 actions.push({ type: 'off_y', item: y, reason: '黑名单命中，强制下架悠悠' });
             }
@@ -136,7 +163,7 @@ function detectConflictsAndBuildSnapshot({
         // 1. 任意一个平台为 "租赁中"，则其他所有 "上架" 的平台必须 "下架"。
         const anyRenting = (statY === '租赁中') || (statU === '租赁中') || (statZ === '租赁中');
         const normByAcc = platformStatusNormMap && typeof platformStatusNormMap === 'object'
-            ? (platformStatusNormMap[acc] || {})
+            ? (platformStatusNormMap[identityKey] || {})
             : {};
         const canAutoOnY = isOnAllowedByCode(String((normByAcc.uuzuhao && normByAcc.uuzuhao.code) || ''));
         const canAutoOnU = isOnAllowedByCode(String((normByAcc.uhaozu && normByAcc.uhaozu.code) || ''));
@@ -161,13 +188,31 @@ function detectConflictsAndBuildSnapshot({
             } else {
                 // 正常状态下：无租赁，且无系统惩罚 -> 全部上架
                 if (statY === '下架' && !platformRestrictSet.has(`${acc}::uuzuhao`) && canAutoOnY) {
-                    actions.push({ type: 'on_y', item: { account: acc }, reason: '无租赁，自动补上架悠悠' });
+                    actions.push({
+                        type: 'on_y',
+                        item: { account: acc, game_id: one.game_id, game_name: one.game_name },
+                        reason: '无租赁，自动补上架悠悠'
+                    });
                 }
                 if (statU === '下架' && !platformRestrictSet.has(`${acc}::uhaozu`) && canAutoOnU) {
-                    actions.push({ type: 'on_u', item: { account: acc }, reason: '无租赁，自动补上架U号租' });
+                    actions.push({
+                        type: 'on_u',
+                        item: { account: acc, game_id: one.game_id, game_name: one.game_name },
+                        reason: '无租赁，自动补上架U号租'
+                    });
                 }
                 if (statZ === '下架' && !platformRestrictSet.has(`${acc}::zuhaowang`) && canAutoOnZ) {
-                    actions.push({ type: 'on_z', item: { account: acc, gameId: z ? z.gameId : 1104466820, dataId: z ? z.dataId : '' }, reason: '无租赁，自动补上架租号王' });
+                    actions.push({
+                        type: 'on_z',
+                        item: {
+                            account: acc,
+                            game_id: one.game_id,
+                            game_name: one.game_name,
+                            gameId: z ? z.gameId : 1104466820,
+                            dataId: z ? z.dataId : ''
+                        },
+                        reason: '无租赁，自动补上架租号王'
+                    });
                 }
             }
         }
@@ -330,6 +375,8 @@ function buildPlatformRowsFromUserAccounts(rows = []) {
         if (y) {
             youpinData.push({
                 account,
+                game_id: String((row && row.game_id) || '1').trim() || '1',
+                game_name: String((row && row.game_name) || 'WZRY').trim() || 'WZRY',
                 status: y,
                 remark: String(row.account_remark || account)
             });
@@ -339,6 +386,8 @@ function buildPlatformRowsFromUserAccounts(rows = []) {
         if (u) {
             uhaozuData.push({
                 account,
+                game_id: String((row && row.game_id) || '1').trim() || '1',
+                game_name: String((row && row.game_name) || 'WZRY').trim() || 'WZRY',
                 status: u,
                 reason: ''
             });
@@ -348,6 +397,8 @@ function buildPlatformRowsFromUserAccounts(rows = []) {
         if (z) {
             zhwData.push({
                 account,
+                game_id: String((row && row.game_id) || '1').trim() || '1',
+                game_name: String((row && row.game_name) || 'WZRY').trim() || 'WZRY',
                 status: z,
                 gameId: Number((prd.zuhaowang && (prd.zuhaowang.game_id || prd.zuhaowang.gameId)) || 0),
                 dataId: String((prd.zuhaowang && (prd.zuhaowang.prd_id || prd.zuhaowang.id)) || '').trim()
@@ -362,10 +413,11 @@ function buildPlatformStatusNormMapByAccount(rows = []) {
     const out = {};
     for (const row of rows) {
         const account = String((row && row.game_account) || '').trim();
+        const gameId = String((row && row.game_id) || '1').trim() || '1';
         if (!account) continue;
         const channelStatus = row && typeof row.channel_status === 'object' ? row.channel_status : {};
         const channelPrdInfo = row && typeof row.channel_prd_info === 'object' ? row.channel_prd_info : {};
-        out[account] = buildPlatformStatusNorm(channelStatus, channelPrdInfo, {});
+        out[accountKeyOf(gameId, account)] = buildPlatformStatusNorm(channelStatus, channelPrdInfo, {});
     }
     return out;
 }
