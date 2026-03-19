@@ -46,7 +46,9 @@ function isProdGuardEnabledByUser(user) {
 
 async function bridgeGuardBlockedToRiskTask(userId, gameAccount, options = {}, guardRet = {}) {
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
+    const acc = String((gameAccount && gameAccount.game_account) || gameAccount || '').trim();
+    const gameId = String((gameAccount && gameAccount.game_id) || options.game_id || '1').trim() || '1';
+    const gameName = String((gameAccount && gameAccount.game_name) || options.game_name || 'WZRY').trim() || 'WZRY';
     if (!uid || !acc) return { bridged: false, reason: 'invalid_input' };
     const blockedReason = String((guardRet && guardRet.blocked_reason) || '').trim();
     if (!blockedReason) return { bridged: false, reason: 'empty_blocked_reason' };
@@ -73,7 +75,7 @@ async function bridgeGuardBlockedToRiskTask(userId, gameAccount, options = {}, g
         guard_error: String((guardRet && guardRet.guard_error) || '').trim(),
         hit_at: hitAt
     };
-    const event = await upsertOpenRiskEvent(uid, acc, riskType, {
+    const event = await upsertOpenRiskEvent(uid, { game_account: acc, game_id: gameId, game_name: gameName }, riskType, {
         risk_level: 'high',
         snapshot,
         desc: `auto open by ${source} guard blocked`
@@ -92,6 +94,8 @@ async function bridgeGuardBlockedToRiskTask(userId, gameAccount, options = {}, g
     const task = await upsertGuardTask({
         user_id: uid,
         game_account: acc,
+        game_id: gameId,
+        game_name: gameName,
         risk_type: riskType,
         task_type: taskType,
         status: TASK_STATUS_PENDING,
@@ -111,11 +115,12 @@ async function bridgeGuardBlockedToRiskTask(userId, gameAccount, options = {}, g
 
 async function deleteBlacklistWithGuard(userId, gameAccount, options = {}) {
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
+    const acc = String((gameAccount && gameAccount.game_account) || gameAccount || '').trim();
     if (!uid) throw new Error('user_id 非法');
     if (!acc) throw new Error('game_account 不能为空');
 
-    const gameName = String(options.game_name || 'WZRY').trim() || 'WZRY';
+    const gameId = String((gameAccount && gameAccount.game_id) || options.game_id || '1').trim() || '1';
+    const gameName = String((gameAccount && gameAccount.game_name) || options.game_name || 'WZRY').trim() || 'WZRY';
     const source = String(options.source || 'guard').trim();
     const operator = String(options.operator || 'guard').trim();
     const desc = String(options.desc || '').trim();
@@ -127,10 +132,12 @@ async function deleteBlacklistWithGuard(userId, gameAccount, options = {}) {
 
     try {
         const onlineRes = await queryOnlineStatusCached(uid, acc, {
+            game_id: gameId,
             game_name: gameName,
             desc: 'update by blacklist guard online'
         });
         const forbiddenRes = await queryForbiddenStatusCached(uid, acc, {
+            game_id: gameId,
             game_name: gameName,
             desc: 'update by blacklist guard forbidden'
         });
@@ -141,9 +148,12 @@ async function deleteBlacklistWithGuard(userId, gameAccount, options = {}) {
         guard_error = String(e && e.message ? e.message : e || '').trim();
     }
 
-    const guardApply = await setGuardSourcesByProbeAndReconcile(uid, acc, {
+    const key = { game_account: acc, game_id: gameId, game_name: gameName };
+    const guardApply = await setGuardSourcesByProbeAndReconcile(uid, key, {
         online,
         forbidden,
+        game_id: gameId,
+        game_name: gameName,
         detail: {
             guard_checked,
             guard_error
@@ -159,7 +169,7 @@ async function deleteBlacklistWithGuard(userId, gameAccount, options = {}) {
     if (blockReason) {
         let bridge = { bridged: false, reason: 'skipped' };
         try {
-            bridge = await bridgeGuardBlockedToRiskTask(uid, acc, options, {
+            bridge = await bridgeGuardBlockedToRiskTask(uid, key, options, {
                 blocked_reason: blockReason,
                 online,
                 forbidden,
@@ -206,35 +216,38 @@ async function deleteBlacklistWithGuard(userId, gameAccount, options = {}) {
     let entryAbsent = false;
     let removeBlockedReason = '';
     if (clearSource) {
-        const out = await clearSourceAndReconcile(uid, acc, clearSource, {
+        const out = await clearSourceAndReconcile(uid, key, clearSource, {
             source,
             operator,
             desc: desc || `clear source=${clearSource} by guard`,
             detail: { cleared_by_guard: true }
         });
         removed = Boolean(out && out.reconcile && out.reconcile.removed);
-        const activeRows = await listBlacklistSourcesByUserAndAccounts(uid, [acc], { active_only: true });
+        const activeRows = await listBlacklistSourcesByUserAndAccounts(uid, [key], { active_only: true });
         entryAbsent = !Array.isArray(activeRows) || activeRows.length === 0;
     } else {
-        const activeRows = await listBlacklistSourcesByUserAndAccounts(uid, [acc], { active_only: true });
+        const activeRows = await listBlacklistSourcesByUserAndAccounts(uid, [key], { active_only: true });
         for (const row of (Array.isArray(activeRows) ? activeRows : [])) {
             const src = String((row && row.source) || '').trim().toLowerCase();
             if (!src) continue;
-            await clearSourceAndReconcile(uid, acc, src, {
+            await clearSourceAndReconcile(uid, key, src, {
                 source,
                 operator,
                 desc: desc || 'clear all active source by guard',
                 detail: { cleared_by_guard: true, clear_all: true }
             });
         }
-        const leftRows = await listBlacklistSourcesByUserAndAccounts(uid, [acc], { active_only: true });
+        const leftRows = await listBlacklistSourcesByUserAndAccounts(uid, [key], { active_only: true });
         entryAbsent = !Array.isArray(leftRows) || leftRows.length === 0;
         removed = entryAbsent;
     }
 
     if (!removed) {
         const allEntries = await listUserBlacklistByUserWithMeta(uid);
-        const exists = (Array.isArray(allEntries) ? allEntries : []).some((x) => String((x && x.game_account) || '').trim() === acc);
+        const exists = (Array.isArray(allEntries) ? allEntries : []).some((x) =>
+            String((x && x.game_account) || '').trim() === acc
+            && (String((x && x.game_id) || '1').trim() || '1') === gameId
+        );
         entryAbsent = !exists || entryAbsent;
         removeBlockedReason = entryAbsent ? '' : 'entry_exists_but_not_removed';
     }

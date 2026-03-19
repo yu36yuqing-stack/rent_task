@@ -602,15 +602,19 @@ async function buildUuzuhaoProductIndex(userId) {
         if (!prdId) continue;
         const gameAccount = String(row.game_account || '').trim();
         const roleName = String(row.account_remark || '').trim();
+        const gameId = String(row.game_id || '').trim() || '1';
+        const gameName = String(row.game_name || '').trim() || 'WZRY';
         if (!index.has(prdId)) {
-            index.set(prdId, { game_account: gameAccount, role_name: roleName });
+            index.set(prdId, { game_account: gameAccount, role_name: roleName, game_id: gameId, game_name: gameName });
             continue;
         }
         const prev = index.get(prdId) || {};
         // 重复 prd_id 时优先保留信息更完整的一条。
         index.set(prdId, {
             game_account: prev.game_account || gameAccount,
-            role_name: prev.role_name || roleName
+            role_name: prev.role_name || roleName,
+            game_id: prev.game_id || gameId,
+            game_name: prev.game_name || gameName
         });
     }
     return index;
@@ -748,28 +752,43 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     const orderOffReason = buildOrderOffReasonByThreshold(orderOffThreshold);
     const rows = await listAllUserGameAccountsByUser(uid);
     const accountToRemark = new Map();
+    const allAccounts = [];
     for (const row of rows) {
         const acc = String(row.game_account || '').trim();
         if (!acc) continue;
+        const gid = String(row.game_id || '').trim() || '1';
+        const key = `${gid}::${acc}`;
         const remark = String(row.account_remark || '').trim();
-        if (!accountToRemark.has(acc)) accountToRemark.set(acc, remark);
-        else if (!accountToRemark.get(acc) && remark) accountToRemark.set(acc, remark);
+        if (!accountToRemark.has(key)) accountToRemark.set(key, remark);
+        allAccounts.push({
+            game_account: acc,
+            game_id: gid,
+            game_name: String(row.game_name || 'WZRY').trim() || 'WZRY'
+        });
     }
-    const allAccounts = Array.from(accountToRemark.keys());
     const todayPaidCounts = allAccounts.length > 0
         ? (orderOffMode === ORDER_OFF_MODE_ROLLING_24H
             ? await listRolling24hPaidOrderCountByAccounts(uid, allAccounts)
             : await listTodayPaidOrderCountByAccounts(uid, allAccounts))
         : {};
     const countDetails = allAccounts
-        .map((acc) => ({ game_account: acc, count: Number(todayPaidCounts[acc] || 0) }))
-        .sort((a, b) => b.count - a.count || a.game_account.localeCompare(b.game_account));
+        .map((one) => {
+            const key = `${one.game_id}::${one.game_account}`;
+            return {
+                game_account: one.game_account,
+                game_id: one.game_id,
+                game_name: one.game_name,
+                count: Number(todayPaidCounts[key] || 0)
+            };
+        })
+        .sort((a, b) => b.count - a.count || `${a.game_id}::${a.game_account}`.localeCompare(`${b.game_id}::${b.game_account}`));
 
     const targetSet = new Set();
     if (order3OffEnabled) {
-        for (const acc of allAccounts) {
-            const c = Number(todayPaidCounts[acc] || 0);
-            if (c >= orderOffThreshold) targetSet.add(acc);
+        for (const one of allAccounts) {
+            const key = `${one.game_id}::${one.game_account}`;
+            const c = Number(todayPaidCounts[key] || 0);
+            if (c >= orderOffThreshold) targetSet.add(key);
         }
     }
 
@@ -778,7 +797,7 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     const currentSet = new Set(
         current
             .filter((x) => isOrderOffReason(x.reason))
-            .map((x) => String(x.game_account || '').trim())
+            .map((x) => `${String(x.game_id || '1').trim() || '1'}::${String(x.game_account || '').trim()}`)
             .filter(Boolean)
     );
 
@@ -805,11 +824,14 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     let added = 0;
     let deleted = 0;
     for (const acc of toAdd) {
-        await upsertSourceAndReconcile(uid, acc, 'order_n_off', {
+        const [gameId, gameAccount] = String(acc).split('::');
+        const one = allAccounts.find((x) => `${x.game_id}::${x.game_account}` === acc) || { game_id: gameId, game_account: gameAccount, game_name: 'WZRY' };
+        await upsertSourceAndReconcile(uid, one, 'order_n_off', {
             active: true,
             reason: orderOffReason,
             detail: {
-                game_account: acc,
+                game_account: gameAccount,
+                game_id: gameId,
                 remark: accountToRemark.get(acc) || '',
                 threshold: orderOffThreshold,
                 mode: orderOffMode
@@ -822,10 +844,13 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
         added += 1;
     }
     for (const acc of toDelete) {
-        await upsertSourceAndReconcile(uid, acc, 'order_n_off', {
+        const [gameId, gameAccount] = String(acc).split('::');
+        await upsertSourceAndReconcile(uid, { game_id: gameId, game_name: 'WZRY', game_account: gameAccount }, 'order_n_off', {
             active: false,
             reason: orderOffReason,
             detail: {
+                game_account: gameAccount,
+                game_id: gameId,
                 threshold: orderOffThreshold,
                 mode: orderOffMode
             }

@@ -1,4 +1,5 @@
 const { openDatabase } = require('./sqlite_client');
+const { normalizeGameProfile } = require('../common/game_profile');
 
 const BL_MODE_LEGACY = 0;
 const BL_MODE_DUAL_READ_OLD = 1;
@@ -118,6 +119,7 @@ async function mirrorSourceShadowUpsert(userId, gameAccount, reason, options = {
     const acc = String(gameAccount || '').trim();
     const rs = String(reason || '').trim();
     if (!uid || !acc || !rs) return;
+    const game = normalizeGameIdentity(options.game_id, options.game_name);
     const src = resolveSourceByLegacyWrite(rs, options.source);
     const now = String(options.now || '').trim() || nowText();
     const desc = String(options.desc || '').trim() || 'mirror from legacy blacklist upsert';
@@ -130,23 +132,23 @@ async function mirrorSourceShadowUpsert(userId, gameAccount, reason, options = {
     const oldRow = await get(db, `
         SELECT id
         FROM user_blacklist_source
-        WHERE user_id = ? AND game_account = ? AND source = ? AND is_deleted = 0
+        WHERE user_id = ? AND game_id = ? AND game_account = ? AND source = ? AND is_deleted = 0
         LIMIT 1
-    `, [uid, acc, src]);
+    `, [uid, game.game_id, acc, src]);
     if (oldRow) {
         await run(db, `
             UPDATE user_blacklist_source
-            SET active = 1, reason = ?, priority = ?, detail = ?, expire_at = '',
+            SET game_name = ?, active = 1, reason = ?, priority = ?, detail = ?, expire_at = '',
                 modify_date = ?, is_deleted = 0, desc = ?
             WHERE id = ?
-        `, [rs, priority, detail, now, desc, Number(oldRow.id)]);
+        `, [game.game_name, rs, priority, detail, now, desc, Number(oldRow.id)]);
         return;
     }
     await run(db, `
         INSERT INTO user_blacklist_source
-        (user_id, game_account, source, active, reason, priority, detail, expire_at, create_date, modify_date, is_deleted, desc)
-        VALUES (?, ?, ?, 1, ?, ?, ?, '', ?, ?, 0, ?)
-    `, [uid, acc, src, rs, priority, detail, now, now, desc]);
+        (user_id, game_account, game_id, game_name, source, active, reason, priority, detail, expire_at, create_date, modify_date, is_deleted, desc)
+        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, '', ?, ?, 0, ?)
+    `, [uid, acc, game.game_id, game.game_name, src, rs, priority, detail, now, now, desc]);
 }
 
 async function mirrorSourceShadowClearByAccount(userId, gameAccount, options = {}) {
@@ -156,13 +158,14 @@ async function mirrorSourceShadowClearByAccount(userId, gameAccount, options = {
     const uid = Number(userId || 0);
     const acc = String(gameAccount || '').trim();
     if (!uid || !acc) return;
+    const game = normalizeGameIdentity(options.game_id, options.game_name);
     const now = String(options.now || '').trim() || nowText();
     const desc = String(options.desc || '').trim() || 'mirror clear from legacy blacklist hard_delete';
     const rows = await all(db, `
         SELECT id, reason, priority, detail, expire_at
         FROM user_blacklist_source
-        WHERE user_id = ? AND game_account = ? AND is_deleted = 0
-    `, [uid, acc]);
+        WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
+    `, [uid, game.game_id, acc]);
     for (const row of rows) {
         const detail = parseJsonObject(row && row.detail);
         await run(db, `
@@ -189,13 +192,31 @@ async function tableColumnNamesInOrder(db, tableName) {
     return rows.map((row) => String((row && row.name) || '').trim());
 }
 
+async function ensureColumn(db, tableName, columnName, ddl) {
+    const cols = await all(db, `PRAGMA table_info(${tableName})`);
+    const has = cols.some((row) => String((row && row.name) || '').trim() === String(columnName || '').trim());
+    if (has) return;
+    await run(db, `ALTER TABLE ${tableName} ADD COLUMN ${ddl}`);
+}
+
 function normalizeUserId(userId) {
     return Number(userId || 0);
 }
 
+function normalizeGameIdentity(gameId, gameName) {
+    const normalized = normalizeGameProfile(gameId, gameName, { preserveUnknown: true });
+    return {
+        game_id: String(normalized.game_id || '1').trim() || '1',
+        game_name: String(normalized.game_name || 'WZRY').trim() || 'WZRY'
+    };
+}
+
 function normalizeBlacklistEntry(entry = {}) {
+    const game = normalizeGameIdentity(entry.game_id, entry.game_name);
     return {
         game_account: String(entry.game_account || entry.account || '').trim(),
+        game_id: game.game_id,
+        game_name: game.game_name,
         remark: String(entry.remark || '').trim(),
         reason: String(entry.reason || '').trim()
     };
@@ -204,6 +225,8 @@ function normalizeBlacklistEntry(entry = {}) {
 function rowToPublicEntry(row = {}) {
     return {
         game_account: String(row.game_account || '').trim(),
+        game_id: String(row.game_id || '1').trim() || '1',
+        game_name: String(row.game_name || 'WZRY').trim() || 'WZRY',
         remark: String(row.remark || '').trim(),
         reason: String(row.reason || '').trim(),
         create_date: String(row.create_date || '').trim()
@@ -213,6 +236,12 @@ function rowToPublicEntry(row = {}) {
 async function ensureUserBlacklistColumns(db) {
     const columns = await all(db, 'PRAGMA table_info(user_blacklist)');
     const names = new Set(columns.map((c) => String(c && c.name || '').trim()));
+    if (!names.has('game_id')) {
+        await run(db, `ALTER TABLE user_blacklist ADD COLUMN game_id TEXT NOT NULL DEFAULT '1'`);
+    }
+    if (!names.has('game_name')) {
+        await run(db, `ALTER TABLE user_blacklist ADD COLUMN game_name TEXT NOT NULL DEFAULT 'WZRY'`);
+    }
     if (!names.has('remark')) {
         await run(db, `ALTER TABLE user_blacklist ADD COLUMN remark TEXT NOT NULL DEFAULT ''`);
     }
@@ -226,6 +255,8 @@ async function reorderUserBlacklistColumnsIfNeeded(db) {
         'id',
         'user_id',
         'game_account',
+        'game_id',
+        'game_name',
         'remark',
         'reason',
         'create_date',
@@ -242,6 +273,8 @@ async function reorderUserBlacklistColumnsIfNeeded(db) {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             game_account TEXT NOT NULL,
+            game_id TEXT NOT NULL DEFAULT '1',
+            game_name TEXT NOT NULL DEFAULT 'WZRY',
             remark TEXT NOT NULL DEFAULT '',
             reason TEXT NOT NULL DEFAULT '',
             create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -252,11 +285,13 @@ async function reorderUserBlacklistColumnsIfNeeded(db) {
     `);
     await run(db, `
         INSERT INTO user_blacklist
-        (id, user_id, game_account, remark, reason, create_date, modify_date, is_deleted, desc)
+        (id, user_id, game_account, game_id, game_name, remark, reason, create_date, modify_date, is_deleted, desc)
         SELECT
             id,
             user_id,
             game_account,
+            COALESCE(game_id, '1'),
+            COALESCE(game_name, 'WZRY'),
             COALESCE(remark, ''),
             COALESCE(reason, ''),
             COALESCE(create_date, CURRENT_TIMESTAMP),
@@ -276,6 +311,7 @@ async function backfillUserBlacklistRemarkFromUserGameAccount(db) {
             FROM user_game_account uga
             WHERE uga.user_id = user_blacklist.user_id
               AND uga.game_account = user_blacklist.game_account
+              AND uga.game_id = user_blacklist.game_id
               AND uga.is_deleted = 0
               AND TRIM(COALESCE(uga.account_remark, '')) <> ''
             ORDER BY uga.id DESC
@@ -287,18 +323,44 @@ async function backfillUserBlacklistRemarkFromUserGameAccount(db) {
     `, [nowText()]);
 }
 
-async function loadRemarkFromUserGameAccount(db, userId, gameAccount) {
+async function loadRemarkFromUserGameAccount(db, userId, gameAccount, gameId = '', gameName = '') {
     try {
+        const game = normalizeGameIdentity(gameId, gameName);
         const row = await get(db, `
             SELECT account_remark
             FROM user_game_account
-            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
             ORDER BY id DESC
             LIMIT 1
-        `, [userId, gameAccount]);
+        `, [userId, game.game_id, gameAccount]);
         return String((row && row.account_remark) || '').trim();
     } catch {
         return '';
+    }
+}
+
+async function backfillBlacklistGameIdentityByAccount(db) {
+    const rows = await all(db, `
+        SELECT id, user_id, game_account
+        FROM user_blacklist
+        WHERE is_deleted = 0
+          AND COALESCE(game_id, '1') = '1'
+    `);
+    for (const row of rows) {
+        const matches = await all(db, `
+            SELECT DISTINCT game_id, game_name
+            FROM user_game_account
+            WHERE user_id = ?
+              AND game_account = ?
+              AND is_deleted = 0
+        `, [Number(row.user_id || 0), String(row.game_account || '').trim()]);
+        if (matches.length !== 1) continue;
+        const one = normalizeGameIdentity(matches[0].game_id, matches[0].game_name);
+        await run(db, `
+            UPDATE user_blacklist
+            SET game_id = ?, game_name = ?, modify_date = ?
+            WHERE id = ?
+        `, [one.game_id, one.game_name, nowText(), Number(row.id || 0)]);
     }
 }
 
@@ -310,6 +372,8 @@ async function initUserBlacklistDb() {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 game_account TEXT NOT NULL,
+                game_id TEXT NOT NULL DEFAULT '1',
+                game_name TEXT NOT NULL DEFAULT 'WZRY',
                 remark TEXT NOT NULL DEFAULT '',
                 reason TEXT NOT NULL DEFAULT '',
                 create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -320,13 +384,14 @@ async function initUserBlacklistDb() {
         `);
         await ensureUserBlacklistColumns(db);
         await reorderUserBlacklistColumnsIfNeeded(db);
+        await run(db, `DROP INDEX IF EXISTS uq_user_blacklist_alive`);
         await run(db, `
             CREATE UNIQUE INDEX IF NOT EXISTS uq_user_blacklist_alive
-            ON user_blacklist(user_id, game_account, is_deleted)
+            ON user_blacklist(user_id, game_id, game_account, is_deleted)
         `);
         await run(db, `
             CREATE INDEX IF NOT EXISTS idx_user_blacklist_user_alive
-            ON user_blacklist(user_id, is_deleted)
+            ON user_blacklist(user_id, game_id, is_deleted)
         `);
         await run(db, `
             CREATE TABLE IF NOT EXISTS user_blacklist_history (
@@ -334,6 +399,8 @@ async function initUserBlacklistDb() {
                 user_id INTEGER NOT NULL,
                 event_type TEXT NOT NULL,
                 game_account TEXT NOT NULL DEFAULT '',
+                game_id TEXT NOT NULL DEFAULT '1',
+                game_name TEXT NOT NULL DEFAULT 'WZRY',
                 before_data TEXT NOT NULL DEFAULT '',
                 after_data TEXT NOT NULL DEFAULT '',
                 source TEXT NOT NULL DEFAULT '',
@@ -344,6 +411,8 @@ async function initUserBlacklistDb() {
                 desc TEXT NOT NULL DEFAULT ''
             )
         `);
+        await ensureColumn(db, 'user_blacklist_history', 'game_id', "game_id TEXT NOT NULL DEFAULT '1'");
+        await ensureColumn(db, 'user_blacklist_history', 'game_name', "game_name TEXT NOT NULL DEFAULT 'WZRY'");
         await run(db, `
             CREATE INDEX IF NOT EXISTS idx_user_blacklist_history_user
             ON user_blacklist_history(user_id, is_deleted, id)
@@ -353,6 +422,8 @@ async function initUserBlacklistDb() {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 game_account TEXT NOT NULL,
+                game_id TEXT NOT NULL DEFAULT '1',
+                game_name TEXT NOT NULL DEFAULT 'WZRY',
                 source TEXT NOT NULL,
                 active INTEGER NOT NULL DEFAULT 0,
                 reason TEXT NOT NULL DEFAULT '',
@@ -365,16 +436,19 @@ async function initUserBlacklistDb() {
                 desc TEXT NOT NULL DEFAULT ''
             )
         `);
+        await ensureColumn(db, 'user_blacklist_source', 'game_id', "game_id TEXT NOT NULL DEFAULT '1'");
+        await ensureColumn(db, 'user_blacklist_source', 'game_name', "game_name TEXT NOT NULL DEFAULT 'WZRY'");
         await run(db, `
             CREATE UNIQUE INDEX IF NOT EXISTS uq_user_blacklist_source_alive
-            ON user_blacklist_source(user_id, game_account, source, is_deleted)
+            ON user_blacklist_source(user_id, game_id, game_account, source, is_deleted)
         `);
         await run(db, `
             CREATE INDEX IF NOT EXISTS idx_user_blacklist_source_user_alive
-            ON user_blacklist_source(user_id, active, modify_date, is_deleted)
+            ON user_blacklist_source(user_id, game_id, active, modify_date, is_deleted)
         `);
         try {
             await backfillUserBlacklistRemarkFromUserGameAccount(db);
+            await backfillBlacklistGameIdentityByAccount(db);
         } catch (_) {
             // user_game_account 尚未初始化时，允许跳过一次回填。
         }
@@ -390,12 +464,16 @@ async function listBlacklistedAccountsByUser(userId) {
     const db = openDatabase();
     try {
         const rows = await all(db, `
-            SELECT game_account
+            SELECT game_account, game_id, game_name
             FROM user_blacklist
             WHERE user_id = ? AND is_deleted = 0
             ORDER BY id ASC
         `, [uid]);
-        return rows.map((r) => String(r.game_account || '').trim()).filter(Boolean);
+        return rows.map((r) => ({
+            game_account: String(r.game_account || '').trim(),
+            game_id: String(r.game_id || '1').trim() || '1',
+            game_name: String(r.game_name || 'WZRY').trim() || 'WZRY'
+        })).filter((x) => x.game_account);
     } finally {
         db.close();
     }
@@ -408,7 +486,7 @@ async function listUserBlacklistByUser(userId) {
     const db = openDatabase();
     try {
         const rows = await all(db, `
-            SELECT game_account, remark, reason, create_date
+            SELECT game_account, game_id, game_name, remark, reason, create_date
             FROM user_blacklist
             WHERE user_id = ? AND is_deleted = 0
             ORDER BY id ASC
@@ -426,13 +504,15 @@ async function listUserBlacklistByUserWithMeta(userId) {
     const db = openDatabase();
     try {
         const rows = await all(db, `
-            SELECT game_account, remark, reason, create_date, modify_date, desc
+            SELECT game_account, game_id, game_name, remark, reason, create_date, modify_date, desc
             FROM user_blacklist
             WHERE user_id = ? AND is_deleted = 0
             ORDER BY id ASC
         `, [uid]);
         return rows.map((row) => ({
             game_account: String(row.game_account || '').trim(),
+            game_id: String(row.game_id || '1').trim() || '1',
+            game_name: String(row.game_name || 'WZRY').trim() || 'WZRY',
             remark: String(row.remark || '').trim(),
             reason: String(row.reason || '').trim(),
             create_date: String(row.create_date || '').trim(),
@@ -460,11 +540,11 @@ async function upsertUserBlacklistEntry(userId, entry, opts = {}) {
     try {
         return await inTx(db, async () => {
             const now = nowText();
-            const roleName = await loadRemarkFromUserGameAccount(db, uid, normalized.game_account);
+            const roleName = await loadRemarkFromUserGameAccount(db, uid, normalized.game_account, normalized.game_id, normalized.game_name);
             const oldRow = await get(db, `
                 SELECT * FROM user_blacklist
-                WHERE user_id = ? AND game_account = ? AND is_deleted = 0
-            `, [uid, normalized.game_account]);
+                WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
+            `, [uid, normalized.game_id, normalized.game_account]);
             const oldPayload = oldRow ? rowToPublicEntry(oldRow) : null;
             const eventType = oldRow ? 'upsert_update' : 'upsert_insert';
             const finalRemark = roleName || normalized.remark || String((oldRow && oldRow.remark) || '').trim();
@@ -473,39 +553,45 @@ async function upsertUserBlacklistEntry(userId, entry, opts = {}) {
                 if (customCreateDate) {
                     await run(db, `
                         UPDATE user_blacklist
-                        SET remark = ?, reason = ?, create_date = ?, modify_date = ?, desc = ?, is_deleted = 0
-                        WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+                        SET game_name = ?, remark = ?, reason = ?, create_date = ?, modify_date = ?, desc = ?, is_deleted = 0
+                        WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
                     `, [
+                        normalized.game_name,
                         finalRemark,
                         normalized.reason,
                         customCreateDate,
                         now,
                         desc,
                         uid,
+                        normalized.game_id,
                         normalized.game_account
                     ]);
                 } else {
                     await run(db, `
                         UPDATE user_blacklist
-                        SET remark = ?, reason = ?, modify_date = ?, desc = ?, is_deleted = 0
-                        WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+                        SET game_name = ?, remark = ?, reason = ?, modify_date = ?, desc = ?, is_deleted = 0
+                        WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
                     `, [
+                        normalized.game_name,
                         finalRemark,
                         normalized.reason,
                         now,
                         desc,
                         uid,
+                        normalized.game_id,
                         normalized.game_account
                     ]);
                 }
             } else {
                 await run(db, `
                     INSERT INTO user_blacklist
-                    (user_id, game_account, remark, reason, create_date, modify_date, is_deleted, desc)
-                    VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+                    (user_id, game_account, game_id, game_name, remark, reason, create_date, modify_date, is_deleted, desc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
                 `, [
                     uid,
                     normalized.game_account,
+                    normalized.game_id,
+                    normalized.game_name,
                     finalRemark,
                     normalized.reason,
                     customCreateDate || now,
@@ -515,20 +601,22 @@ async function upsertUserBlacklistEntry(userId, entry, opts = {}) {
             }
 
             const newRow = await get(db, `
-                SELECT game_account, remark, reason, create_date
+                SELECT game_account, game_id, game_name, remark, reason, create_date
                 FROM user_blacklist
-                WHERE user_id = ? AND game_account = ? AND is_deleted = 0
-            `, [uid, normalized.game_account]);
+                WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
+            `, [uid, normalized.game_id, normalized.game_account]);
             const newPayload = rowToPublicEntry(newRow || {});
 
             await run(db, `
                 INSERT INTO user_blacklist_history
-                (user_id, event_type, game_account, before_data, after_data, source, operator, modify_date, desc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (user_id, event_type, game_account, game_id, game_name, before_data, after_data, source, operator, modify_date, desc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
                 uid,
                 eventType,
                 normalized.game_account,
+                normalized.game_id,
+                normalized.game_name,
                 stableJson(oldPayload),
                 stableJson(newPayload),
                 source,
@@ -543,7 +631,9 @@ async function upsertUserBlacklistEntry(userId, entry, opts = {}) {
                     now,
                     source,
                     operator,
-                    desc
+                    desc,
+                    game_id: normalized.game_id,
+                    game_name: normalized.game_name
                 });
             } catch (e) {
                 console.warn(`[BlacklistSourceShadow] upsert mirror failed user=${uid} account=${normalized.game_account}: ${e.message}`);
@@ -559,7 +649,12 @@ async function upsertUserBlacklistEntry(userId, entry, opts = {}) {
 async function removeUserBlacklistEntry(userId, gameAccount, opts = {}) {
     await initUserBlacklistDb();
     const uid = normalizeUserId(userId);
-    const acc = String(gameAccount || '').trim();
+    const normalized = normalizeBlacklistEntry({
+        game_account: gameAccount && typeof gameAccount === 'object' ? gameAccount.game_account : gameAccount,
+        game_id: (gameAccount && typeof gameAccount === 'object' ? gameAccount.game_id : '') || opts.game_id,
+        game_name: (gameAccount && typeof gameAccount === 'object' ? gameAccount.game_name : '') || opts.game_name
+    });
+    const acc = normalized.game_account;
     if (!uid) throw new Error('user_id 非法');
     if (!acc) throw new Error('game_account 不能为空');
 
@@ -573,24 +668,26 @@ async function removeUserBlacklistEntry(userId, gameAccount, opts = {}) {
             const now = nowText();
             const oldRow = await get(db, `
                 SELECT * FROM user_blacklist
-                WHERE user_id = ? AND game_account = ? AND is_deleted = 0
-            `, [uid, acc]);
+                WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
+            `, [uid, normalized.game_id, acc]);
             if (!oldRow) return false;
 
             const oldPayload = rowToPublicEntry(oldRow);
             await run(db, `
                 UPDATE user_blacklist
                 SET is_deleted = 1, modify_date = ?, desc = ?
-                WHERE user_id = ? AND game_account = ? AND is_deleted = 0
-            `, [now, desc, uid, acc]);
+                WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
+            `, [now, desc, uid, normalized.game_id, acc]);
 
             await run(db, `
                 INSERT INTO user_blacklist_history
-                (user_id, event_type, game_account, before_data, after_data, source, operator, modify_date, desc)
-                VALUES (?, 'delete', ?, ?, ?, ?, ?, ?, ?)
+                (user_id, event_type, game_account, game_id, game_name, before_data, after_data, source, operator, modify_date, desc)
+                VALUES (?, 'delete', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
                 uid,
                 acc,
+                normalized.game_id,
+                normalized.game_name,
                 stableJson(oldPayload),
                 stableJson(null),
                 source,
@@ -608,7 +705,12 @@ async function removeUserBlacklistEntry(userId, gameAccount, opts = {}) {
 async function hardDeleteUserBlacklistEntry(userId, gameAccount, opts = {}) {
     await initUserBlacklistDb();
     const uid = normalizeUserId(userId);
-    const acc = String(gameAccount || '').trim();
+    const normalized = normalizeBlacklistEntry({
+        game_account: gameAccount && typeof gameAccount === 'object' ? gameAccount.game_account : gameAccount,
+        game_id: (gameAccount && typeof gameAccount === 'object' ? gameAccount.game_id : '') || opts.game_id,
+        game_name: (gameAccount && typeof gameAccount === 'object' ? gameAccount.game_name : '') || opts.game_name
+    });
+    const acc = normalized.game_account;
     if (!uid) throw new Error('user_id 非法');
     if (!acc) throw new Error('game_account 不能为空');
 
@@ -625,8 +727,8 @@ async function hardDeleteUserBlacklistEntry(userId, gameAccount, opts = {}) {
             const now = nowText();
             const oldRow = await get(db, `
                 SELECT * FROM user_blacklist
-                WHERE user_id = ? AND game_account = ? AND is_deleted = 0
-            `, [uid, acc]);
+                WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
+            `, [uid, normalized.game_id, acc]);
             if (!oldRow) return false;
             if (reasonExpected && String(oldRow.reason || '').trim() !== reasonExpected) {
                 return false;
@@ -635,16 +737,18 @@ async function hardDeleteUserBlacklistEntry(userId, gameAccount, opts = {}) {
             const oldPayload = rowToPublicEntry(oldRow);
             await run(db, `
                 DELETE FROM user_blacklist
-                WHERE user_id = ? AND game_account = ? AND is_deleted = 0
-            `, [uid, acc]);
+                WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
+            `, [uid, normalized.game_id, acc]);
 
             await run(db, `
                 INSERT INTO user_blacklist_history
-                (user_id, event_type, game_account, before_data, after_data, source, operator, modify_date, desc)
-                VALUES (?, 'hard_delete', ?, ?, ?, ?, ?, ?, ?)
+                (user_id, event_type, game_account, game_id, game_name, before_data, after_data, source, operator, modify_date, desc)
+                VALUES (?, 'hard_delete', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
                 uid,
                 acc,
+                normalized.game_id,
+                normalized.game_name,
                 stableJson(oldPayload),
                 stableJson(null),
                 source,
@@ -656,7 +760,9 @@ async function hardDeleteUserBlacklistEntry(userId, gameAccount, opts = {}) {
                 await mirrorSourceShadowClearByAccount(uid, acc, {
                     db,
                     now,
-                    desc
+                    desc,
+                    game_id: normalized.game_id,
+                    game_name: normalized.game_name
                 });
             } catch (e) {
                 console.warn(`[BlacklistSourceShadow] hard_delete mirror failed user=${uid} account=${acc}: ${e.message}`);

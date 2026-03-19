@@ -87,9 +87,11 @@ function groupByAccount(rows = []) {
     const out = new Map();
     for (const row of (Array.isArray(rows) ? rows : [])) {
         const acc = String((row && row.game_account) || '').trim();
+        const gid = String((row && row.game_id) || '1').trim() || '1';
         if (!acc) continue;
-        if (!out.has(acc)) out.set(acc, []);
-        out.get(acc).push(row);
+        const key = `${gid}::${acc}`;
+        if (!out.has(key)) out.set(key, []);
+        out.get(key).push(row);
     }
     return out;
 }
@@ -97,7 +99,7 @@ function groupByAccount(rows = []) {
 function toProjectedMapBySources(rows = []) {
     const grouped = groupByAccount(rows);
     const out = {};
-    for (const [acc, list] of grouped.entries()) {
+    for (const [key, list] of grouped.entries()) {
         const activeList = list
             .filter((x) => Boolean(x && x.active))
             .map((x) => ({
@@ -107,8 +109,10 @@ function toProjectedMapBySources(rows = []) {
             }));
         const winner = pickWinner(activeList);
         if (!winner) continue;
-        out[acc] = {
-            game_account: acc,
+        out[key] = {
+            game_account: String(winner.game_account || '').trim(),
+            game_id: String(winner.game_id || '1').trim() || '1',
+            game_name: String(winner.game_name || 'WZRY').trim() || 'WZRY',
             reason: String(winner.reason || '').trim(),
             source: String(winner.source || '').trim(),
             priority: Number(winner.priority || 0),
@@ -130,10 +134,12 @@ function toProjectedMapBySources(rows = []) {
 
 async function ensureSourceSnapshotByLegacy(userId, gameAccount, legacyReason = '', options = {}) {
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
+    const acc = String((gameAccount && gameAccount.game_account) || gameAccount || '').trim();
+    const gameId = String((gameAccount && gameAccount.game_id) || options.game_id || '1').trim() || '1';
+    const gameName = String((gameAccount && gameAccount.game_name) || options.game_name || 'WZRY').trim() || 'WZRY';
     if (!uid || !acc) return null;
     const normalized = reasonFromLegacy(legacyReason);
-    return upsertBlacklistSource(uid, acc, normalized.source, {
+    return upsertBlacklistSource(uid, { game_account: acc, game_id: gameId, game_name: gameName }, normalized.source, {
         active: 1,
         reason: normalized.reason,
         priority: normalized.priority,
@@ -151,7 +157,9 @@ async function ensureSourceSnapshotByLegacy(userId, gameAccount, legacyReason = 
 async function reconcileBlacklistForAccount(userId, gameAccount, options = {}) {
     await initUserBlacklistSourceDb();
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
+    const acc = String((gameAccount && gameAccount.game_account) || gameAccount || '').trim();
+    const gameId = String((gameAccount && gameAccount.game_id) || options.game_id || '1').trim() || '1';
+    const gameName = String((gameAccount && gameAccount.game_name) || options.game_name || 'WZRY').trim() || 'WZRY';
     if (!uid || !acc) throw new Error('invalid user/account');
 
     const mode = normalizeMode(options.mode === undefined ? getBlacklistV2Mode() : options.mode);
@@ -159,14 +167,16 @@ async function reconcileBlacklistForAccount(userId, gameAccount, options = {}) {
         ? (mode >= MODE_DUAL_READ_NEW)
         : Boolean(options.apply_projection);
 
-    const rows = await listBlacklistSourcesByUserAndAccounts(uid, [acc], { active_only: false });
+    const key = `${gameId}::${acc}`;
+    const rows = await listBlacklistSourcesByUserAndAccounts(uid, [{ game_account: acc, game_id: gameId, game_name: gameName }], { active_only: false });
     const projected = toProjectedMapBySources(rows);
-    const winner = projected[acc] || null;
+    const winner = projected[key] || null;
 
     if (!applyProjection) {
         return {
             mode,
             account: acc,
+            game_id: gameId,
             projected: winner,
             applied: false,
             removed: false,
@@ -175,7 +185,7 @@ async function reconcileBlacklistForAccount(userId, gameAccount, options = {}) {
     }
 
     if (!winner) {
-        const removed = await hardDeleteUserBlacklistEntry(uid, acc, {
+        const removed = await hardDeleteUserBlacklistEntry(uid, { game_account: acc, game_id: gameId, game_name: gameName }, {
             source: 'reconcile_blacklist_v2',
             operator: String(options.operator || 'system').trim() || 'system',
             desc: String(options.desc || 'reconcile remove by v2').trim() || 'reconcile remove by v2'
@@ -192,6 +202,8 @@ async function reconcileBlacklistForAccount(userId, gameAccount, options = {}) {
 
     await upsertUserBlacklistEntry(uid, {
         game_account: acc,
+        game_id: gameId,
+        game_name: gameName,
         reason: String(winner.reason || '').trim()
     }, {
         source: 'reconcile_blacklist_v2',
@@ -209,6 +221,7 @@ async function reconcileBlacklistForAccount(userId, gameAccount, options = {}) {
     return {
         mode,
         account: acc,
+        game_id: gameId,
         projected: winner,
         applied: true,
         removed: false,
@@ -224,13 +237,23 @@ async function buildProjectedBlacklistByUser(userId, options = {}) {
     const projected = toProjectedMapBySources(rows);
 
     if (options.include_legacy_bootstrap) {
+        const projectedAccountSet = new Set(
+            Object.values(projected || {})
+                .map((row) => String((row && row.game_account) || '').trim())
+                .filter(Boolean)
+        );
         const legacyRows = await listUserBlacklistByUserWithMeta(uid);
         for (const row of (Array.isArray(legacyRows) ? legacyRows : [])) {
             const acc = String((row && row.game_account) || '').trim();
+            const gid = String((row && row.game_id) || '1').trim() || '1';
+            const key = `${gid}::${acc}`;
             if (!acc) continue;
-            if (projected[acc]) continue;
-            projected[acc] = {
+            if (projected[key]) continue;
+            if (projectedAccountSet.has(acc)) continue;
+            projected[key] = {
                 game_account: acc,
+                game_id: gid,
+                game_name: String((row && row.game_name) || 'WZRY').trim() || 'WZRY',
                 reason: String((row && row.reason) || '').trim(),
                 source: 'legacy_shadow',
                 priority: 0,
@@ -247,9 +270,13 @@ function mapLegacyBlacklistRows(rows = []) {
     const out = {};
     for (const row of (Array.isArray(rows) ? rows : [])) {
         const acc = String((row && row.game_account) || '').trim();
+        const gid = String((row && row.game_id) || '1').trim() || '1';
+        const key = `${gid}::${acc}`;
         if (!acc) continue;
-        out[acc] = {
+        out[key] = {
             game_account: acc,
+            game_id: gid,
+            game_name: String((row && row.game_name) || 'WZRY').trim() || 'WZRY',
             reason: String((row && row.reason) || '').trim()
         };
     }
@@ -277,7 +304,8 @@ async function compareLegacyAndProjectedByUser(userId) {
         const projectedReason = projected ? String(projected.reason || '').trim() : '';
         if (!!legacy === !!projected && legacyReason === projectedReason) continue;
         mismatch.push({
-            game_account: acc,
+            game_account: String((legacy || projected || {}).game_account || '').trim(),
+            game_id: (legacy || projected || {}).game_id || '',
             legacy_reason: legacyReason,
             projected_reason: projectedReason,
             projected_source: projected ? String(projected.source || '').trim() : ''

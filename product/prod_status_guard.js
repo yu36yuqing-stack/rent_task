@@ -329,6 +329,8 @@ function buildProbeRows(accounts = []) {
     const list = Array.isArray(accounts) ? accounts : [];
     return list.map((x) => ({
         account: String(x.account || '').trim(),
+        game_id: String(x.game_id || '1').trim() || '1',
+        game_name: String(x.game_name || 'WZRY').trim() || 'WZRY',
         remark: String(x.remark || '').trim(),
         youpin: String(x.youpin || '').trim(),
         uhaozu: String(x.uhaozu || '').trim(),
@@ -401,7 +403,8 @@ async function probeProdOnlineStatus(user, accounts = [], options = {}) {
     for (const row of probeRows) {
         try {
             const r = await queryOnlineStatusCached(user && user.id, row.account, {
-                game_name: 'WZRY',
+                game_id: row.game_id,
+                game_name: row.game_name,
                 auth,
                 desc: 'update by prod_status_guard probe'
             });
@@ -431,12 +434,14 @@ async function probeProdOnlineStatus(user, accounts = [], options = {}) {
 
 async function applyInitialControlForAccount(userId, account, auth, logger) {
     const uid = Number(userId || 0);
-    const acc = String(account || '').trim();
+    const acc = String((account && account.game_account) || account || '').trim();
     if (!uid || !acc) return { ok: false, error: 'invalid_input' };
     try {
-        await setGuardSourcesByProbeAndReconcile(uid, acc, {
+        await setGuardSourcesByProbeAndReconcile(uid, { game_account: acc, game_id: account.game_id, game_name: account.game_name }, {
             online: true,
             forbidden: false,
+            game_id: account.game_id,
+            game_name: account.game_name,
             detail: { type: RISK_TYPE_ONLINE_NON_RENTING, step: 'blacklist_add' }
         }, {
             source: 'prod_guard_init',
@@ -450,12 +455,15 @@ async function applyInitialControlForAccount(userId, account, auth, logger) {
     try {
         forbidRet = await setForbiddenPlayWithSnapshot(uid, acc, true, {
             auth,
-            game_name: 'WZRY',
+            game_id: account.game_id,
+            game_name: account.game_name,
             desc: 'update by prod_status_guard init control'
         });
-        await setGuardSourcesByProbeAndReconcile(uid, acc, {
+        await setGuardSourcesByProbeAndReconcile(uid, { game_account: acc, game_id: account.game_id, game_name: account.game_name }, {
             online: true,
             forbidden: true,
+            game_id: account.game_id,
+            game_name: account.game_name,
             detail: { type: RISK_TYPE_ONLINE_NON_RENTING, step: 'forbidden_enable' }
         }, {
             source: 'prod_guard_init',
@@ -498,7 +506,12 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
         const acc = String((one && one.account) || '').trim();
         if (!acc) continue;
         try {
-            const event = await upsertOpenRiskEvent(uid, acc, RISK_TYPE_ONLINE_NON_RENTING, {
+            const key = {
+                game_account: acc,
+                game_id: String((one && one.game_id) || '1').trim() || '1',
+                game_name: String((one && one.game_name) || 'WZRY').trim() || 'WZRY'
+            };
+            const event = await upsertOpenRiskEvent(uid, key, RISK_TYPE_ONLINE_NON_RENTING, {
                 risk_level: 'high',
                 snapshot: {
                     source: 'prod_status_guard',
@@ -530,6 +543,8 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
             const task = await upsertGuardTask({
                 user_id: uid,
                 game_account: acc,
+                game_id: key.game_id,
+                game_name: key.game_name,
                 risk_type: RISK_TYPE_ONLINE_NON_RENTING,
                 task_type: TASK_TYPE_SHEEP_FIX,
                 status: TASK_STATUS_PENDING,
@@ -540,7 +555,7 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
                 desc: 'auto enqueue by prod_status_guard'
             });
             queued += 1;
-            const initRet = await applyInitialControlForAccount(uid, acc, auth, logger);
+            const initRet = await applyInitialControlForAccount(uid, key, auth, logger);
             if (initRet.ok) {
                 const patch = {
                     status: TASK_STATUS_WATCHING,
@@ -723,7 +738,11 @@ async function processOneSheepFixTask(task, authCache, userSwitchCache, logger) 
     }
 
     if (String(task.status || '') === TASK_STATUS_PENDING) {
-        const initRet = await applyInitialControlForAccount(uid, acc, auth, logger);
+        const initRet = await applyInitialControlForAccount(uid, {
+            game_account: acc,
+            game_id: String(task.game_id || '1').trim() || '1',
+            game_name: String(task.game_name || 'WZRY').trim() || 'WZRY'
+        }, auth, logger);
         if (initRet.ok) {
             const patch = {
                 status: TASK_STATUS_WATCHING,
@@ -750,7 +769,8 @@ async function processOneSheepFixTask(task, authCache, userSwitchCache, logger) 
     let online = false;
     try {
         const probe = await queryOnlineStatusCached(uid, acc, {
-            game_name: 'WZRY',
+            game_id: String(task.game_id || '1').trim() || '1',
+            game_name: String(task.game_name || 'WZRY').trim() || 'WZRY',
             auth,
             desc: 'update by prod_status_guard worker probe'
         });
@@ -781,7 +801,8 @@ async function processOneSheepFixTask(task, authCache, userSwitchCache, logger) 
     try {
         await setForbiddenPlayWithSnapshot(uid, acc, false, {
             auth,
-            game_name: 'WZRY',
+            game_id: String(task.game_id || '1').trim() || '1',
+            game_name: String(task.game_name || 'WZRY').trim() || 'WZRY',
             desc: 'update by prod_status_guard worker release'
         });
     } catch (e) {
@@ -796,7 +817,7 @@ async function processOneSheepFixTask(task, authCache, userSwitchCache, logger) 
         return;
     }
 
-    const delRet = await deleteBlacklistWithGuard(uid, acc, {
+    const delRet = await deleteBlacklistWithGuard(uid, { game_account: acc, game_id: String(task.game_id || '1').trim() || '1', game_name: String(task.game_name || 'WZRY').trim() || 'WZRY' }, {
         source: 'prod_guard',
         operator: 'risk_auto',
         desc: 'auto release by sheep_fix offline',

@@ -52,6 +52,28 @@ function toMoney2(value) {
     return Number(n.toFixed(2));
 }
 
+function normalizeAccountKey(input, fallback = {}) {
+    if (input && typeof input === 'object' && !Array.isArray(input)) {
+        return {
+            game_account: String(input.game_account || input.account || '').trim(),
+            game_id: String(input.game_id || fallback.game_id || '1').trim() || '1',
+            game_name: String(input.game_name || fallback.game_name || 'WZRY').trim() || 'WZRY'
+        };
+    }
+    return {
+        game_account: String(input || '').trim(),
+        game_id: String(fallback.game_id || '1').trim() || '1',
+        game_name: String(fallback.game_name || 'WZRY').trim() || 'WZRY'
+    };
+}
+
+function normalizeAccountKeys(inputs = []) {
+    return Array.from(new Map((Array.isArray(inputs) ? inputs : [])
+        .map((x) => normalizeAccountKey(x))
+        .filter((x) => x.game_account)
+        .map((x) => [`${x.game_id}::${x.game_account}`, x])).values());
+}
+
 function toDateTimeText(value) {
     if (value === null || value === undefined || value === '') return '';
     if (typeof value === 'string' && /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(value)) {
@@ -593,38 +615,37 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
 
-    const uniq = Array.from(new Set((Array.isArray(gameAccounts) ? gameAccounts : [])
-        .map((x) => String(x || '').trim())
-        .filter(Boolean)));
-    if (uniq.length === 0) return {};
+    const keys = normalizeAccountKeys(gameAccounts);
+    if (keys.length === 0) return {};
 
     const day = String(dateText || businessDateText(6)).slice(0, 10);
     const dayStart6 = `${day} 06:00:00`;
     traceOrderCount(
-        `[OrderCount] uid=${uid} now="${new Date().toString()}" tz="${Intl.DateTimeFormat().resolvedOptions().timeZone || ''}" day=${day} window=[${dayStart6}, +1day) accounts=${uniq.length}`
+        `[OrderCount] uid=${uid} now="${new Date().toString()}" tz="${Intl.DateTimeFormat().resolvedOptions().timeZone || ''}" day=${day} window=[${dayStart6}, +1day) accounts=${keys.length}`
     );
-    const placeholders = uniq.map(() => '?').join(',');
+    const tupleSql = keys.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
     const db = openDatabase();
     try {
         const rows = await all(db, `
-            SELECT game_account, COUNT(*) AS cnt
+            SELECT game_id, game_account, COUNT(*) AS cnt
             FROM "order"
             WHERE user_id = ?
               AND is_deleted = 0
-              AND game_account IN (${placeholders})
+              AND (${tupleSql})
               AND start_time >= ?
               AND start_time < datetime(?, '+1 day')
               AND (
                   COALESCE(order_status, '') IN ('租赁中', '出租中')
                   OR COALESCE(rec_amount, 0) > 0
               )
-            GROUP BY game_account
-        `, [uid, ...uniq, dayStart6, dayStart6]);
+            GROUP BY game_id, game_account
+        `, [uid, ...keys.flatMap((x) => [x.game_id, x.game_account]), dayStart6, dayStart6]);
         const out = {};
         for (const row of rows) {
             const acc = String(row.game_account || '').trim();
+            const gid = String(row.game_id || '1').trim() || '1';
             if (!acc) continue;
-            out[acc] = Number(row.cnt || 0);
+            out[`${gid}::${acc}`] = Number(row.cnt || 0);
         }
         const hitAccounts = Object.keys(out);
         const totalCnt = hitAccounts.reduce((sum, acc) => sum + Number(out[acc] || 0), 0);
@@ -633,7 +654,7 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
             .map((acc) => `${acc}:${Number(out[acc] || 0)}`)
             .join(',');
         traceOrderCount(
-            `[OrderCount] uid=${uid} result hit_accounts=${hitAccounts.length}/${uniq.length} total_cnt=${totalCnt} sample="${sample}"`
+            `[OrderCount] uid=${uid} result hit_accounts=${hitAccounts.length}/${keys.length} total_cnt=${totalCnt} sample="${sample}"`
         );
         return out;
     } finally {
@@ -646,38 +667,37 @@ async function listRolling24hPaidOrderCountByAccounts(userId, gameAccounts = [])
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
 
-    const uniq = Array.from(new Set((Array.isArray(gameAccounts) ? gameAccounts : [])
-        .map((x) => String(x || '').trim())
-        .filter(Boolean)));
-    if (uniq.length === 0) return {};
+    const keys = normalizeAccountKeys(gameAccounts);
+    if (keys.length === 0) return {};
 
     const endTime = toDateTimeText(Date.now());
     const startTime = toDateTimeText(Date.now() - 24 * 3600 * 1000);
     traceOrderCount(
-        `[OrderCount24h] uid=${uid} now="${new Date().toString()}" tz="${Intl.DateTimeFormat().resolvedOptions().timeZone || ''}" window=[${startTime}, ${endTime}) accounts=${uniq.length}`
+        `[OrderCount24h] uid=${uid} now="${new Date().toString()}" tz="${Intl.DateTimeFormat().resolvedOptions().timeZone || ''}" window=[${startTime}, ${endTime}) accounts=${keys.length}`
     );
-    const placeholders = uniq.map(() => '?').join(',');
+    const tupleSql = keys.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
     const db = openDatabase();
     try {
         const rows = await all(db, `
-            SELECT game_account, COUNT(*) AS cnt
+            SELECT game_id, game_account, COUNT(*) AS cnt
             FROM "order"
             WHERE user_id = ?
               AND is_deleted = 0
-              AND game_account IN (${placeholders})
+              AND (${tupleSql})
               AND start_time >= ?
               AND start_time < ?
               AND (
                   COALESCE(order_status, '') IN ('租赁中', '出租中')
                   OR COALESCE(rec_amount, 0) > 0
               )
-            GROUP BY game_account
-        `, [uid, ...uniq, startTime, endTime]);
+            GROUP BY game_id, game_account
+        `, [uid, ...keys.flatMap((x) => [x.game_id, x.game_account]), startTime, endTime]);
         const out = {};
         for (const row of rows) {
             const acc = String(row.game_account || '').trim();
+            const gid = String(row.game_id || '1').trim() || '1';
             if (!acc) continue;
-            out[acc] = Number(row.cnt || 0);
+            out[`${gid}::${acc}`] = Number(row.cnt || 0);
         }
         const hitAccounts = Object.keys(out);
         const totalCnt = hitAccounts.reduce((sum, acc) => sum + Number(out[acc] || 0), 0);
@@ -686,7 +706,7 @@ async function listRolling24hPaidOrderCountByAccounts(userId, gameAccounts = [])
             .map((acc) => `${acc}:${Number(out[acc] || 0)}`)
             .join(',');
         traceOrderCount(
-            `[OrderCount24h] uid=${uid} result hit_accounts=${hitAccounts.length}/${uniq.length} total_cnt=${totalCnt} sample="${sample}"`
+            `[OrderCount24h] uid=${uid} result hit_accounts=${hitAccounts.length}/${keys.length} total_cnt=${totalCnt} sample="${sample}"`
         );
         return out;
     } finally {
@@ -699,32 +719,32 @@ async function listRentingOrderWindowByAccounts(userId, gameAccounts = []) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
 
-    const uniq = Array.from(new Set((Array.isArray(gameAccounts) ? gameAccounts : [])
-        .map((x) => String(x || '').trim())
-        .filter(Boolean)));
-    if (uniq.length === 0) return {};
+    const keys = normalizeAccountKeys(gameAccounts);
+    if (keys.length === 0) return {};
 
-    const placeholders = uniq.map(() => '?').join(',');
+    const tupleSql = keys.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
     const db = openDatabase();
     try {
         const rows = await all(db, `
             SELECT
                 game_account,
+                game_id,
                 MIN(start_time) AS start_time,
                 MAX(end_time) AS end_time,
                 COUNT(*) AS cnt
             FROM "order"
             WHERE user_id = ?
               AND is_deleted = 0
-              AND game_account IN (${placeholders})
+              AND (${tupleSql})
               AND COALESCE(order_status, '') IN ('租赁中', '出租中')
-            GROUP BY game_account
-        `, [uid, ...uniq]);
+            GROUP BY game_id, game_account
+        `, [uid, ...keys.flatMap((x) => [x.game_id, x.game_account])]);
         const out = {};
         for (const row of rows) {
             const acc = String(row.game_account || '').trim();
+            const gid = String(row.game_id || '1').trim() || '1';
             if (!acc) continue;
-            out[acc] = {
+            out[`${gid}::${acc}`] = {
                 start_time: String(row.start_time || '').trim(),
                 end_time: String(row.end_time || '').trim(),
                 count: Number(row.cnt || 0)

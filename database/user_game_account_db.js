@@ -331,6 +331,66 @@ function mergeAccountSwitch(baseRaw, patchRaw) {
     return { ...base, ...patch };
 }
 
+function isAliveUniqueConstraintError(err) {
+    const msg = String(err && err.message ? err.message : err || '');
+    return /UNIQUE constraint failed:\s*user_game_account\.user_id,\s*user_game_account\.game_id,\s*user_game_account\.game_account,\s*user_game_account\.is_deleted/i.test(msg);
+}
+
+async function getAliveUserGameAccountRow(db, userId, gameId, gameAccount) {
+    return await get(db, `
+        SELECT * FROM user_game_account
+        WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
+        ORDER BY id DESC
+        LIMIT 1
+    `, [userId, gameId, gameAccount]);
+}
+
+async function writeAliveUserGameAccount(db, row, payload = {}) {
+    const nextStatus = normalizeStatusJson(payload.channel_status || {});
+    const nextPrdInfo = normalizePrdInfoJson(payload.channel_prd_info || {});
+    const nextSwitch = normalizeAccountSwitch(payload.switch || {});
+    const accountRemark = String(payload.account_remark || '').trim();
+    const purchasePriceRaw = Number(payload.purchase_price);
+    const hasPurchasePrice = Number.isFinite(purchasePriceRaw) && purchasePriceRaw >= 0;
+    const purchaseDateRaw = String(payload.purchase_date || '').trim();
+    const hasPurchaseDate = /^\d{4}-\d{2}-\d{2}$/.test(purchaseDateRaw);
+    const finalGameId = canonicalGameId(payload.game_id, payload.game_name || row.game_name || 'WZRY');
+    const finalGameName = canonicalGameNameById(finalGameId, payload.game_name || row.game_name || 'WZRY');
+    const mergedStatus = { ...parseJsonObject(row.channel_status), ...nextStatus };
+    const mergedPrdInfo = { ...parseJsonObject(row.channel_prd_info), ...nextPrdInfo };
+    const mergedSwitch = mergeAccountSwitch(row.switch, nextSwitch);
+    const mergedRemark = accountRemark || String(row.account_remark || '');
+    const mergedPurchasePrice = hasPurchasePrice ? purchasePriceRaw : Number(row.purchase_price || 0);
+    const mergedPurchaseDate = hasPurchaseDate ? purchaseDateRaw : String(row.purchase_date || '').slice(0, 10);
+    const mergedOnlineSnapshot = parseJsonObject(row.online_probe_snapshot);
+    const mergedForbiddenSnapshot = parseJsonObject(row.forbidden_probe_snapshot);
+    const desc = String(payload.desc || '').trim() || String(row.desc || '');
+
+    await run(db, `
+        UPDATE user_game_account
+        SET game_id = ?, game_name = ?, account_remark = ?, channel_status = ?, channel_prd_info = ?,
+            "switch" = ?, online_probe_snapshot = ?, forbidden_probe_snapshot = ?,
+            purchase_price = ?, purchase_date = ?, modify_date = ?, is_deleted = 0, desc = ?
+        WHERE id = ?
+    `, [
+        finalGameId,
+        finalGameName,
+        mergedRemark,
+        JSON.stringify(mergedStatus),
+        JSON.stringify(mergedPrdInfo),
+        JSON.stringify(mergedSwitch),
+        JSON.stringify(mergedOnlineSnapshot),
+        JSON.stringify(mergedForbiddenSnapshot),
+        mergedPurchasePrice,
+        mergedPurchaseDate,
+        nowText(),
+        desc,
+        Number(row.id)
+    ]);
+
+    return await getAliveUserGameAccountRow(db, Number(row.user_id || 0), finalGameId, String(row.game_account || ''));
+}
+
 async function compactCanonicalGameNames(db) {
     const rows = await all(db, `
         SELECT id, user_id, game_account, game_id, game_name, account_remark, channel_status, channel_prd_info
@@ -424,20 +484,16 @@ async function upsertUserGameAccount(input = {}) {
 
     const db = openDatabase();
     try {
-        const row = await get(db, `
-            SELECT * FROM user_game_account
-            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
-            ORDER BY id DESC
-            LIMIT 1
-        `, [userId, gameAccount]);
+        const lookupGameId = hintedGameId;
+        const row = await getAliveUserGameAccountRow(db, userId, lookupGameId, gameAccount);
 
         if (!row) {
             const deletedRow = await get(db, `
                 SELECT * FROM user_game_account
-                WHERE user_id = ? AND game_account = ? AND is_deleted = 1
+                WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 1
                 ORDER BY id DESC
                 LIMIT 1
-            `, [userId, gameAccount]);
+            `, [userId, lookupGameId, gameAccount]);
 
             if (deletedRow) {
                 const finalGameId = hasGameHint
@@ -466,48 +522,86 @@ async function upsertUserGameAccount(input = {}) {
                 const mergedPurchaseDate = hasPurchaseDate ? purchaseDateRaw : String(deletedRow.purchase_date || '').slice(0, 10);
                 const mergedOnlineSnapshot = parseJsonObject(deletedRow.online_probe_snapshot);
                 const mergedForbiddenSnapshot = parseJsonObject(deletedRow.forbidden_probe_snapshot);
-                await run(db, `
-                    UPDATE user_game_account
-                    SET game_id = ?, game_name = ?, account_remark = ?, channel_status = ?, channel_prd_info = ?,
-                        "switch" = ?, online_probe_snapshot = ?, forbidden_probe_snapshot = ?,
-                        purchase_price = ?, purchase_date = ?, modify_date = ?, is_deleted = 0, desc = ?
-                    WHERE id = ?
-                `, [
-                    finalGameId,
-                    finalGameName,
-                    mergedRemark,
-                    JSON.stringify(mergedStatus),
-                    JSON.stringify(mergedPrdInfo),
-                    JSON.stringify(mergedSwitch),
-                    JSON.stringify(mergedOnlineSnapshot),
-                    JSON.stringify(mergedForbiddenSnapshot),
-                    mergedPurchasePrice,
-                    mergedPurchaseDate,
-                    nowText(),
-                    desc || String(deletedRow.desc || ''),
-                    Number(deletedRow.id)
-                ]);
+                try {
+                    await run(db, `
+                        UPDATE user_game_account
+                        SET game_id = ?, game_name = ?, account_remark = ?, channel_status = ?, channel_prd_info = ?,
+                            "switch" = ?, online_probe_snapshot = ?, forbidden_probe_snapshot = ?,
+                            purchase_price = ?, purchase_date = ?, modify_date = ?, is_deleted = 0, desc = ?
+                        WHERE id = ?
+                    `, [
+                        finalGameId,
+                        finalGameName,
+                        mergedRemark,
+                        JSON.stringify(mergedStatus),
+                        JSON.stringify(mergedPrdInfo),
+                        JSON.stringify(mergedSwitch),
+                        JSON.stringify(mergedOnlineSnapshot),
+                        JSON.stringify(mergedForbiddenSnapshot),
+                        mergedPurchasePrice,
+                        mergedPurchaseDate,
+                        nowText(),
+                        desc || String(deletedRow.desc || ''),
+                        Number(deletedRow.id)
+                    ]);
+                } catch (err) {
+                    if (!isAliveUniqueConstraintError(err)) throw err;
+                    const aliveRow = await getAliveUserGameAccountRow(db, userId, finalGameId, gameAccount);
+                    if (!aliveRow) throw err;
+                    await writeAliveUserGameAccount(db, aliveRow, {
+                        user_id: userId,
+                        game_account: gameAccount,
+                        game_id: finalGameId,
+                        game_name: finalGameName,
+                        account_remark: mergedRemark,
+                        channel_status: mergedStatus,
+                        channel_prd_info: mergedPrdInfo,
+                        switch: mergedSwitch,
+                        purchase_price: mergedPurchasePrice,
+                        purchase_date: mergedPurchaseDate,
+                        desc: desc || String(deletedRow.desc || '')
+                    });
+                }
             } else {
                 const finalGameId = hintedGameId;
                 const finalGameName = hintedGameName;
-                await run(db, `
-                    INSERT INTO user_game_account
-                    (user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, "switch", online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, modify_date, is_deleted, desc)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', '{}', ?, ?, ?, 0, ?)
-                `, [
-                    userId,
-                    gameAccount,
-                    accountRemark,
-                    finalGameId,
-                    finalGameName,
-                    JSON.stringify(nextStatus),
-                    JSON.stringify(nextPrdInfo),
-                    JSON.stringify(nextSwitch),
-                    hasPurchasePrice ? purchasePriceRaw : 0,
-                    hasPurchaseDate ? purchaseDateRaw : '',
-                    nowText(),
-                    desc
-                ]);
+                try {
+                    await run(db, `
+                        INSERT INTO user_game_account
+                        (user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, "switch", online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, modify_date, is_deleted, desc)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', '{}', ?, ?, ?, 0, ?)
+                    `, [
+                        userId,
+                        gameAccount,
+                        accountRemark,
+                        finalGameId,
+                        finalGameName,
+                        JSON.stringify(nextStatus),
+                        JSON.stringify(nextPrdInfo),
+                        JSON.stringify(nextSwitch),
+                        hasPurchasePrice ? purchasePriceRaw : 0,
+                        hasPurchaseDate ? purchaseDateRaw : '',
+                        nowText(),
+                        desc
+                    ]);
+                } catch (err) {
+                    if (!isAliveUniqueConstraintError(err)) throw err;
+                    const aliveRow = await getAliveUserGameAccountRow(db, userId, finalGameId, gameAccount);
+                    if (!aliveRow) throw err;
+                    await writeAliveUserGameAccount(db, aliveRow, {
+                        user_id: userId,
+                        game_account: gameAccount,
+                        game_id: finalGameId,
+                        game_name: finalGameName,
+                        account_remark: accountRemark,
+                        channel_status: nextStatus,
+                        channel_prd_info: nextPrdInfo,
+                        switch: nextSwitch,
+                        purchase_price: hasPurchasePrice ? purchasePriceRaw : Number(aliveRow.purchase_price || 0),
+                        purchase_date: hasPurchaseDate ? purchaseDateRaw : String(aliveRow.purchase_date || '').slice(0, 10),
+                        desc
+                    });
+                }
             }
         } else {
             const finalGameId = hasGameHint
@@ -554,12 +648,7 @@ async function upsertUserGameAccount(input = {}) {
             ]);
         }
 
-        const updated = await get(db, `
-            SELECT * FROM user_game_account
-            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
-            ORDER BY id DESC
-            LIMIT 1
-        `, [userId, gameAccount]);
+        const updated = await getAliveUserGameAccountRow(db, userId, lookupGameId, gameAccount);
         return rowToAccount(updated);
     } finally {
         db.close();
@@ -785,7 +874,7 @@ async function listAccountRemarksByUserAndAccounts(userId, gameAccounts = []) {
     }
 }
 
-async function updateUserGameAccountPurchaseByUserAndAccount(userId, gameAccount, purchasePrice, purchaseDate, desc = '') {
+async function updateUserGameAccountPurchaseByUserAndAccount(userId, gameAccount, purchasePrice, purchaseDate, desc = '', gameId = '', gameName = '') {
     await initUserGameAccountDb();
     const uid = Number(userId || 0);
     const acc = String(gameAccount || '').trim();
@@ -801,10 +890,10 @@ async function updateUserGameAccountPurchaseByUserAndAccount(userId, gameAccount
         const row = await get(db, `
             SELECT id
             FROM user_game_account
-            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
             ORDER BY id DESC
             LIMIT 1
-        `, [uid, acc]);
+        `, [uid, canonicalGameId(gameId, gameName || 'WZRY'), acc]);
         if (!row) throw new Error(`找不到账号: ${acc}`);
 
         await run(db, `
@@ -839,7 +928,7 @@ function normalizeProbeSnapshot(kind, input = {}, queryTimeText = nowText()) {
     };
 }
 
-async function getUserGameAccountProbeSnapshotsByUserAndAccount(userId, gameAccount) {
+async function getUserGameAccountProbeSnapshotsByUserAndAccount(userId, gameAccount, gameId = '', gameName = '') {
     await initUserGameAccountDb();
     const uid = Number(userId || 0);
     const acc = String(gameAccount || '').trim();
@@ -851,10 +940,10 @@ async function getUserGameAccountProbeSnapshotsByUserAndAccount(userId, gameAcco
         const row = await get(db, `
             SELECT online_probe_snapshot, forbidden_probe_snapshot
             FROM user_game_account
-            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
             ORDER BY id DESC
             LIMIT 1
-        `, [uid, acc]);
+        `, [uid, canonicalGameId(gameId, gameName || 'WZRY'), acc]);
         if (!row) return { online_probe_snapshot: {}, forbidden_probe_snapshot: {} };
         return {
             online_probe_snapshot: parseJsonObject(row.online_probe_snapshot),
@@ -865,7 +954,7 @@ async function getUserGameAccountProbeSnapshotsByUserAndAccount(userId, gameAcco
     }
 }
 
-async function getLatestUserGameAccountByUserAndAccount(userId, gameAccount) {
+async function getLatestUserGameAccountByUserAndAccount(userId, gameAccount, gameId = '', gameName = '') {
     await initUserGameAccountDb();
     const uid = Number(userId || 0);
     const acc = String(gameAccount || '').trim();
@@ -877,10 +966,10 @@ async function getLatestUserGameAccountByUserAndAccount(userId, gameAccount) {
         const row = await get(db, `
             SELECT *
             FROM user_game_account
-            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
             ORDER BY id DESC
             LIMIT 1
-        `, [uid, acc]);
+        `, [uid, canonicalGameId(gameId, gameName || 'WZRY'), acc]);
         return row ? rowToAccount(row) : null;
     } finally {
         db.close();
@@ -895,15 +984,16 @@ async function updateUserGameAccountOnlineProbeSnapshot(userId, gameAccount, inp
     if (!acc) throw new Error('game_account 不能为空');
     const queryTime = String(input.query_time || nowText()).trim() || nowText();
     const snapshot = normalizeProbeSnapshot('online', input, queryTime);
+    const gid = canonicalGameId(input.game_id, input.game_name || 'WZRY');
     const db = openDatabase();
     try {
         const row = await get(db, `
             SELECT id, desc
             FROM user_game_account
-            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
             ORDER BY id DESC
             LIMIT 1
-        `, [uid, acc]);
+        `, [uid, gid, acc]);
         if (!row) throw new Error(`找不到账号: ${acc}`);
         await run(db, `
             UPDATE user_game_account
@@ -929,15 +1019,16 @@ async function updateUserGameAccountForbiddenProbeSnapshot(userId, gameAccount, 
     if (!acc) throw new Error('game_account 不能为空');
     const queryTime = String(input.query_time || nowText()).trim() || nowText();
     const snapshot = normalizeProbeSnapshot('forbidden', input, queryTime);
+    const gid = canonicalGameId(input.game_id, input.game_name || 'WZRY');
     const db = openDatabase();
     try {
         const row = await get(db, `
             SELECT id, desc
             FROM user_game_account
-            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
             ORDER BY id DESC
             LIMIT 1
-        `, [uid, acc]);
+        `, [uid, gid, acc]);
         if (!row) throw new Error(`找不到账号: ${acc}`);
         await run(db, `
             UPDATE user_game_account
@@ -955,7 +1046,7 @@ async function updateUserGameAccountForbiddenProbeSnapshot(userId, gameAccount, 
     }
 }
 
-async function updateUserGameAccountSwitchByUserAndAccount(userId, gameAccount, patchSwitch = {}, desc = '') {
+async function updateUserGameAccountSwitchByUserAndAccount(userId, gameAccount, patchSwitch = {}, desc = '', gameId = '', gameName = '') {
     await initUserGameAccountDb();
     const uid = Number(userId || 0);
     const acc = String(gameAccount || '').trim();
@@ -967,10 +1058,10 @@ async function updateUserGameAccountSwitchByUserAndAccount(userId, gameAccount, 
         const row = await get(db, `
             SELECT id, "switch", desc
             FROM user_game_account
-            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
             ORDER BY id DESC
             LIMIT 1
-        `, [uid, acc]);
+        `, [uid, canonicalGameId(gameId, gameName || 'WZRY'), acc]);
         if (!row) throw new Error(`找不到账号: ${acc}`);
         const merged = mergeAccountSwitch(row.switch, nextPatch);
         await run(db, `

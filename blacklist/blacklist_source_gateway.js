@@ -29,6 +29,21 @@ function normalizeSource(source = '') {
     return String(source || '').trim().toLowerCase();
 }
 
+function normalizeAccountKey(input, fallback = {}) {
+    if (input && typeof input === 'object' && !Array.isArray(input)) {
+        return {
+            game_account: String(input.game_account || input.account || '').trim(),
+            game_id: String(input.game_id || fallback.game_id || '1').trim() || '1',
+            game_name: String(input.game_name || fallback.game_name || 'WZRY').trim() || 'WZRY'
+        };
+    }
+    return {
+        game_account: String(input || '').trim(),
+        game_id: String(fallback.game_id || '1').trim() || '1',
+        game_name: String(fallback.game_name || 'WZRY').trim() || 'WZRY'
+    };
+}
+
 function normalizeSourceRule(source = '', patch = {}) {
     const src = normalizeSource(source);
     const rule = SOURCE_RULES[src] || null;
@@ -41,7 +56,8 @@ function normalizeSourceRule(source = '', patch = {}) {
 
 async function queryLatestOrderEndSecByAccount(userId, gameAccount) {
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
+    const key = normalizeAccountKey(gameAccount);
+    const acc = key.game_account;
     if (!uid || !acc) return 0;
     await initOrderDb();
     const db = openDatabase();
@@ -52,11 +68,12 @@ async function queryLatestOrderEndSecByAccount(userId, gameAccount) {
                 FROM "order"
                 WHERE user_id = ?
                   AND is_deleted = 0
+                  AND game_id = ?
                   AND game_account = ?
                   AND TRIM(COALESCE(end_time, '')) <> ''
                 ORDER BY datetime(end_time) DESC, id DESC
                 LIMIT 1
-            `, [uid, acc], (err, r) => {
+            `, [uid, key.game_id, acc], (err, r) => {
                 if (err) return reject(err);
                 resolve(r || null);
             });
@@ -69,16 +86,18 @@ async function queryLatestOrderEndSecByAccount(userId, gameAccount) {
 
 async function hasActiveOrderByAccount(userId, gameAccount) {
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
+    const key = normalizeAccountKey(gameAccount);
+    const acc = key.game_account;
     if (!uid || !acc) return false;
-    const map = await listRentingOrderWindowByAccounts(uid, [acc]);
-    const x = map && typeof map === 'object' ? map[acc] : null;
+    const map = await listRentingOrderWindowByAccounts(uid, [key]);
+    const x = map && typeof map === 'object' ? map[`${key.game_id}::${acc}`] : null;
     return Boolean(x && Number(x.count || 0) > 0);
 }
 
 async function upsertSourceAndReconcile(userId, gameAccount, source, patch = {}, opts = {}) {
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
+    const key = normalizeAccountKey(gameAccount, patch);
+    const acc = key.game_account;
     const { src, reason, priority } = normalizeSourceRule(source, patch);
     if (!uid) throw new Error('user_id 非法');
     if (!acc) throw new Error('game_account 不能为空');
@@ -91,15 +110,17 @@ async function upsertSourceAndReconcile(userId, gameAccount, source, patch = {},
     const operator = String(opts.operator || 'system').trim() || 'system';
     const mode = Number(opts.mode === undefined ? getBlacklistV2Mode() : opts.mode);
 
-    const sourceRow = await upsertBlacklistSource(uid, acc, src, {
+    const sourceRow = await upsertBlacklistSource(uid, key, src, {
         active,
         reason,
+        game_id: key.game_id,
+        game_name: key.game_name,
         priority,
         detail,
         expire_at: expireAt
     }, { desc });
 
-    const rec = await reconcileBlacklistForAccount(uid, acc, {
+    const rec = await reconcileBlacklistForAccount(uid, key, {
         mode,
         apply_projection: true,
         operator,
@@ -118,38 +139,47 @@ async function setReasonSourceAndReconcile(userId, gameAccount, reasonText, opts
     else if (reason === '检测在线') source = GUARD_ONLINE_SOURCE;
     else if (reason === '冷却期下架') source = 'order_cooldown';
     else if (/^\d+单下架$/.test(reason)) source = 'order_n_off';
-    return upsertSourceAndReconcile(userId, gameAccount, source, {
+    const key = normalizeAccountKey(gameAccount, opts);
+    return upsertSourceAndReconcile(userId, key, source, {
         active: true,
         reason,
+        game_id: key.game_id,
+        game_name: key.game_name,
         detail: opts.detail || {}
     }, opts);
 }
 
 async function clearSourceAndReconcile(userId, gameAccount, source, opts = {}) {
-    return upsertSourceAndReconcile(userId, gameAccount, source, {
+    const key = normalizeAccountKey(gameAccount, opts);
+    return upsertSourceAndReconcile(userId, key, source, {
         active: false,
+        game_id: key.game_id,
+        game_name: key.game_name,
         detail: opts.detail || {}
     }, opts);
 }
 
 async function setGuardSourcesByProbeAndReconcile(userId, gameAccount, probe = {}, opts = {}) {
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
+    const key = normalizeAccountKey(gameAccount, probe);
+    const acc = key.game_account;
     if (!uid) throw new Error('user_id 非法');
     if (!acc) throw new Error('game_account 不能为空');
 
     const nowSec = Math.floor(Date.now() / 1000);
     const onlineProbe = Boolean(probe.online);
     const forbiddenProbe = Boolean(probe.forbidden);
-    const activeOrder = await hasActiveOrderByAccount(uid, acc);
-    const lastEndSec = await queryLatestOrderEndSecByAccount(uid, acc);
+    const activeOrder = await hasActiveOrderByAccount(uid, key);
+    const lastEndSec = await queryLatestOrderEndSecByAccount(uid, key);
     const withinRecentEnd = Boolean(lastEndSec > 0 && (nowSec - lastEndSec) >= 0 && (nowSec - lastEndSec) <= GUARD_ONLINE_RECENT_END_SEC);
     const onlineActive = onlineProbe && !activeOrder && !withinRecentEnd;
     const cooldownUntilSec = lastEndSec > 0 ? lastEndSec + GUARD_ONLINE_RECENT_END_SEC : 0;
 
     const baseDetail = probe.detail && typeof probe.detail === 'object' ? probe.detail : {};
-    await upsertBlacklistSource(uid, acc, GUARD_ONLINE_SOURCE, {
+    await upsertBlacklistSource(uid, key, GUARD_ONLINE_SOURCE, {
         active: onlineActive,
+        game_id: key.game_id,
+        game_name: key.game_name,
         reason: (SOURCE_RULES[GUARD_ONLINE_SOURCE] && SOURCE_RULES[GUARD_ONLINE_SOURCE].reason) || '检测在线',
         priority: (SOURCE_RULES[GUARD_ONLINE_SOURCE] && SOURCE_RULES[GUARD_ONLINE_SOURCE].priority) || 650,
         detail: {
@@ -165,8 +195,10 @@ async function setGuardSourcesByProbeAndReconcile(userId, gameAccount, probe = {
         expire_at: cooldownUntilSec > nowSec ? nowText(new Date(cooldownUntilSec * 1000)) : ''
     }, { desc: String(opts.desc || '').trim() || 'update guard_online by probe' });
 
-    await upsertBlacklistSource(uid, acc, GUARD_FORBIDDEN_SOURCE, {
+    await upsertBlacklistSource(uid, key, GUARD_FORBIDDEN_SOURCE, {
         active: forbiddenProbe,
+        game_id: key.game_id,
+        game_name: key.game_name,
         reason: (SOURCE_RULES[GUARD_FORBIDDEN_SOURCE] && SOURCE_RULES[GUARD_FORBIDDEN_SOURCE].reason) || '禁玩中',
         priority: (SOURCE_RULES[GUARD_FORBIDDEN_SOURCE] && SOURCE_RULES[GUARD_FORBIDDEN_SOURCE].priority) || 700,
         detail: {
@@ -177,7 +209,7 @@ async function setGuardSourcesByProbeAndReconcile(userId, gameAccount, probe = {
         expire_at: ''
     }, { desc: String(opts.desc || '').trim() || 'update guard_forbidden by probe' });
 
-    const rec = await reconcileBlacklistForAccount(uid, acc, {
+    const rec = await reconcileBlacklistForAccount(uid, key, {
         mode: Number(opts.mode === undefined ? getBlacklistV2Mode() : opts.mode),
         apply_projection: true,
         operator: String(opts.operator || 'system').trim() || 'system',

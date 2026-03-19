@@ -135,7 +135,11 @@ function calcUhaozuRentHour(rentNum, rentWay) {
 function mapUuzuhaoOrderToUserOrder(raw = {}, options = {}) {
     const gameAccount = String(options.game_account || raw.accountNo || '').trim();
     const roleName = String(options.role_name || raw.remarkName || '').trim();
-    const normalizedGame = normalizeGameProfile(raw.gameId, raw.gameName, { preserveUnknown: true });
+    const normalizedGame = normalizeGameProfile(
+        options.game_id === undefined ? raw.gameId : options.game_id,
+        options.game_name === undefined ? raw.gameName : options.game_name,
+        { preserveUnknown: true }
+    );
     const rentPrice = toNumberSafe(raw.rentPrice, 0);
     const rentHour = toNumberSafe(raw.rentHour, 0);
     const receivableAmount = toNumberSafe(raw.receivableAmount, 0);

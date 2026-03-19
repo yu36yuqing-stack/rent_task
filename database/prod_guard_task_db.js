@@ -57,6 +57,8 @@ async function initProdGuardTaskDb() {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 game_account TEXT NOT NULL DEFAULT '',
+                game_id TEXT NOT NULL DEFAULT '1',
+                game_name TEXT NOT NULL DEFAULT 'WZRY',
                 risk_type TEXT NOT NULL DEFAULT '',
                 task_type TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'pending',
@@ -78,6 +80,8 @@ async function initProdGuardTaskDb() {
                 desc TEXT NOT NULL DEFAULT ''
             )
         `);
+        await ensureColumn(db, 'prod_guard_task', 'game_id', 'game_id TEXT NOT NULL DEFAULT \'1\'');
+        await ensureColumn(db, 'prod_guard_task', 'game_name', 'game_name TEXT NOT NULL DEFAULT \'WZRY\'');
         // 历史约束：同账号同任务类型只能有一条，会导致跨事件复用同一任务。
         // 新约束：同一事件只能有一条任务，事件结束后新事件创建新任务。
         await run(db, `DROP INDEX IF EXISTS uq_prod_guard_task_alive`);
@@ -126,6 +130,8 @@ async function upsertGuardTask(input = {}, options = {}) {
     await initProdGuardTaskDb();
     const uid = Number(input.user_id || 0);
     const acc = String(input.game_account || '').trim();
+    const gameId = String(input.game_id || '1').trim() || '1';
+    const gameName = String(input.game_name || 'WZRY').trim() || 'WZRY';
     const riskType = String(input.risk_type || '').trim();
     const taskType = String(input.task_type || '').trim();
     if (!uid) throw new Error('user_id 不合法');
@@ -152,11 +158,11 @@ async function upsertGuardTask(input = {}, options = {}) {
         if (!old) {
             const ret = await run(db, `
                 INSERT INTO prod_guard_task
-                (user_id, game_account, risk_type, task_type, status, event_id, next_check_at, last_online_tag,
+                (user_id, game_account, game_id, game_name, risk_type, task_type, status, event_id, next_check_at, last_online_tag,
                  blacklist_applied, forbidden_applied, retry_count, max_retry, probe_loop_count,
                  last_error, forbidden_on_at, forbidden_off_at, finished_at, create_date, modify_date, is_deleted, desc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, 0, 0, ?, 0, '', '', '', '', ?, ?, 0, ?)
-            `, [uid, acc, riskType, taskType, status, eventId, nextCheckAt, maxRetry, now, now, desc]);
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0, 0, 0, ?, 0, '', '', '', '', ?, ?, 0, ?)
+            `, [uid, acc, gameId, gameName, riskType, taskType, status, eventId, nextCheckAt, maxRetry, now, now, desc]);
             return { id: Number(ret.lastID || 0), inserted: true };
         }
         await run(db, `
@@ -194,7 +200,7 @@ async function listDueGuardTasks(options = {}) {
     try {
         const rows = await all(db, `
             SELECT
-              id, user_id, game_account, risk_type, task_type, status, event_id,
+              id, user_id, game_account, game_id, game_name, risk_type, task_type, status, event_id,
               next_check_at, last_online_tag, blacklist_applied, forbidden_applied,
               retry_count, max_retry, probe_loop_count, last_error, forbidden_on_at, forbidden_off_at,
               finished_at, create_date, modify_date, desc
@@ -209,6 +215,8 @@ async function listDueGuardTasks(options = {}) {
             id: Number(r.id || 0),
             user_id: Number(r.user_id || 0),
             game_account: String(r.game_account || '').trim(),
+            game_id: String(r.game_id || '1').trim() || '1',
+            game_name: String(r.game_name || 'WZRY').trim() || 'WZRY',
             risk_type: String(r.risk_type || '').trim(),
             task_type: String(r.task_type || '').trim(),
             status: String(r.status || '').trim(),
@@ -241,7 +249,7 @@ async function getGuardTaskByEventId(eventId) {
     try {
         const r = await get(db, `
             SELECT
-              id, user_id, game_account, risk_type, task_type, status, event_id,
+              id, user_id, game_account, game_id, game_name, risk_type, task_type, status, event_id,
               next_check_at, last_online_tag, blacklist_applied, forbidden_applied,
               retry_count, max_retry, probe_loop_count, last_error, forbidden_on_at, forbidden_off_at,
               finished_at, create_date, modify_date, desc
@@ -255,6 +263,8 @@ async function getGuardTaskByEventId(eventId) {
             id: Number(r.id || 0),
             user_id: Number(r.user_id || 0),
             game_account: String(r.game_account || '').trim(),
+            game_id: String(r.game_id || '1').trim() || '1',
+            game_name: String(r.game_name || 'WZRY').trim() || 'WZRY',
             risk_type: String(r.risk_type || '').trim(),
             task_type: String(r.task_type || '').trim(),
             status: String(r.status || '').trim(),

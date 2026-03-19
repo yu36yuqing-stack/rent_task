@@ -230,7 +230,7 @@ async function listActiveRentingOrdersByUser(userId) {
     const db = openDatabase();
     try {
         const rows = await dbAll(db, `
-            SELECT game_account, start_time, end_time, order_no, channel
+            SELECT game_account, game_id, game_name, start_time, end_time, order_no, channel
             FROM "order"
             WHERE user_id = ?
               AND is_deleted = 0
@@ -239,6 +239,8 @@ async function listActiveRentingOrdersByUser(userId) {
         `, [uid]);
         return rows.map((r) => ({
             game_account: String(r.game_account || '').trim(),
+            game_id: String(r.game_id || '1').trim() || '1',
+            game_name: String(r.game_name || 'WZRY').trim() || 'WZRY',
             start_time: String(r.start_time || '').trim(),
             end_time: String(r.end_time || '').trim(),
             order_no: String(r.order_no || '').trim(),
@@ -267,9 +269,13 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
         const untilSec = endSec + endDelaySec;
         if (untilSec <= nowSec) continue;
         const acc = row.game_account;
-        const prev = cooldownByAccount.get(acc);
+        const key = `${row.game_id}::${acc}`;
+        const prev = cooldownByAccount.get(key);
         if (!prev || untilSec > prev.cooldown_until) {
-            cooldownByAccount.set(acc, {
+            cooldownByAccount.set(key, {
+                game_account: acc,
+                game_id: row.game_id,
+                game_name: row.game_name,
                 cooldown_until: untilSec,
                 order_no: row.order_no,
                 channel: row.channel
@@ -278,13 +284,13 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
     }
 
     const current = await listUserBlacklistByUserWithMeta(uid);
-    const currentMap = new Map(current.map((x) => [String(x.game_account || '').trim(), x]));
+    const currentMap = new Map(current.map((x) => [`${String(x.game_id || '1').trim() || '1'}::${String(x.game_account || '').trim()}`, x]));
     let added = 0;
     let updated = 0;
     let skipped_conflict = 0;
 
-    for (const [acc, meta] of cooldownByAccount.entries()) {
-        const old = currentMap.get(acc);
+    for (const [key, meta] of cooldownByAccount.entries()) {
+        const old = currentMap.get(key);
         const oldReason = String((old && old.reason) || '').trim();
         if (old && oldReason && oldReason !== COOLDOWN_REASON) {
             skipped_conflict += 1;
@@ -295,7 +301,11 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
             source_channel: meta.channel,
             updated_at_sec: nowSec
         });
-        await upsertSourceAndReconcile(uid, acc, 'order_cooldown', {
+        await upsertSourceAndReconcile(uid, {
+            game_account: meta.game_account,
+            game_id: meta.game_id,
+            game_name: meta.game_name
+        }, 'order_cooldown', {
             active: true,
             reason: COOLDOWN_REASON,
             expire_at: new Date(meta.cooldown_until * 1000).toISOString().slice(0, 19).replace('T', ' '),
@@ -329,6 +339,7 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
     if (!uid) throw new Error('user_id 不合法');
     const freshWindowSec = Math.max(60, Number(options.fresh_window_sec || COOLDOWN_SYNC_FRESH_WINDOW_SEC));
     const endDelaySec = Math.max(0, Number(options.end_delay_sec || COOLDOWN_END_DELAY_SEC));
+    const nearEndSec = Math.max(0, Number(options.near_end_sec || COOLDOWN_NEAR_END_SEC));
     const nowSec = Math.floor(Date.now() / 1000);
     const freshness = await isOrderSyncFreshByUser(uid, freshWindowSec);
     if (!freshness.fresh) {
@@ -347,18 +358,24 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
 
     for (const row of sourceRows) {
         const acc = String(row.game_account || '').trim();
+        const gid = String(row.game_id || '1').trim() || '1';
         if (!acc) continue;
-        releaseCandidates.set(acc, {
+        releaseCandidates.set(`${gid}::${acc}`, {
             game_account: acc,
+            game_id: gid,
+            game_name: String(row.game_name || 'WZRY').trim() || 'WZRY',
             source_row: row,
             legacy_row: null
         });
     }
     for (const row of legacyCooldownRows) {
         const acc = String(row.game_account || '').trim();
-        if (!acc || releaseCandidates.has(acc)) continue;
-        releaseCandidates.set(acc, {
+        const gid = String(row.game_id || '1').trim() || '1';
+        if (!acc || releaseCandidates.has(`${gid}::${acc}`)) continue;
+        releaseCandidates.set(`${gid}::${acc}`, {
             game_account: acc,
+            game_id: gid,
+            game_name: String(row.game_name || 'WZRY').trim() || 'WZRY',
             source_row: null,
             legacy_row: row
         });
@@ -393,8 +410,14 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
         }
         if (meta.source_order_no) {
             const orderStatus = await getOrderStatusByOrderNo(uid, meta.source_order_no, meta.source_channel);
+            const endTime = await getOrderEndTimeByOrderNo(uid, meta.source_order_no, meta.source_channel);
+            const endSec = parseDateTimeTextToSec(endTime);
             if (orderStatus === '已退款') {
-                await upsertSourceAndReconcile(uid, acc, 'order_cooldown', {
+                await upsertSourceAndReconcile(uid, {
+                    game_account: acc,
+                    game_id: candidate.game_id,
+                    game_name: candidate.game_name
+                }, 'order_cooldown', {
                     active: false,
                     reason: COOLDOWN_REASON,
                     detail: {
@@ -410,12 +433,37 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
                 released_by_refund += 1;
                 continue;
             }
+            if (endSec > nowSec && (endSec - nowSec) > nearEndSec) {
+                await upsertSourceAndReconcile(uid, {
+                    game_account: acc,
+                    game_id: candidate.game_id,
+                    game_name: candidate.game_name
+                }, 'order_cooldown', {
+                    active: false,
+                    reason: COOLDOWN_REASON,
+                    detail: {
+                        released_by: 'end_time_moved_out_of_cooldown_window',
+                        source_order_no: meta.source_order_no,
+                        end_time: endTime
+                    }
+                }, {
+                    source: COOLDOWN_SOURCE,
+                    operator: 'product_sync',
+                    desc: `auto release by latest end_time out of cooldown window (${meta.source_order_no})`,
+                });
+                released += 1;
+                continue;
+            }
         }
         if (nowSec < untilSec) {
             pending += 1;
             continue;
         }
-        await upsertSourceAndReconcile(uid, acc, 'order_cooldown', {
+        await upsertSourceAndReconcile(uid, {
+            game_account: acc,
+            game_id: candidate.game_id,
+            game_name: candidate.game_name
+        }, 'order_cooldown', {
             active: false,
             reason: COOLDOWN_REASON,
             detail: {

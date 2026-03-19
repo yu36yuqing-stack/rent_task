@@ -45,6 +45,8 @@ async function initProdRiskEventDb() {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 game_account TEXT NOT NULL DEFAULT '',
+                game_id TEXT NOT NULL DEFAULT '1',
+                game_name TEXT NOT NULL DEFAULT 'WZRY',
                 risk_type TEXT NOT NULL DEFAULT '',
                 risk_level TEXT NOT NULL DEFAULT 'medium',
                 status TEXT NOT NULL DEFAULT 'open',
@@ -57,9 +59,15 @@ async function initProdRiskEventDb() {
                 desc TEXT NOT NULL DEFAULT ''
             )
         `);
+        const cols = await all(db, `PRAGMA table_info("prod_risk_event")`);
+        const hasGameId = cols.some((r) => String(r.name || '').trim() === 'game_id');
+        const hasGameName = cols.some((r) => String(r.name || '').trim() === 'game_name');
+        if (!hasGameId) await run(db, `ALTER TABLE prod_risk_event ADD COLUMN game_id TEXT NOT NULL DEFAULT '1'`);
+        if (!hasGameName) await run(db, `ALTER TABLE prod_risk_event ADD COLUMN game_name TEXT NOT NULL DEFAULT 'WZRY'`);
         // 历史约束会限制同账号同风险类型只能有一条 resolved/ignored 记录，
         // 新模型要求“每次事件独立”，仅限制 open 态唯一。
         await run(db, `DROP INDEX IF EXISTS uq_prod_risk_event_alive`);
+        await run(db, `DROP INDEX IF EXISTS uq_prod_risk_event_open_alive`);
         // 迁移兜底：清理历史重复 open，保留最新一条，避免唯一索引创建失败。
         await run(db, `
             UPDATE prod_risk_event
@@ -74,7 +82,8 @@ async function initProdRiskEventDb() {
                 SELECT p1.id
                 FROM prod_risk_event p1
                 JOIN prod_risk_event p2
-                  ON p1.user_id = p2.user_id
+                 ON p1.user_id = p2.user_id
+                 AND COALESCE(p1.game_id, '1') = COALESCE(p2.game_id, '1')
                  AND p1.game_account = p2.game_account
                  AND p1.risk_type = p2.risk_type
                  AND p1.status = 'open'
@@ -86,7 +95,7 @@ async function initProdRiskEventDb() {
         `);
         await run(db, `
             CREATE UNIQUE INDEX IF NOT EXISTS uq_prod_risk_event_open_alive
-            ON prod_risk_event(user_id, game_account, risk_type)
+            ON prod_risk_event(user_id, game_id, game_account, risk_type)
             WHERE is_deleted = 0 AND status = 'open'
         `);
         await run(db, `
@@ -153,7 +162,9 @@ function mergeSnapshotForOpenEvent(oldSnapshotRaw, nextSnapshotRaw, now) {
 async function upsertOpenRiskEvent(userId, gameAccount, riskType, options = {}) {
     await initProdRiskEventDb();
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
+    const acc = String((gameAccount && gameAccount.game_account) || gameAccount || '').trim();
+    const gameId = String((gameAccount && gameAccount.game_id) || options.game_id || '1').trim() || '1';
+    const gameName = String((gameAccount && gameAccount.game_name) || options.game_name || 'WZRY').trim() || 'WZRY';
     const type = String(riskType || '').trim();
     if (!uid) throw new Error('user_id 不合法');
     if (!acc) throw new Error('game_account 不能为空');
@@ -169,19 +180,20 @@ async function upsertOpenRiskEvent(userId, gameAccount, riskType, options = {}) 
             SELECT id, snapshot
             FROM prod_risk_event
             WHERE user_id = ?
+              AND game_id = ?
               AND game_account = ?
               AND risk_type = ?
               AND status = ?
               AND is_deleted = 0
             LIMIT 1
-        `, [uid, acc, type, STATUS_OPEN]);
+        `, [uid, gameId, acc, type, STATUS_OPEN]);
         if (!old) {
             const snapshot = safeJsonText(normalizeSnapshot(options.snapshot, now));
             const ret = await run(db, `
                 INSERT INTO prod_risk_event
-                (user_id, game_account, risk_type, risk_level, status, hit_at, resolved_at, snapshot, create_date, modify_date, is_deleted, desc)
-                VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, 0, ?)
-            `, [uid, acc, type, level, STATUS_OPEN, now, snapshot, now, now, desc]);
+                (user_id, game_account, game_id, game_name, risk_type, risk_level, status, hit_at, resolved_at, snapshot, create_date, modify_date, is_deleted, desc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, 0, ?)
+            `, [uid, acc, gameId, gameName, type, level, STATUS_OPEN, now, snapshot, now, now, desc]);
             return { id: Number(ret.lastID || 0), inserted: true };
         }
         const snapshot = safeJsonText(mergeSnapshotForOpenEvent(old.snapshot, options.snapshot, now));
@@ -202,7 +214,8 @@ async function upsertOpenRiskEvent(userId, gameAccount, riskType, options = {}) 
 async function resolveOpenRiskEvent(userId, gameAccount, riskType, options = {}) {
     await initProdRiskEventDb();
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
+    const acc = String((gameAccount && gameAccount.game_account) || gameAccount || '').trim();
+    const gameId = String((gameAccount && gameAccount.game_id) || options.game_id || '1').trim() || '1';
     const type = String(riskType || '').trim();
     if (!uid || !acc || !type) return false;
     const now = nowText();
@@ -217,11 +230,12 @@ async function resolveOpenRiskEvent(userId, gameAccount, riskType, options = {})
                 modify_date = ?,
                 desc = CASE WHEN ? <> '' THEN ? ELSE desc END
             WHERE user_id = ?
+              AND game_id = ?
               AND game_account = ?
               AND risk_type = ?
               AND status = ?
               AND is_deleted = 0
-        `, [status, now, now, desc, desc, uid, acc, type, STATUS_OPEN]);
+        `, [status, now, now, desc, desc, uid, gameId, acc, type, STATUS_OPEN]);
         return Number(ret.changes || 0) > 0;
     } finally {
         db.close();

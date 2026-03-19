@@ -7,6 +7,7 @@ const {
     clearPlatformStatusForUser,
     softDeleteEmptyAccountsByUser
 } = require('../database/user_game_account_db');
+const { openDatabase } = require('../database/sqlite_client');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { releaseOrderCooldownBlacklistByUser } = require('../order/order_cooldown');
 const { normalizeZuhaowangAuthPayload } = require('../user/user');
@@ -85,6 +86,89 @@ function isAuthUsable(row = {}) {
         if (!Number.isNaN(t) && t <= Date.now()) return false;
     }
     return true;
+}
+
+function dbAll(db, sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.all(sql, params, (err, rows) => {
+            if (err) return reject(err);
+            resolve(rows || []);
+        });
+    });
+}
+
+function isNonEmptyObject(input) {
+    return Boolean(input && typeof input === 'object' && !Array.isArray(input) && Object.keys(input).length > 0);
+}
+
+async function ensureLinkedGameAccountsByOrders(userId) {
+    const uid = Number(userId || 0);
+    if (!uid) return { mirrored: 0, skipped: 0 };
+
+    const existingRows = await listAllUserGameAccountsByUser(uid);
+    const byAccount = new Map();
+    for (const row of existingRows) {
+        const acc = String((row && row.game_account) || '').trim();
+        if (!acc) continue;
+        const arr = byAccount.get(acc) || [];
+        arr.push(row);
+        byAccount.set(acc, arr);
+    }
+
+    const db = openDatabase();
+    try {
+        const orderRows = await dbAll(db, `
+            SELECT DISTINCT user_id, game_account, game_id, game_name, MAX(COALESCE(role_name, '')) AS role_name
+            FROM "order"
+            WHERE user_id = ?
+              AND is_deleted = 0
+              AND TRIM(COALESCE(game_account, '')) <> ''
+              AND TRIM(COALESCE(game_id, '')) <> ''
+            GROUP BY user_id, game_account, game_id, game_name
+        `, [uid]);
+
+        let mirrored = 0;
+        let skipped = 0;
+        for (const row of orderRows) {
+            const acc = String(row.game_account || '').trim();
+            const gameId = String(row.game_id || '').trim();
+            const gameName = String(row.game_name || '').trim();
+            if (!acc || !gameId) continue;
+
+            const current = byAccount.get(acc) || [];
+            const base = current[0];
+            if (!base) {
+                skipped += 1;
+                continue;
+            }
+
+            const sameGameRow = current.find((x) => String(x.game_id || '').trim() === gameId);
+            if (sameGameRow && isNonEmptyObject(sameGameRow.channel_status) && isNonEmptyObject(sameGameRow.channel_prd_info)) {
+                continue;
+            }
+
+            const next = await upsertUserGameAccount({
+                user_id: uid,
+                game_account: acc,
+                game_id: gameId,
+                game_name: gameName,
+                account_remark: String(base.account_remark || row.role_name || '').trim(),
+                channel_status: base.channel_status || {},
+                channel_prd_info: base.channel_prd_info || {},
+                switch: base.switch || {},
+                purchase_price: Number(base.purchase_price || 0),
+                purchase_date: String(base.purchase_date || '').slice(0, 10),
+                desc: 'mirror by linked order game'
+            });
+            current.push(next);
+            byAccount.set(acc, current);
+            mirrored += 1;
+        }
+
+        return { mirrored, skipped };
+    } finally {
+        db.close();
+    }
 }
 
 async function pullPlatformDataByAuth(platform, authPayload = {}) {
@@ -202,6 +286,8 @@ async function syncUserAccountsByAuth(userId) {
         upserted += 1;
     }
 
+    const mirroredByOrders = await ensureLinkedGameAccountsByOrders(uid);
+
     const cleaned = await softDeleteEmptyAccountsByUser(uid);
 
     return {
@@ -210,6 +296,7 @@ async function syncUserAccountsByAuth(userId) {
         platforms: validPlatforms,
         pulled,
         upserted,
+        mirrored_by_orders: mirroredByOrders,
         cleaned,
         order_cooldown_release: cooldownRelease,
         errors
@@ -234,5 +321,6 @@ async function listAllUserGameAccountsByUser(userId) {
 
 module.exports = {
     syncUserAccountsByAuth,
-    listAllUserGameAccountsByUser
+    listAllUserGameAccountsByUser,
+    ensureLinkedGameAccountsByOrders
 };

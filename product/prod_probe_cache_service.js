@@ -53,12 +53,12 @@ async function resolveUuzuhaoAuthByUser(userId) {
     return payload;
 }
 
-async function resolveAccountGameProfile(userId, gameAccount, fallbackGameName = 'WZRY') {
+async function resolveAccountGameProfile(userId, gameAccount, fallbackGameName = 'WZRY', options = {}) {
     const uid = Number(userId || 0);
     const acc = String(gameAccount || '').trim();
     if (!uid || !acc) return { game_id: '1', game_name: fallbackGameName };
     try {
-        const row = await getLatestUserGameAccountByUserAndAccount(uid, acc);
+        const row = await getLatestUserGameAccountByUserAndAccount(uid, acc, options.game_id || '', fallbackGameName);
         if (!row) return { game_id: '1', game_name: fallbackGameName };
         return {
             game_id: String(row.game_id || '1').trim() || '1',
@@ -75,12 +75,14 @@ async function queryOnlineStatusCached(userId, gameAccount, options = {}) {
     const gameName = String(options.game_name || 'WZRY').trim() || 'WZRY';
     if (!uid) throw new Error('user_id 不合法');
     if (!acc) throw new Error('game_account 不能为空');
-    const profile = await resolveAccountGameProfile(uid, acc, gameName);
+    const profile = await resolveAccountGameProfile(uid, acc, gameName, options);
     const finalGameName = String(profile.game_name || gameName).trim() || gameName;
     if (!ONLINE_SUPPORTED_GAME_IDS.has(String(profile.game_id || '').trim())) {
         const queryTime = nowText();
         await updateUserGameAccountOnlineProbeSnapshot(uid, acc, {
             online: false,
+            game_id: String(profile.game_id || '').trim() || '1',
+            game_name: finalGameName,
             query_time: queryTime,
             skipped: true,
             skip_reason: `online_not_supported_for_game_id_${String(profile.game_id)}`
@@ -100,7 +102,7 @@ async function queryOnlineStatusCached(userId, gameAccount, options = {}) {
     const forceRefresh = Boolean(options.force_refresh);
 
     if (!forceRefresh) {
-        const cached = await getUserGameAccountProbeSnapshotsByUserAndAccount(uid, acc);
+        const cached = await getUserGameAccountProbeSnapshotsByUserAndAccount(uid, acc, profile.game_id, finalGameName);
         const snap = cached && cached.online_probe_snapshot && typeof cached.online_probe_snapshot === 'object'
             ? cached.online_probe_snapshot
             : {};
@@ -122,10 +124,12 @@ async function queryOnlineStatusCached(userId, gameAccount, options = {}) {
         : await resolveUuzuhaoAuthByUser(uid);
     const result = await queryAccountOnlineStatus(acc, finalGameName, { auth });
     const queryTime = nowText();
-    await updateUserGameAccountOnlineProbeSnapshot(uid, acc, {
-        online: Boolean(result && result.online),
-        query_time: queryTime
-    }, String(options.desc || 'update by probe cache service').trim());
+        await updateUserGameAccountOnlineProbeSnapshot(uid, acc, {
+            online: Boolean(result && result.online),
+            game_id: String(profile.game_id || '').trim() || '1',
+            game_name: finalGameName,
+            query_time: queryTime
+        }, String(options.desc || 'update by probe cache service').trim());
     return {
         game_account: acc,
         game_name: String((result && result.game_name) || finalGameName).trim() || finalGameName,
@@ -144,11 +148,11 @@ async function queryForbiddenStatusCached(userId, gameAccount, options = {}) {
     const ttlSec = Math.max(1, Number(options.ttl_sec || DEFAULT_PROBE_CACHE_TTL_SEC));
     const nowSec = Math.floor(Date.now() / 1000);
     const forceRefresh = Boolean(options.force_refresh);
-    const profile = await resolveAccountGameProfile(uid, acc, gameName);
+    const profile = await resolveAccountGameProfile(uid, acc, gameName, options);
     const finalGameName = String(profile.game_name || gameName).trim() || gameName;
 
     if (!forceRefresh) {
-        const cached = await getUserGameAccountProbeSnapshotsByUserAndAccount(uid, acc);
+        const cached = await getUserGameAccountProbeSnapshotsByUserAndAccount(uid, acc, profile.game_id, finalGameName);
         const snap = cached && cached.forbidden_probe_snapshot && typeof cached.forbidden_probe_snapshot === 'object'
             ? cached.forbidden_probe_snapshot
             : {};
@@ -173,6 +177,8 @@ async function queryForbiddenStatusCached(userId, gameAccount, options = {}) {
     const queryTime = nowText();
     await updateUserGameAccountForbiddenProbeSnapshot(uid, acc, {
         enabled: Boolean(result && result.enabled),
+        game_id: String(profile.game_id || '').trim() || '1',
+        game_name: finalGameName,
         query_time: queryTime
     }, String(options.desc || 'update by probe cache service').trim());
     return {
@@ -191,7 +197,7 @@ async function setForbiddenPlayWithSnapshot(userId, gameAccount, enabled, option
     const gameName = String(options.game_name || 'WZRY').trim() || 'WZRY';
     if (!uid) throw new Error('user_id 不合法');
     if (!acc) throw new Error('game_account 不能为空');
-    const profile = await resolveAccountGameProfile(uid, acc, gameName);
+    const profile = await resolveAccountGameProfile(uid, acc, gameName, options);
     const finalGameName = String(profile.game_name || gameName).trim() || gameName;
     const auth = options.auth && typeof options.auth === 'object'
         ? options.auth
@@ -200,6 +206,8 @@ async function setForbiddenPlayWithSnapshot(userId, gameAccount, enabled, option
     const queryTime = nowText();
     await updateUserGameAccountForbiddenProbeSnapshot(uid, acc, {
         enabled: Boolean(result && result.enabled),
+        game_id: String(profile.game_id || '').trim() || '1',
+        game_name: finalGameName,
         query_time: queryTime
     }, String(options.desc || 'update by probe set').trim());
     return {

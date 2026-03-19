@@ -491,22 +491,24 @@ async function handleProducts(req, res, urlObj) {
         : 'all';
     const mode = Number(getBlacklistV2Mode());
     const blacklistRows = await listUserBlacklistByUserWithMeta(user.id);
+    const keyOfGameAccount = (gameId, gameAccount) => `${String(gameId || '1').trim() || '1'}::${String(gameAccount || '').trim()}`;
     const legacyMap = {};
     for (const row of blacklistRows) {
         const acc = String((row && row.game_account) || '').trim();
+        const gid = String((row && row.game_id) || '1').trim() || '1';
         if (!acc) continue;
-        legacyMap[acc] = row;
+        legacyMap[keyOfGameAccount(gid, acc)] = row;
     }
     const blacklistMap = {};
     if (mode >= 2) {
         const projected = await buildProjectedBlacklistByUser(user.id, { include_legacy_bootstrap: true });
-        for (const acc of Object.keys(projected || {})) {
-            const p = projected[acc] || {};
-            const legacy = legacyMap[acc] || {};
+        for (const identityKey of Object.keys(projected || {})) {
+            const p = projected[identityKey] || {};
+            const legacy = legacyMap[identityKey] || {};
             const reason = String(p.reason || '').trim();
             const createDate = String((legacy && legacy.create_date) || '').trim();
             const winnerDetail = p.winner_detail && typeof p.winner_detail === 'object' ? p.winner_detail : {};
-            blacklistMap[acc] = {
+            blacklistMap[identityKey] = {
                 reason,
                 remark: String((legacy && legacy.remark) || '').trim(),
                 create_date: createDate,
@@ -521,8 +523,9 @@ async function handleProducts(req, res, urlObj) {
     } else {
         for (const row of blacklistRows) {
             const acc = String((row && row.game_account) || '').trim();
+            const gid = String((row && row.game_id) || '1').trim() || '1';
             if (!acc) continue;
-            blacklistMap[acc] = {
+            blacklistMap[keyOfGameAccount(gid, acc)] = {
                 reason: String((row && row.reason) || '').trim(),
                 remark: String((row && row.remark) || '').trim(),
                 create_date: String((row && row.create_date) || '').trim(),
@@ -534,9 +537,15 @@ async function handleProducts(req, res, urlObj) {
     const orderOffRule = await getOrderOffRuleByUser(user.id);
     const allRows = await listAllAccountsByUser(user.id);
     const scopedRows = allRows.list.filter((x) => String((x && x.game_name) || '').trim() === gameName);
-    const allAccs = scopedRows.map((x) => String(x.game_account || '').trim()).filter(Boolean);
+    const allAccs = scopedRows.map((x) => ({
+        game_account: String((x && x.game_account) || '').trim(),
+        game_id: String((x && x.game_id) || '1').trim() || '1',
+        game_name: String((x && x.game_name) || 'WZRY').trim() || 'WZRY'
+    })).filter((x) => x.game_account);
     const accountRowMap = new Map(
-        scopedRows.map((x) => [String((x && x.game_account) || '').trim(), x]).filter(([acc]) => Boolean(acc))
+        scopedRows
+            .map((x) => [keyOfGameAccount(x && x.game_id, x && x.game_account), x])
+            .filter(([acc]) => Boolean(acc))
     );
     const paidMap = allAccs.length > 0
         ? (orderOffRule.mode === ORDER_OFF_MODE_ROLLING_24H
@@ -546,7 +555,9 @@ async function handleProducts(req, res, urlObj) {
     const rentingWindowMap = allAccs.length > 0
         ? await listRentingOrderWindowByAccounts(user.id, allAccs)
         : {};
-    const restrictRowsRaw = allAccs.length > 0 ? await listPlatformRestrictByUserAndAccounts(user.id, allAccs) : [];
+    const restrictRowsRaw = allAccs.length > 0
+        ? await listPlatformRestrictByUserAndAccounts(user.id, allAccs.map((x) => x.game_account))
+        : [];
     const restrictRows = [];
     for (const row of restrictRowsRaw) {
         const acc = String((row && row.game_account) || '').trim();
@@ -574,8 +585,10 @@ async function handleProducts(req, res, urlObj) {
     for (const row of restrictRows) {
         const acc = String((row && row.game_account) || '').trim();
         if (!acc) continue;
-        if (!restrictMap[acc]) restrictMap[acc] = [];
-        if (!restrictPlatformMap[acc]) restrictPlatformMap[acc] = {};
+        const matchedRows = scopedRows.filter((x) => String((x && x.game_account) || '').trim() === acc);
+        const matchedKeys = matchedRows.length > 0
+            ? matchedRows.map((x) => keyOfGameAccount(x && x.game_id, x && x.game_account))
+            : [keyOfGameAccount('1', acc)];
         const detail = row && typeof row.detail === 'object' ? row.detail : {};
         const platform = String((row && row.platform) || detail.platform || '').trim();
         const msg = String(detail.msg || '').trim();
@@ -584,16 +597,21 @@ async function handleProducts(req, res, urlObj) {
             : platform === 'zuhaowang' ? '租号王'
             : platform;
         const text = platformName && msg ? `${platformName}: ${msg}` : (msg || platformName || RESTRICT_REASON);
-        restrictMap[acc].push(text);
-        if (platform) restrictPlatformMap[acc][platform] = text;
+        for (const matchedKey of matchedKeys) {
+            if (!restrictMap[matchedKey]) restrictMap[matchedKey] = [];
+            if (!restrictPlatformMap[matchedKey]) restrictPlatformMap[matchedKey] = {};
+            restrictMap[matchedKey].push(text);
+            if (platform) restrictPlatformMap[matchedKey][platform] = text;
+        }
     }
     const fullList = scopedRows.map((x) => {
         const acc = String(x.game_account || '').trim();
-        const bl = blacklistMap[acc] || null;
-        const restrictList = Array.isArray(restrictMap[acc]) ? restrictMap[acc] : [];
+        const identityKey = keyOfGameAccount(x && x.game_id, acc);
+        const bl = blacklistMap[identityKey] || null;
+        const restrictList = Array.isArray(restrictMap[identityKey]) ? restrictMap[identityKey] : [];
         const channelStatus = x.channel_status || {};
         const channelPrdInfo = x.channel_prd_info || {};
-        const platformStatusNorm = buildPlatformStatusNorm(channelStatus, channelPrdInfo, restrictPlatformMap[acc] || {});
+        const platformStatusNorm = buildPlatformStatusNorm(channelStatus, channelPrdInfo, restrictPlatformMap[identityKey] || {});
         const overallStatusNorm = pickOverallStatusNorm(platformStatusNorm);
         const modeRestricted = Boolean(bl) || restrictList.length > 0 || isRestrictedLikeStatus(overallStatusNorm.code);
         const modeReason = bl
@@ -623,10 +641,10 @@ async function handleProducts(req, res, urlObj) {
             channel_status: channelStatus,
             platform_status_norm: platformStatusNorm,
             overall_status_norm: overallStatusNorm,
-            today_paid_count: Number(paidMap[acc] || 0),
-            renting_order_start_time: String(((rentingWindowMap[acc] || {}).start_time) || '').trim(),
-            renting_order_end_time: String(((rentingWindowMap[acc] || {}).end_time) || '').trim(),
-            renting_order_count: Number(((rentingWindowMap[acc] || {}).count) || 0),
+            today_paid_count: Number(paidMap[identityKey] || 0),
+            renting_order_start_time: String(((rentingWindowMap[identityKey] || {}).start_time) || '').trim(),
+            renting_order_end_time: String(((rentingWindowMap[identityKey] || {}).end_time) || '').trim(),
+            renting_order_count: Number(((rentingWindowMap[identityKey] || {}).count) || 0),
             online_tag: onlineTag,
             online_query_time: prodGuardSwitch.enabled ? String(onlineSnapshot.query_time || '').trim() : '',
             forbidden_status: forbiddenLabelRaw,
@@ -653,7 +671,7 @@ async function handleProducts(req, res, urlObj) {
 
     const totalBlacklisted = scopedRows.reduce((sum, x) => {
         const acc = String(x.game_account || '').trim();
-        return sum + (blacklistMap[acc] ? 1 : 0);
+        return sum + (blacklistMap[keyOfGameAccount(x && x.game_id, acc)] ? 1 : 0);
     }, 0);
     const totalRestricted = fullList.reduce((sum, x) => sum + (x.mode_restricted ? 1 : 0), 0);
     const totalRenting = fullList.reduce((sum, x) => {
@@ -661,8 +679,8 @@ async function handleProducts(req, res, urlObj) {
     }, 0);
     // 顶部总数与卡片数强制同口径：
     // 统一以 listTodayPaidOrderCountByAccounts 的结果聚合，不受筛选分页影响。
-    const totalPaid = Array.from(new Set(fullList.map((x) => String(x.game_account || '').trim()).filter(Boolean)))
-        .reduce((sum, acc) => sum + Number(paidMap[acc] || 0), 0);
+    const totalPaid = fullList
+        .reduce((sum, x) => sum + Number(paidMap[keyOfGameAccount(x && x.game_id, x && x.game_account)] || 0), 0);
 
     return json(res, 200, {
         ok: true,
