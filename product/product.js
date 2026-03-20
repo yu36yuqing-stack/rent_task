@@ -4,18 +4,22 @@ const { collectYoupinData } = require('../uuzuhao/uuzuhao_api');
 const {
     upsertUserGameAccount,
     listUserGameAccounts,
-    clearPlatformStatusForUser,
-    softDeleteEmptyAccountsByUser
+    isUserGameAccountManuallyDeleted
 } = require('../database/user_game_account_db');
 const { openDatabase } = require('../database/sqlite_client');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { releaseOrderCooldownBlacklistByUser } = require('../order/order_cooldown');
 const { normalizeZuhaowangAuthPayload } = require('../user/user');
 const { normalizeGameProfile } = require('../common/game_profile');
+const {
+    upsertOpenProductSyncAnomaly,
+    resolveOpenProductSyncAnomaly
+} = require('../database/product_sync_anomaly_db');
 
 const PLATFORM_ZHW = 'zuhaowang';
 const PLATFORM_UHZ = 'uhaozu';
 const PLATFORM_YYZ = 'uuzuhao';
+const ORDER_MIRROR_RECOVER_MAX_AGE_MS = 3 * 24 * 3600 * 1000;
 
 function keyOf(gameId, gameAccount) {
     return `${String(gameId || '1')}::${String(gameAccount || '')}`;
@@ -97,8 +101,99 @@ function dbAll(db, sql, params = []) {
     });
 }
 
+function dbGet(db, sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.get(sql, params, (err, row) => {
+            if (err) return reject(err);
+            resolve(row || null);
+        });
+    });
+}
+
 function isNonEmptyObject(input) {
     return Boolean(input && typeof input === 'object' && !Array.isArray(input) && Object.keys(input).length > 0);
+}
+
+function isRecentSnapshotTime(text = '', maxAgeMs = ORDER_MIRROR_RECOVER_MAX_AGE_MS) {
+    const ts = Date.parse(String(text || '').trim().replace(' ', 'T'));
+    if (!Number.isFinite(ts)) return false;
+    return (Date.now() - ts) <= Math.max(0, Number(maxAgeMs || 0));
+}
+
+function hasPlatformBinding(row = {}, platform = '') {
+    const info = row && row.channel_prd_info && typeof row.channel_prd_info === 'object'
+        ? row.channel_prd_info
+        : {};
+    const one = info && typeof info[platform] === 'object' ? info[platform] : null;
+    return Boolean(one && String(one.prd_id || '').trim());
+}
+
+function buildPlatformExpectedMap(rows = [], platform = '') {
+    const out = new Map();
+    for (const row of rows) {
+        if (!hasPlatformBinding(row, platform)) continue;
+        const acc = String((row && row.game_account) || '').trim();
+        const gid = String((row && row.game_id) || '1').trim() || '1';
+        if (!acc) continue;
+        out.set(keyOf(gid, acc), {
+            game_account: acc,
+            game_id: gid,
+            game_name: String((row && row.game_name) || 'WZRY').trim() || 'WZRY',
+            account_remark: String((row && row.account_remark) || '').trim()
+        });
+    }
+    return out;
+}
+
+async function reconcileProductSyncAnomalies(userId, existingRows = [], pulledByPlatform = {}, errors = []) {
+    const uid = Number(userId || 0);
+    if (!uid) return [];
+
+    const out = [];
+    const errorPlatforms = new Set(
+        (Array.isArray(errors) ? errors : [])
+            .map((msg) => String(msg || '').trim().split(':')[0])
+            .filter((v) => v === PLATFORM_YYZ || v === PLATFORM_UHZ || v === PLATFORM_ZHW)
+    );
+
+    for (const platform of [PLATFORM_YYZ, PLATFORM_UHZ, PLATFORM_ZHW]) {
+        if (errorPlatforms.has(platform)) continue;
+
+        const expectedMap = buildPlatformExpectedMap(existingRows, platform);
+        const pulledRows = Array.isArray(pulledByPlatform[platform]) ? pulledByPlatform[platform] : [];
+        const pulledKeySet = new Set(
+            pulledRows
+                .map((row) => keyOf(row && row.game_id, row && row.game_account))
+                .filter(Boolean)
+        );
+        const missingRows = [];
+        for (const [fullKey, row] of expectedMap.entries()) {
+            if (!pulledKeySet.has(fullKey)) missingRows.push(row);
+        }
+
+        if (missingRows.length > 0) {
+            const sampleText = missingRows
+                .slice(0, 6)
+                .map((row) => `${row.game_name}/${row.game_account}`)
+                .join(', ');
+            const anomaly = await upsertOpenProductSyncAnomaly(uid, platform, {
+                expected_count: expectedMap.size,
+                pulled_count: pulledRows.length,
+                missing_count: missingRows.length,
+                missing_accounts: missingRows,
+                sample_missing_text: sampleText,
+                desc: `product sync missing platform=${platform}`
+            });
+            out.push(anomaly);
+            continue;
+        }
+
+        await resolveOpenProductSyncAnomaly(uid, platform, {
+            desc: `resolved by successful sync platform=${platform}`
+        });
+    }
+
+    return out;
 }
 
 async function ensureLinkedGameAccountsByOrders(userId) {
@@ -134,12 +229,53 @@ async function ensureLinkedGameAccountsByOrders(userId) {
             const gameId = String(row.game_id || '').trim();
             const gameName = String(row.game_name || '').trim();
             if (!acc || !gameId) continue;
+            if (await isUserGameAccountManuallyDeleted(uid, gameId, acc)) {
+                skipped += 1;
+                continue;
+            }
 
             const current = byAccount.get(acc) || [];
             const base = current[0];
-            if (!base) {
-                skipped += 1;
-                continue;
+            let baseRow = base;
+            if (!baseRow) {
+                const deletedSnapshot = await dbGet(db, `
+                    SELECT *
+                    FROM user_game_account
+                    WHERE user_id = ?
+                      AND game_account = ?
+                      AND game_id = ?
+                      AND is_deleted = 1
+                    ORDER BY id DESC
+                    LIMIT 1
+                `, [uid, acc, gameId]);
+                if (deletedSnapshot && isRecentSnapshotTime(deletedSnapshot.modify_date)) {
+                    let channelStatus = {};
+                    let channelPrdInfo = {};
+                    let accountSwitch = {};
+                    try { channelStatus = JSON.parse(String(deletedSnapshot.channel_status || '{}')) || {}; } catch {}
+                    try { channelPrdInfo = JSON.parse(String(deletedSnapshot.channel_prd_info || '{}')) || {}; } catch {}
+                    try { accountSwitch = JSON.parse(String(deletedSnapshot.switch || '{}')) || {}; } catch {}
+                    baseRow = {
+                        account_remark: String(deletedSnapshot.account_remark || '').trim(),
+                        channel_status: channelStatus,
+                        channel_prd_info: channelPrdInfo,
+                        switch: accountSwitch,
+                        purchase_price: Number(deletedSnapshot.purchase_price || 0),
+                        purchase_date: String(deletedSnapshot.purchase_date || '').slice(0, 10)
+                    };
+                } else if (!deletedSnapshot) {
+                    baseRow = {
+                        account_remark: String(row.role_name || '').trim(),
+                        channel_status: {},
+                        channel_prd_info: {},
+                        switch: {},
+                        purchase_price: 0,
+                        purchase_date: ''
+                    };
+                } else {
+                    skipped += 1;
+                    continue;
+                }
             }
 
             const sameGameRow = current.find((x) => String(x.game_id || '').trim() === gameId);
@@ -152,12 +288,12 @@ async function ensureLinkedGameAccountsByOrders(userId) {
                 game_account: acc,
                 game_id: gameId,
                 game_name: gameName,
-                account_remark: String(base.account_remark || row.role_name || '').trim(),
-                channel_status: base.channel_status || {},
-                channel_prd_info: base.channel_prd_info || {},
-                switch: base.switch || {},
-                purchase_price: Number(base.purchase_price || 0),
-                purchase_date: String(base.purchase_date || '').slice(0, 10),
+                account_remark: String(baseRow.account_remark || row.role_name || '').trim(),
+                channel_status: baseRow.channel_status || {},
+                channel_prd_info: baseRow.channel_prd_info || {},
+                switch: baseRow.switch || {},
+                purchase_price: Number(baseRow.purchase_price || 0),
+                purchase_date: String(baseRow.purchase_date || '').slice(0, 10),
                 desc: 'mirror by linked order game'
             });
             current.push(next);
@@ -231,16 +367,12 @@ async function syncUserAccountsByAuth(userId) {
     if (validAuthRows.length === 0) {
         throw new Error('当前用户没有可用的平台授权，请先 upsert 平台授权');
     }
-    // 先清空三平台历史状态，避免已撤销授权的平台残留旧状态干扰策略判断。
-    // 注意：channel_prd_info 不清空，只在后续 upsert 时增量更新，保留稳定的平台商品映射。
-    for (const platform of [PLATFORM_ZHW, PLATFORM_UHZ, PLATFORM_YYZ]) {
-        await clearPlatformStatusForUser(uid, platform);
-    }
     const validPlatforms = validAuthRows.map((r) => String(r.platform || '')).filter(Boolean);
 
     const merged = new Map();
     const errors = [];
     const pulled = {};
+    const pulledRowsByPlatform = {};
 
     for (const row of validAuthRows) {
         const platform = String(row.platform || '');
@@ -248,6 +380,7 @@ async function syncUserAccountsByAuth(userId) {
         try {
             const pulledRows = await pullPlatformDataByAuth(platform, authPayload);
             pulled[platform] = pulledRows.length;
+            pulledRowsByPlatform[platform] = pulledRows;
             for (const item of pulledRows) {
                 const k = keyOf(item.game_id, item.game_account);
                 const cur = merged.get(k) || {
@@ -273,6 +406,9 @@ async function syncUserAccountsByAuth(userId) {
 
     let upserted = 0;
     for (const item of merged.values()) {
+        if (await isUserGameAccountManuallyDeleted(uid, item.game_id, item.game_account)) {
+            continue;
+        }
         await upsertUserGameAccount({
             user_id: uid,
             game_account: item.game_account,
@@ -287,8 +423,8 @@ async function syncUserAccountsByAuth(userId) {
     }
 
     const mirroredByOrders = await ensureLinkedGameAccountsByOrders(uid);
-
-    const cleaned = await softDeleteEmptyAccountsByUser(uid);
+    const currentRows = await listAllUserGameAccountsByUser(uid);
+    const anomalies = await reconcileProductSyncAnomalies(uid, currentRows, pulledRowsByPlatform, errors);
 
     return {
         ok: errors.length === 0,
@@ -297,7 +433,8 @@ async function syncUserAccountsByAuth(userId) {
         pulled,
         upserted,
         mirrored_by_orders: mirroredByOrders,
-        cleaned,
+        cleaned: 0,
+        anomalies,
         order_cooldown_release: cooldownRelease,
         errors
     };

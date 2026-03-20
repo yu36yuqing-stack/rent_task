@@ -8,6 +8,7 @@ const { listTodayPaidOrderCountByAccounts } = require('../database/order_db');
 const { listRecentProductOnoffByUser } = require('../database/product_onoff_history_db');
 const { listAccountRemarksByUserAndAccounts } = require('../database/user_game_account_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
+const { listOpenProductSyncAnomaliesByUser } = require('../database/product_sync_anomaly_db');
 const { resolveDisplayNameByRow } = require('../product/display_name');
 
 const TASK_DIR = path.resolve(__dirname, '..');
@@ -249,12 +250,25 @@ function buildPayloadForOneUser(accounts, extra = {}) {
         hour12: false
     });
     const list = Array.isArray(accounts) ? accounts : [];
+    const syncAnomalies = Array.isArray(extra.sync_anomalies) ? extra.sync_anomalies : [];
+    const missingKeySet = new Set();
+    syncAnomalies.forEach((row) => {
+        const missingAccounts = Array.isArray(row && row.missing_accounts) ? row.missing_accounts : [];
+        missingAccounts.forEach((item) => {
+            missingKeySet.add(accountKeyOf(item && item.game_id, item && item.game_account));
+        });
+    });
+    const masterTotal = Number(extra.master_total || list.length || 0);
     return {
         ok: true,
         hhmm,
         runCount: 0,
         recentActions: [],
         accounts: list,
+        master_total: masterTotal,
+        sync_effective_total: Math.max(0, masterTotal - missingKeySet.size),
+        sync_anomaly_count: syncAnomalies.length,
+        sync_anomalies: syncAnomalies,
         allNormal: list.every((x) => isAccountNormalByAuthorizedPlatforms(x, extra.authorized_platforms || [])),
         ...extra
     };
@@ -341,6 +355,7 @@ async function notifyUserByPayload(user, payload) {
         authorized_platforms: authorizedPlatforms,
         allNormal: Array.isArray(payload.accounts)
             ? payload.accounts.every((x) => isAccountNormalByAuthorizedPlatforms(x, authorizedPlatforms))
+                && (!Array.isArray(payload.sync_anomalies) || payload.sync_anomalies.length === 0)
             : Boolean(payload.allNormal)
     };
 
@@ -380,6 +395,19 @@ async function notifyUserByPayload(user, payload) {
         };
     }
     return { ok: true, reason: '', errors: [] };
+}
+
+async function listUserSyncAnomaliesForReport(userId) {
+    const rows = await listOpenProductSyncAnomaliesByUser(userId);
+    return rows.map((row) => ({
+        platform: String((row && row.platform) || '').trim(),
+        expected_count: Number((row && row.expected_count) || 0),
+        pulled_count: Number((row && row.pulled_count) || 0),
+        missing_count: Number((row && row.missing_count) || 0),
+        sample_missing_text: String((row && row.sample_missing_text) || '').trim(),
+        first_seen_at: String((row && row.first_seen_at) || '').trim(),
+        last_seen_at: String((row && row.last_seen_at) || '').trim()
+    }));
 }
 
 async function fillTodayOrderCounts(userId, accounts = []) {
@@ -428,5 +456,6 @@ module.exports = {
     formatActionForDisplay,
     buildRecentActionsForUser,
     buildPayloadForOneUser,
-    notifyUserByPayload
+    notifyUserByPayload,
+    listUserSyncAnomaliesForReport
 };

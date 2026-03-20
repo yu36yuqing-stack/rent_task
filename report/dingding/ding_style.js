@@ -71,9 +71,29 @@ function buildDingdingMessage(payload) {
     }
     lines.push('');
 
+    const syncAnomalies = Array.isArray(payload.sync_anomalies) ? payload.sync_anomalies : [];
+    lines.push(`📦 商品主档总数: ${Number(payload.master_total || 0)}个`);
+    lines.push(`📡 本轮同步有效数: ${Number(payload.sync_effective_total || 0)}个`);
+    lines.push(`⚠️ 同步异常数: ${Number(payload.sync_anomaly_count || syncAnomalies.length || 0)}个`);
+    lines.push('⚠️ 同步异常');
+    if (syncAnomalies.length > 0) {
+        syncAnomalies.slice(0, 4).forEach((row) => {
+            const platform = String(row.platform || '').trim();
+            const platformName = platform === 'uuzuhao' ? '悠悠'
+                : platform === 'uhaozu' ? 'U号租'
+                : platform === 'zuhaowang' ? '租号王'
+                : platform || '未知平台';
+            const sample = String(row.sample_missing_text || '').trim();
+            lines.push(`• ${platformName}: 期望${Number(row.expected_count || 0)} / 拉回${Number(row.pulled_count || 0)} / 少回${Number(row.missing_count || 0)}${sample ? ` (${sample})` : ''}`);
+        });
+    } else {
+        lines.push('• 无');
+    }
+    lines.push('');
+
     const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
     const authorizedPlatforms = normalizeAuthorizedPlatforms(payload.authorized_platforms);
-    lines.push(`📋 完整账号列表 (${accounts.length}个)`);
+    lines.push(`📋 商品主档明细 (${Number(payload.master_total || accounts.length || 0)}个)`);
     lines.push('');
     accounts.forEach((acc) => {
         const y = shortState(acc.youpin);

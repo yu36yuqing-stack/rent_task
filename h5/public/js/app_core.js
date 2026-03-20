@@ -104,7 +104,17 @@
       currentMenu: 'products',
       drawerOpen: false,
       pullRefresh: { dragging: false, ready: false, loading: false, startY: 0, distance: 0 },
-      stats: { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_renting: 0, total_paid: 0 },
+      stats: {
+        total_all: 0,
+        master_total: 0,
+        sync_effective_total: 0,
+        total_blacklisted: 0,
+        total_restricted: 0,
+        total_renting: 0,
+        total_paid: 0,
+        sync_anomaly_count: 0,
+        sync_anomaly_text: ''
+      },
       orders: {
         status_filter: 'all',
         quick_filter: 'today',
@@ -809,7 +819,17 @@
       state.list = Array.isArray(data.list) ? data.list : [];
       state.total = Number(data.total || 0);
       state.product_game_name = String(data.game_name || gameName).trim() || gameName;
-      state.stats = data.stats || { total_all: 0, total_blacklisted: 0, total_restricted: 0, total_renting: 0, total_paid: 0 };
+      state.stats = data.stats || {
+        total_all: 0,
+        master_total: 0,
+        sync_effective_total: 0,
+        total_blacklisted: 0,
+        total_restricted: 0,
+        total_renting: 0,
+        total_paid: 0,
+        sync_anomaly_count: 0,
+        sync_anomaly_text: ''
+      };
     }
 
     async function loadOrders() {

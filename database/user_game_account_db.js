@@ -144,6 +144,8 @@ function rowToAccount(row = {}) {
         purchase_price: Number(row.purchase_price || 0),
         purchase_date: String(row.purchase_date || '').slice(0, 10),
         modify_date: String(row.modify_date || ''),
+        manual_deleted: Number(row.manual_deleted || 0),
+        manual_deleted_at: String(row.manual_deleted_at || ''),
         is_deleted: Number(row.is_deleted || 0),
         desc: String(row.desc || '')
     };
@@ -165,6 +167,8 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
         'purchase_price',
         'purchase_date',
         'modify_date',
+        'manual_deleted',
+        'manual_deleted_at',
         'is_deleted',
         'desc'
     ];
@@ -190,13 +194,15 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
             purchase_price REAL NOT NULL DEFAULT 0,
             purchase_date TEXT NOT NULL DEFAULT '',
             modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            manual_deleted INTEGER NOT NULL DEFAULT 0,
+            manual_deleted_at TEXT NOT NULL DEFAULT '',
             is_deleted INTEGER NOT NULL DEFAULT 0,
             desc TEXT NOT NULL DEFAULT ''
         )
     `);
     await run(db, `
         INSERT INTO user_game_account
-        (id, user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, switch, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, modify_date, is_deleted, desc)
+        (id, user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, switch, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, modify_date, manual_deleted, manual_deleted_at, is_deleted, desc)
         SELECT
             id,
             user_id,
@@ -217,6 +223,8 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
             COALESCE(purchase_price, 0),
             COALESCE(purchase_date, ''),
             COALESCE(modify_date, CURRENT_TIMESTAMP),
+            COALESCE(manual_deleted, 0),
+            COALESCE(manual_deleted_at, ''),
             COALESCE(is_deleted, 0),
             COALESCE(desc, '')
         FROM user_game_account_old
@@ -243,6 +251,8 @@ async function initUserGameAccountDb() {
                 purchase_price REAL NOT NULL DEFAULT 0,
                 purchase_date TEXT NOT NULL DEFAULT '',
                 modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                manual_deleted INTEGER NOT NULL DEFAULT 0,
+                manual_deleted_at TEXT NOT NULL DEFAULT '',
                 is_deleted INTEGER NOT NULL DEFAULT 0,
                 desc TEXT NOT NULL DEFAULT ''
             )
@@ -274,6 +284,12 @@ async function initUserGameAccountDb() {
         }
         if (!cols.has('purchase_date')) {
             await run(db, `ALTER TABLE user_game_account ADD COLUMN purchase_date TEXT NOT NULL DEFAULT ''`);
+        }
+        if (!cols.has('manual_deleted')) {
+            await run(db, `ALTER TABLE user_game_account ADD COLUMN manual_deleted INTEGER NOT NULL DEFAULT 0`);
+        }
+        if (!cols.has('manual_deleted_at')) {
+            await run(db, `ALTER TABLE user_game_account ADD COLUMN manual_deleted_at TEXT NOT NULL DEFAULT ''`);
         }
         if (!cols.has('online_probe_snapshot')) {
             await run(db, `ALTER TABLE user_game_account ADD COLUMN online_probe_snapshot TEXT NOT NULL DEFAULT '{}'`);
@@ -496,6 +512,9 @@ async function upsertUserGameAccount(input = {}) {
             `, [userId, lookupGameId, gameAccount]);
 
             if (deletedRow) {
+                if (Number(deletedRow.manual_deleted || 0) === 1) {
+                    return rowToAccount(deletedRow);
+                }
                 const finalGameId = hasGameHint
                     ? hintedGameId
                     : canonicalGameId(deletedRow.game_id, deletedRow.game_name);
@@ -527,7 +546,7 @@ async function upsertUserGameAccount(input = {}) {
                         UPDATE user_game_account
                         SET game_id = ?, game_name = ?, account_remark = ?, channel_status = ?, channel_prd_info = ?,
                             "switch" = ?, online_probe_snapshot = ?, forbidden_probe_snapshot = ?,
-                            purchase_price = ?, purchase_date = ?, modify_date = ?, is_deleted = 0, desc = ?
+                            purchase_price = ?, purchase_date = ?, modify_date = ?, manual_deleted = 0, manual_deleted_at = '', is_deleted = 0, desc = ?
                         WHERE id = ?
                     `, [
                         finalGameId,
@@ -1080,6 +1099,28 @@ async function updateUserGameAccountSwitchByUserAndAccount(userId, gameAccount, 
     }
 }
 
+async function isUserGameAccountManuallyDeleted(userId, gameId, gameAccount) {
+    await initUserGameAccountDb();
+    const uid = Number(userId || 0);
+    const acc = String(gameAccount || '').trim();
+    const gid = canonicalGameId(gameId, '');
+    if (!uid || !acc || !gid) return false;
+
+    const db = openDatabase();
+    try {
+        const row = await get(db, `
+            SELECT manual_deleted
+            FROM user_game_account
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 1
+            ORDER BY id DESC
+            LIMIT 1
+        `, [uid, gid, acc]);
+        return Number(row && row.manual_deleted) === 1;
+    } finally {
+        db.close();
+    }
+}
+
 module.exports = {
     PLATFORM_KEYS,
     initUserGameAccountDb,
@@ -1095,5 +1136,6 @@ module.exports = {
     getUserGameAccountProbeSnapshotsByUserAndAccount,
     updateUserGameAccountOnlineProbeSnapshot,
     updateUserGameAccountForbiddenProbeSnapshot,
+    isUserGameAccountManuallyDeleted,
     normalizeAccountSwitch
 };

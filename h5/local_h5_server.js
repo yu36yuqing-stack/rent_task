@@ -30,6 +30,7 @@ const {
     listRolling24hPaidOrderCountByAccounts,
     listRentingOrderWindowByAccounts
 } = require('../database/order_db');
+const { listOpenProductSyncAnomaliesByUser } = require('../database/product_sync_anomaly_db');
 const {
     initUserSessionDb,
     createRefreshSession,
@@ -492,6 +493,13 @@ async function handleProducts(req, res, urlObj) {
     const mode = Number(getBlacklistV2Mode());
     const blacklistRows = await listUserBlacklistByUserWithMeta(user.id);
     const keyOfGameAccount = (gameId, gameAccount) => `${String(gameId || '1').trim() || '1'}::${String(gameAccount || '').trim()}`;
+    const platformLabel = (platform) => {
+        const key = String(platform || '').trim();
+        if (key === 'uuzuhao') return '悠悠';
+        if (key === 'uhaozu') return 'U号租';
+        if (key === 'zuhaowang') return '租号王';
+        return key || '未知平台';
+    };
     const legacyMap = {};
     for (const row of blacklistRows) {
         const acc = String((row && row.game_account) || '').trim();
@@ -537,6 +545,31 @@ async function handleProducts(req, res, urlObj) {
     const orderOffRule = await getOrderOffRuleByUser(user.id);
     const allRows = await listAllAccountsByUser(user.id);
     const scopedRows = allRows.list.filter((x) => String((x && x.game_name) || '').trim() === gameName);
+    const syncAnomalyRows = await listOpenProductSyncAnomaliesByUser(user.id);
+    const scopedSyncAnomalies = syncAnomalyRows
+        .map((row) => {
+            const missingAccounts = Array.isArray(row && row.missing_accounts) ? row.missing_accounts : [];
+            const scopedMissing = missingAccounts.filter((item) => String((item && item.game_name) || '').trim() === gameName);
+            if (scopedMissing.length === 0) return null;
+            return {
+                platform: String((row && row.platform) || '').trim(),
+                platform_label: platformLabel(row && row.platform),
+                expected_count: Number((row && row.expected_count) || 0),
+                pulled_count: Number((row && row.pulled_count) || 0),
+                missing_count: scopedMissing.length,
+                first_seen_at: String((row && row.first_seen_at) || '').trim(),
+                last_seen_at: String((row && row.last_seen_at) || '').trim(),
+                missing_accounts: scopedMissing
+            };
+        })
+        .filter(Boolean);
+    const syncMissingKeySet = new Set();
+    for (const row of scopedSyncAnomalies) {
+        const missingAccounts = Array.isArray(row && row.missing_accounts) ? row.missing_accounts : [];
+        for (const item of missingAccounts) {
+            syncMissingKeySet.add(keyOfGameAccount(item && item.game_id, item && item.game_account));
+        }
+    }
     const allAccs = scopedRows.map((x) => ({
         game_account: String((x && x.game_account) || '').trim(),
         game_id: String((x && x.game_id) || '1').trim() || '1',
@@ -691,10 +724,20 @@ async function handleProducts(req, res, urlObj) {
         filter,
         stats: {
             total_all: scopedRows.length,
+            master_total: scopedRows.length,
+            sync_effective_total: Math.max(0, scopedRows.length - syncMissingKeySet.size),
             total_blacklisted: totalBlacklisted,
             total_restricted: totalRestricted,
             total_renting: totalRenting,
-            total_paid: totalPaid
+            total_paid: totalPaid,
+            sync_anomaly_count: scopedSyncAnomalies.length,
+            sync_anomaly_text: scopedSyncAnomalies.length > 0
+                ? scopedSyncAnomalies
+                    .slice(0, 2)
+                    .map((row) => `${row.platform_label}少回${row.missing_count}个`)
+                    .join('；')
+                : '',
+            sync_anomalies: scopedSyncAnomalies
         },
         order_count_mode: orderOffRule.mode,
         order_count_label: orderOffRule.mode === ORDER_OFF_MODE_ROLLING_24H ? '近24h订单' : '今日订单',

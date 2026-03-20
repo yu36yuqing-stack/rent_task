@@ -3,7 +3,8 @@ const {
     fillTodayOrderCounts,
     buildRecentActionsForUser,
     buildPayloadForOneUser,
-    notifyUserByPayload
+    notifyUserByPayload,
+    listUserSyncAnomaliesForReport
 } = require('../report/report_rent_status');
 const { syncUserAccountsByAuth, listAllUserGameAccountsByUser } = require('../product/product');
 const { triggerProdStatusGuard, probeProdOnlineStatus } = require('../product/prod_status_guard');
@@ -105,9 +106,12 @@ async function runFullUserPipeline(user, options = {}) {
         }
         triggerProdStatusGuard(user, accounts, { logger, snapshot: onlineProbe });
         const recentActions = await buildRecentActionsForUser(uid, { limit: 8 });
+        const syncAnomalies = await listUserSyncAnomaliesForReport(uid);
         const payload = buildPayloadForOneUser(accounts, {
             report_owner: String(user.name || user.account || '').trim(),
-            recentActions
+            recentActions,
+            master_total: rows.length,
+            sync_anomalies: syncAnomalies
         });
 
         notifyResult = await notifyUserByPayload(user, payload);

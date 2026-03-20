@@ -80,9 +80,30 @@ function buildTelegramMessage(payload) {
         msg += '• 无\n\n';
     }
 
+    const syncAnomalies = Array.isArray(payload.sync_anomalies) ? payload.sync_anomalies : [];
+    msg += `<b>📦 商品主档总数</b> <code>${esc(Number(payload.master_total || 0))}个</code>\n`;
+    msg += `<b>📡 本轮同步有效数</b> <code>${esc(Number(payload.sync_effective_total || 0))}个</code>\n`;
+    msg += `<b>⚠️ 同步异常数</b> <code>${esc(Number(payload.sync_anomaly_count || syncAnomalies.length || 0))}个</code>\n`;
+    if (syncAnomalies.length > 0) {
+        msg += '<b>⚠️ 同步异常</b>\n';
+        syncAnomalies.slice(0, 4).forEach((row) => {
+            const platform = String(row.platform || '').trim();
+            const platformName = platform === 'uuzuhao' ? '悠悠'
+                : platform === 'uhaozu' ? 'U号租'
+                : platform === 'zuhaowang' ? '租号王'
+                : platform || '未知平台';
+            const sample = String(row.sample_missing_text || '').trim();
+            msg += `• ${esc(platformName)}: 期望${esc(row.expected_count)} / 拉回${esc(row.pulled_count)} / 少回${esc(row.missing_count)}${sample ? ` (${esc(sample)})` : ''}\n`;
+        });
+        msg += '\n';
+    } else {
+        msg += '<b>⚠️ 同步异常</b>\n';
+        msg += '• 无\n\n';
+    }
+
     const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
     const authorizedPlatforms = normalizeAuthorizedPlatforms(payload.authorized_platforms);
-    msg += `<b>📋 完整账号列表</b> <code>(${esc(accounts.length)}个)</code>\n\n`;
+    msg += `<b>📋 商品主档明细</b> <code>(${esc(Number(payload.master_total || accounts.length || 0))}个)</code>\n\n`;
     accounts.forEach((acc) => {
         const y = shortState(acc.youpin);
         const u = shortState(acc.uhaozu);
