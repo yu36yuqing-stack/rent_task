@@ -386,11 +386,19 @@ async function fillTodayOrderCounts(userId, accounts = []) {
     const uid = Number(userId || 0);
     if (!uid || !Array.isArray(accounts) || accounts.length === 0) return;
     try {
-        const accList = accounts.map((a) => String((a && a.account) || '').trim()).filter(Boolean);
+        const accList = accounts
+            .map((a) => ({
+                game_account: String((a && a.account) || '').trim(),
+                game_id: String((a && a.game_id) || '1').trim() || '1'
+            }))
+            .filter((a) => a.game_account);
         const countMap = await listTodayPaidOrderCountByAccounts(uid, accList);
         for (const acc of accounts) {
-            const key = String((acc && acc.account) || '').trim();
-            acc.today_order_count = Number(countMap[key] || 0);
+            const gameId = String((acc && acc.game_id) || '1').trim() || '1';
+            const account = String((acc && acc.account) || '').trim();
+            const fullKey = accountKeyOf(gameId, account);
+            // Backward compatible with any legacy account-only count maps.
+            acc.today_order_count = Number(countMap[fullKey] || countMap[account] || 0);
         }
     } catch (e) {
         for (const acc of accounts) acc.today_order_count = 0;
