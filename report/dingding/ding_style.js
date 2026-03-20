@@ -72,9 +72,10 @@ function buildDingdingMessage(payload) {
     lines.push('');
 
     const syncAnomalies = Array.isArray(payload.sync_anomalies) ? payload.sync_anomalies : [];
+    const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+    const totalPaid = accounts.reduce((sum, acc) => sum + Number(acc && acc.today_order_count || 0), 0);
+    lines.push(`📈 今日订单: ${totalPaid}`);
     lines.push(`📦 商品主档总数: ${Number(payload.master_total || 0)}个`);
-    lines.push(`📡 本轮同步有效数: ${Number(payload.sync_effective_total || 0)}个`);
-    lines.push(`⚠️ 同步异常数: ${Number(payload.sync_anomaly_count || syncAnomalies.length || 0)}个`);
     lines.push('⚠️ 同步异常');
     if (syncAnomalies.length > 0) {
         syncAnomalies.slice(0, 4).forEach((row) => {
@@ -90,8 +91,6 @@ function buildDingdingMessage(payload) {
         lines.push('• 无');
     }
     lines.push('');
-
-    const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
     const authorizedPlatforms = normalizeAuthorizedPlatforms(payload.authorized_platforms);
     lines.push(`📋 商品主档明细 (${Number(payload.master_total || accounts.length || 0)}个)`);
     lines.push('');

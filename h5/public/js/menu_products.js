@@ -820,12 +820,6 @@
       const allActive = state.filter === 'all';
       const restrictedActive = state.filter === 'restricted';
       const rentingActive = state.filter === 'renting';
-      const summaryMap = {
-        all: Number(state.stats.total_all || 0),
-        restricted: Number(state.stats.total_restricted || 0),
-        renting: Number(state.stats.total_renting || 0)
-      };
-      const summaryTotal = Number(summaryMap[state.filter] || 0);
       const orderCountLabel = orderCountLabelByMode();
       els.filters.innerHTML = `
         <button class="stats-period-btn product-filter-tab ${allActive ? 'active' : ''}" data-filter="all" type="button">全部</button>
@@ -835,13 +829,8 @@
       els.orderTotal.innerHTML = `
         <span class="order-total-main">${orderCountLabel}：${Number(state.stats.total_paid || 0)}</span>
         <span class="order-total-divider" aria-hidden="true"></span>
-        <span class="order-total-summary">当前筛选${summaryTotal}</span>
-        <br><span class="order-total-summary">商品主档总数：${Number(state.stats.master_total || state.stats.total_all || 0)}</span>
-        <br><span class="order-total-summary">本轮同步有效数：${Number(state.stats.sync_effective_total || 0)}</span>
-        <br><span class="order-total-summary">同步异常数：${Number(state.stats.sync_anomaly_count || 0)}</span>
-      ` + (String(state.stats.sync_anomaly_text || '').trim()
-        ? `<br><span class="order-total-summary">异常明细：${String(state.stats.sync_anomaly_text || '').trim()}</span>`
-        : '');
+        <span class="order-total-summary">商品主档总数：${Number(state.stats.master_total || state.stats.total_all || 0)}</span>
+      `;
       Array.from(els.filters.querySelectorAll('.product-filter-tab')).forEach((n) => {
         n.addEventListener('click', async () => {
           const nextFilter = n.getAttribute('data-filter') || 'all';
