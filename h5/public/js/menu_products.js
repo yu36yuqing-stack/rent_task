@@ -145,7 +145,12 @@
         } else {
           await request('/api/blacklist/add', {
             method: 'POST',
-            body: JSON.stringify({ game_account: item.game_account, reason: '人工下架' })
+            body: JSON.stringify({
+              game_account: item.game_account,
+              game_id: item.game_id,
+              game_name: item.game_name,
+              reason: '人工下架'
+            })
           });
         }
         await loadList();

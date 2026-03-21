@@ -1107,6 +1107,8 @@ async function handleBlacklistAdd(req, res) {
         source: 'h5',
         operator: user.account || 'h5_user',
         desc: 'manual by h5',
+        game_id: String(body.game_id || '1').trim() || '1',
+        game_name: String(body.game_name || 'WZRY').trim() || 'WZRY',
         detail: { trigger: 'h5_manual_add' }
     });
     return json(res, 200, { ok: true, data: out });

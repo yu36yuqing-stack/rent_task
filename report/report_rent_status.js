@@ -4,15 +4,36 @@ const { sendTelegramMessage } = require('./telegram/tg_notify.js');
 const { sendDingdingMessage } = require('./dingding/ding_notify.js');
 const { buildTelegramMessage } = require('./telegram/tg_style.js');
 const { buildDingdingMessage } = require('./dingding/ding_style.js');
-const { listTodayPaidOrderCountByAccounts } = require('../database/order_db');
+const { listTodayPaidOrderCountByAccounts, listRolling24hPaidOrderCountByAccounts } = require('../database/order_db');
 const { listRecentProductOnoffByUser } = require('../database/product_onoff_history_db');
 const { listAccountRemarksByUserAndAccounts } = require('../database/user_game_account_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { listOpenProductSyncAnomaliesByUser } = require('../database/product_sync_anomaly_db');
+const { getUserRuleByName } = require('../database/user_rule_db');
 const { resolveDisplayNameByRow } = require('../product/display_name');
 
 const TASK_DIR = path.resolve(__dirname, '..');
 const HISTORY_FILE = path.join(TASK_DIR, 'rent_robot_history.jsonl');
+const ORDER_OFF_THRESHOLD_RULE_NAME = 'X单下架阈值';
+const ORDER_OFF_MODE_NATURAL_DAY = 'natural_day';
+const ORDER_OFF_MODE_ROLLING_24H = 'rolling_24h';
+
+function normalizeOrderOffMode(mode, fallback = ORDER_OFF_MODE_NATURAL_DAY) {
+    const text = String(mode || '').trim().toLowerCase();
+    if (text === ORDER_OFF_MODE_ROLLING_24H) return ORDER_OFF_MODE_ROLLING_24H;
+    if (text === ORDER_OFF_MODE_NATURAL_DAY) return ORDER_OFF_MODE_NATURAL_DAY;
+    return fallback;
+}
+
+async function getOrderOffRuleByUser(userId) {
+    const uid = Number(userId || 0);
+    if (!uid) return { mode: ORDER_OFF_MODE_NATURAL_DAY };
+    const rule = await getUserRuleByName(uid, ORDER_OFF_THRESHOLD_RULE_NAME);
+    const detail = rule && rule.rule_detail && typeof rule.rule_detail === 'object' ? rule.rule_detail : {};
+    return {
+        mode: normalizeOrderOffMode(detail.mode ?? detail.order_off_mode, ORDER_OFF_MODE_NATURAL_DAY)
+    };
+}
 
 function readHistory() {
     try {
@@ -340,6 +361,10 @@ async function notifyUserByPayload(user, payload) {
     const cfg = user && user.notify_config && typeof user.notify_config === 'object' ? user.notify_config : {};
     const tgCfg = cfg.telegram || {};
     const dingCfg = cfg.dingding || {};
+    const orderOffRule = await getOrderOffRuleByUser(Number((user && user.id) || 0)).catch(() => ({
+        mode: ORDER_OFF_MODE_NATURAL_DAY
+    }));
+    const orderCountLabel = orderOffRule.mode === ORDER_OFF_MODE_ROLLING_24H ? '近24h订单' : '今日订单';
 
     let authorizedPlatforms = ['uuzuhao', 'uhaozu', 'zuhaowang'];
     try {
@@ -352,6 +377,8 @@ async function notifyUserByPayload(user, payload) {
 
     const payloadWithAuth = {
         ...payload,
+        order_count_mode: orderOffRule.mode,
+        order_count_label: orderCountLabel,
         authorized_platforms: authorizedPlatforms,
         allNormal: Array.isArray(payload.accounts)
             ? payload.accounts.every((x) => isAccountNormalByAuthorizedPlatforms(x, authorizedPlatforms))
@@ -414,13 +441,16 @@ async function fillTodayOrderCounts(userId, accounts = []) {
     const uid = Number(userId || 0);
     if (!uid || !Array.isArray(accounts) || accounts.length === 0) return;
     try {
+        const orderOffRule = await getOrderOffRuleByUser(uid);
         const accList = accounts
             .map((a) => ({
                 game_account: String((a && a.account) || '').trim(),
                 game_id: String((a && a.game_id) || '1').trim() || '1'
             }))
             .filter((a) => a.game_account);
-        const countMap = await listTodayPaidOrderCountByAccounts(uid, accList);
+        const countMap = orderOffRule.mode === ORDER_OFF_MODE_ROLLING_24H
+            ? await listRolling24hPaidOrderCountByAccounts(uid, accList)
+            : await listTodayPaidOrderCountByAccounts(uid, accList);
         for (const acc of accounts) {
             const gameId = String((acc && acc.game_id) || '1').trim() || '1';
             const account = String((acc && acc.account) || '').trim();
