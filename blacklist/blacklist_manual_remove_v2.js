@@ -15,6 +15,10 @@ const {
 } = require('../product/prod_probe_cache_service');
 const { setGuardSourcesByProbeAndReconcile } = require('./blacklist_source_gateway');
 
+function accountKeyOf(gameId, gameAccount) {
+    return `${String(gameId || '1').trim() || '1'}::${String(gameAccount || '').trim()}`;
+}
+
 function sourceReason(source = '') {
     const key = String(source || '').trim().toLowerCase();
     const rule = SOURCE_RULES[key] || null;
@@ -29,20 +33,38 @@ function sourcePriority(source = '') {
 
 async function hasActiveOrderByAccount(userId, gameAccount) {
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
-    if (!uid || !acc) return false;
-    const map = await listRentingOrderWindowByAccounts(uid, [acc]);
-    const x = map && typeof map === 'object' ? map[acc] : null;
+    const key = typeof gameAccount === 'object' && gameAccount
+        ? {
+            game_account: String(gameAccount.game_account || '').trim(),
+            game_id: String(gameAccount.game_id || '1').trim() || '1'
+        }
+        : {
+            game_account: String(gameAccount || '').trim(),
+            game_id: '1'
+        };
+    if (!uid || !key.game_account) return false;
+    const map = await listRentingOrderWindowByAccounts(uid, [key]);
+    const x = map && typeof map === 'object' ? map[accountKeyOf(key.game_id, key.game_account)] : null;
     return Boolean(x && Number(x.count || 0) > 0);
 }
 
 async function patchSource(userId, gameAccount, source, patch = {}, options = {}) {
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
+    const key = typeof gameAccount === 'object' && gameAccount
+        ? {
+            game_account: String(gameAccount.game_account || '').trim(),
+            game_id: String(gameAccount.game_id || patch.game_id || '1').trim() || '1',
+            game_name: String(gameAccount.game_name || patch.game_name || 'WZRY').trim() || 'WZRY'
+        }
+        : {
+            game_account: String(gameAccount || '').trim(),
+            game_id: String(patch.game_id || '1').trim() || '1',
+            game_name: String(patch.game_name || 'WZRY').trim() || 'WZRY'
+        };
     const src = String(source || '').trim().toLowerCase();
-    if (!uid || !acc || !src) return null;
+    if (!uid || !key.game_account || !src) return null;
 
-    const rows = await listBlacklistSourcesByUserAndAccounts(uid, [acc], { active_only: false });
+    const rows = await listBlacklistSourcesByUserAndAccounts(uid, [key], { active_only: false });
     const current = (Array.isArray(rows) ? rows : []).find((x) => String((x && x.source) || '').trim() === src) || null;
     const reason = String(patch.reason || (current && current.reason) || sourceReason(src) || '').trim();
     const priority = Number.isFinite(Number(patch.priority))
@@ -56,12 +78,14 @@ async function patchSource(userId, gameAccount, source, patch = {}, options = {}
         ? String((current && current.expire_at) || '').trim()
         : String(patch.expire_at || '').trim();
 
-    return upsertBlacklistSource(uid, acc, src, {
+    return upsertBlacklistSource(uid, key, src, {
         active: Boolean(patch.active),
         reason,
         priority,
         detail,
-        expire_at: expireAt
+        expire_at: expireAt,
+        game_id: key.game_id,
+        game_name: key.game_name
     }, {
         desc: String(options.desc || '').trim()
     });
@@ -76,10 +100,13 @@ async function manualRemoveBlacklistMode2(userId, gameAccount, options = {}) {
     const operator = String(options.operator || 'system').trim() || 'system';
     const source = String(options.source || 'h5').trim() || 'h5';
     const desc = String(options.desc || 'manual remove by mode2').trim();
+    const gameId = String(options.game_id || '1').trim() || '1';
     const gameName = String(options.game_name || 'WZRY').trim() || 'WZRY';
+    const key = { game_account: acc, game_id: gameId, game_name: gameName };
+    const identityKey = accountKeyOf(gameId, acc);
 
     const projectedBefore = await buildProjectedBlacklistByUser(uid, { include_legacy_bootstrap: false });
-    const winnerBefore = projectedBefore && projectedBefore[acc] ? projectedBefore[acc] : null;
+    const winnerBefore = projectedBefore && projectedBefore[identityKey] ? projectedBefore[identityKey] : null;
     const clearSource = String((winnerBefore && winnerBefore.source) || '').trim().toLowerCase();
     const clearedSources = [];
     const guard = {
@@ -91,27 +118,31 @@ async function manualRemoveBlacklistMode2(userId, gameAccount, options = {}) {
     };
 
     if (clearSource) {
-        await patchSource(uid, acc, clearSource, {
+        await patchSource(uid, key, clearSource, {
             active: false,
             detail: {
                 manual_remove: true,
                 manual_remove_source: source
-            }
+            },
+            game_id: gameId,
+            game_name: gameName
         }, {
             desc: `${desc};clear winner source=${clearSource}`
         });
         clearedSources.push(clearSource);
     }
 
-    const hasActiveOrder = await hasActiveOrderByAccount(uid, acc);
+    const hasActiveOrder = await hasActiveOrderByAccount(uid, key);
     if (hasActiveOrder) {
         guard.skipped_by_active_order = true;
-        const out = await patchSource(uid, acc, 'guard_online', {
+        const out = await patchSource(uid, key, 'guard_online', {
             active: false,
             detail: {
                 suppressed_by_active_order: true,
                 manual_remove_source: source
-            }
+            },
+            game_id: gameId,
+            game_name: gameName
         }, {
             desc: `${desc};suppress guard_online while order in progress`
         });
@@ -132,7 +163,7 @@ async function manualRemoveBlacklistMode2(userId, gameAccount, options = {}) {
             guard.online = Boolean(onlineRes && onlineRes.online);
             guard.forbidden = Boolean(forbiddenRes && forbiddenRes.enabled);
 
-            await setGuardSourcesByProbeAndReconcile(uid, acc, {
+            await setGuardSourcesByProbeAndReconcile(uid, key, {
                 online: guard.online,
                 forbidden: guard.forbidden,
                 detail: {
@@ -148,7 +179,7 @@ async function manualRemoveBlacklistMode2(userId, gameAccount, options = {}) {
         }
     }
 
-    const rec = await reconcileBlacklistForAccount(uid, acc, {
+    const rec = await reconcileBlacklistForAccount(uid, key, {
         mode: Number(getBlacklistV2Mode()),
         apply_projection: true,
         operator,
@@ -156,7 +187,7 @@ async function manualRemoveBlacklistMode2(userId, gameAccount, options = {}) {
     });
 
     const projectedAfter = await buildProjectedBlacklistByUser(uid, { include_legacy_bootstrap: false });
-    const winnerAfter = projectedAfter && projectedAfter[acc] ? projectedAfter[acc] : null;
+    const winnerAfter = projectedAfter && projectedAfter[identityKey] ? projectedAfter[identityKey] : null;
 
     return {
         mode: Number(getBlacklistV2Mode()),

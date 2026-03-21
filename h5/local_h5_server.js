@@ -1123,6 +1123,7 @@ async function handleBlacklistRemove(req, res) {
             source: 'h5',
             operator: user.account || 'h5_user',
             desc: 'manual remove by h5 mode2',
+            game_id: String(body.game_id || '1').trim() || '1',
             game_name: String(body.game_name || 'WZRY').trim() || 'WZRY'
         });
         return json(res, 200, {

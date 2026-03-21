@@ -136,7 +136,11 @@
         if (item.blacklisted) {
           await request('/api/blacklist/remove', {
             method: 'POST',
-            body: JSON.stringify({ game_account: item.game_account })
+            body: JSON.stringify({
+              game_account: item.game_account,
+              game_id: item.game_id,
+              game_name: item.game_name
+            })
           });
         } else {
           await request('/api/blacklist/add', {
