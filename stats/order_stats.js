@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
-const { openDatabase } = require('../database/sqlite_client');
+const { openDatabase, openStatsDatabase } = require('../database/sqlite_client');
 const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('../database/user_db');
 const { initUserGameAccountDb } = require('../database/user_game_account_db');
 const {
@@ -493,7 +493,7 @@ async function listOrderStatsRowsByScope(userId, startDate, endDate, gameName) {
     const e = String(endDate || '').slice(0, 10);
     const g = String(gameName || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
     if (g !== ALL_GAME_NAME) return listOrderStatsRows(uid, s, e, g);
-    const db = openDatabase();
+    const db = openStatsDatabase();
     try {
         return await all(db, `
             SELECT *
@@ -516,7 +516,7 @@ async function listCostSnapshotsByScope(userId, startDate, endDate, gameName) {
     const e = String(endDate || '').slice(0, 10);
     const g = String(gameName || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
     if (g !== ALL_GAME_NAME) return listCostSnapshotsByUser(uid, s, e, g);
-    const db = openDatabase();
+    const db = openStatsDatabase();
     try {
         return await all(db, `
             SELECT stat_date, ROUND(SUM(cost_base), 2) AS cost_base, SUM(account_count) AS account_count

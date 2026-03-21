@@ -1,8 +1,10 @@
 const {
     openMainDatabase,
     openRuntimeDatabase,
+    openStatsDatabase,
     MAIN_DB_FILE,
-    RUNTIME_DB_FILE
+    RUNTIME_DB_FILE,
+    STATS_DB_FILE
 } = require('./sqlite_client');
 const { initUserDb } = require('./user_db');
 const { initUserGameAccountDb } = require('./user_game_account_db');
@@ -13,6 +15,7 @@ const { initUserRuleDb } = require('./user_rule_db');
 const { initOrderDb } = require('./order_db');
 const { initOrderSyncDb } = require('./order_sync_db');
 const { initOrderStatsDailyDb } = require('./order_stats_daily_db');
+const { initOrderStatsCostDailyDb } = require('./order_stats_cost_daily_db');
 const { initOrderStatsJobStateDb } = require('./order_stats_job_state_db');
 const { initOrderComplaintDb } = require('./order_complaint_db');
 const { initOrderDetailDb } = require('./order_detail_db');
@@ -46,6 +49,7 @@ async function main() {
     await initOrderDb();
     await initOrderSyncDb();
     await initOrderStatsDailyDb();
+    await initOrderStatsCostDailyDb();
     await initOrderStatsJobStateDb();
     await initOrderComplaintDb();
     await initOrderDetailDb();
@@ -53,6 +57,7 @@ async function main() {
 
     const mainDb = openMainDatabase();
     const runtimeDb = openRuntimeDatabase();
+    const statsDb = openStatsDatabase();
     try {
         await run(mainDb, `
             CREATE TABLE IF NOT EXISTS health_check (
@@ -77,9 +82,22 @@ async function main() {
         const runtimeRow = await get(runtimeDb, `SELECT COUNT(*) AS total FROM runtime_health_check`);
         console.log(`[SQLite] 运行时库连接成功 db=${RUNTIME_DB_FILE}`);
         console.log(`[SQLite] runtime_health_check total=${runtimeRow?.total ?? 0}`);
+
+        await run(statsDb, `
+            CREATE TABLE IF NOT EXISTS stats_health_check (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tag TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        await run(statsDb, `INSERT INTO stats_health_check(tag) VALUES (?)`, ['init_ok']);
+        const statsRow = await get(statsDb, `SELECT COUNT(*) AS total FROM stats_health_check`);
+        console.log(`[SQLite] 统计库连接成功 db=${STATS_DB_FILE}`);
+        console.log(`[SQLite] stats_health_check total=${statsRow?.total ?? 0}`);
     } finally {
         mainDb.close();
         runtimeDb.close();
+        statsDb.close();
     }
 }
 

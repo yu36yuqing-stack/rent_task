@@ -9,6 +9,9 @@ const MAIN_DB_FILE = process.env.MAIN_DB_FILE_PATH
 const RUNTIME_DB_FILE = process.env.RUNTIME_DB_FILE_PATH
     ? path.resolve(process.env.RUNTIME_DB_FILE_PATH)
     : path.join(DB_DIR, 'rent_robot_runtime.db');
+const STATS_DB_FILE = process.env.STATS_DB_FILE_PATH
+    ? path.resolve(process.env.STATS_DB_FILE_PATH)
+    : path.join(DB_DIR, 'rent_robot_stats.db');
 
 if (!fs.existsSync(DB_DIR)) {
     fs.mkdirSync(DB_DIR, { recursive: true });
@@ -31,6 +34,11 @@ function openRuntimeDatabase() {
     return new sqlite3.Database(RUNTIME_DB_FILE);
 }
 
+function openStatsDatabase() {
+    ensureDbDir(STATS_DB_FILE);
+    return new sqlite3.Database(STATS_DB_FILE);
+}
+
 function openDatabase() {
     return openMainDatabase();
 }
@@ -40,7 +48,9 @@ module.exports = {
     DB_FILE: MAIN_DB_FILE,
     MAIN_DB_FILE,
     RUNTIME_DB_FILE,
+    STATS_DB_FILE,
     openDatabase,
     openMainDatabase,
-    openRuntimeDatabase
+    openRuntimeDatabase,
+    openStatsDatabase
 };

@@ -1,4 +1,4 @@
-const { openDatabase } = require('./sqlite_client');
+const { openStatsDatabase } = require('./sqlite_client');
 
 function nowText() {
     const d = new Date();
@@ -25,7 +25,7 @@ function all(db, sql, params = []) {
 }
 
 async function initOrderStatsCostDailyDb() {
-    const db = openDatabase();
+    const db = openStatsDatabase();
     try {
         await run(db, `
             CREATE TABLE IF NOT EXISTS order_stats_cost_daily (
@@ -71,7 +71,7 @@ async function upsertCostSnapshotForDay(userId, statDate, gameName, costBase, ac
     const cnt = Math.max(0, Math.floor(Number(accountCount || 0)));
     const now = nowText();
 
-    const db = openDatabase();
+    const db = openStatsDatabase();
     try {
         await run(db, `
             INSERT INTO order_stats_cost_daily
@@ -98,7 +98,7 @@ async function listCostSnapshotsByUser(userId, startDate, endDate, gameName = 'W
     if (!uid) throw new Error('user_id 不合法');
     if (!s || !e) throw new Error('start_date / end_date 不能为空');
 
-    const db = openDatabase();
+    const db = openStatsDatabase();
     try {
         return await all(db, `
             SELECT stat_date, cost_base, account_count
