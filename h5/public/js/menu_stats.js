@@ -34,6 +34,14 @@
       return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim());
     }
 
+    function gameIconByName(gameName) {
+      const key = String(gameName || '').trim();
+      if (key === 'WZRY') return '/assets/game_icons/wzry.webp';
+      if (key === '和平精英') return '/assets/game_icons/hpjy.png';
+      if (key === 'CFM') return '/assets/game_icons/cfm.png';
+      return '';
+    }
+
     async function loadStatsCalendar(monthText = '') {
       const month = /^\d{4}-\d{2}$/.test(String(monthText || '').trim())
         ? String(monthText).trim()
@@ -206,10 +214,10 @@
         els.statsAccountList.innerHTML = list.map((x) => `
           <div class="stats-acc-item">
             <div class="stats-acc-top">
-              <p class="stats-acc-name">${x.display_name || x.role_name || x.game_account || '-'}</p>
+              <p class="stats-acc-name">${gameIconByName(x.game_name) ? `<span class="game-avatar"><img src="${gameIconByName(x.game_name)}" alt="${x.game_name || ''}" loading="lazy" decoding="async"></span>` : ''}${x.display_name || x.role_name || x.game_account || '-'}</p>
               <span class="stats-acc-money">¥${Number(x.amount_rec_sum || 0).toFixed(2)}</span>
             </div>
-            <p class="stats-acc-meta">${x.game_name || '-'} · 账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)} · 采购：${x.purchase_date || '-'}</p>
+            <p class="stats-acc-meta">账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)} · 采购：${x.purchase_date || '-'}</p>
             <div class="stats-acc-grid">
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">账号成本</p><p class="stats-acc-chip-v">¥${Number(x.purchase_base || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">年化(单利)</p><p class="stats-acc-chip-v">${(Number(x.annualized_return_rate || 0) * 100).toFixed(2)}%</p></div>

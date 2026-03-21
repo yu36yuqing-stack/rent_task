@@ -35,7 +35,7 @@ function get(db, sql, params = []) {
 }
 
 async function inTx(db, fn) {
-    await run(db, 'BEGIN');
+    await run(db, 'BEGIN IMMEDIATE');
     try {
         const out = await fn();
         await run(db, 'COMMIT');
@@ -198,7 +198,7 @@ async function rebuildUserBlacklistSourceTable(db) {
 
 async function backfillSourceGameIdentityByAccount(db) {
     const rows = await all(db, `
-        SELECT id, user_id, game_account
+        SELECT id, user_id, game_account, source, game_id, game_name
         FROM user_blacklist_source
         WHERE is_deleted = 0
           AND COALESCE(game_id, '1') = '1'
@@ -213,6 +213,26 @@ async function backfillSourceGameIdentityByAccount(db) {
         `, [Number(row.user_id || 0), String(row.game_account || '').trim()]);
         if (matches.length !== 1) continue;
         const one = normalizeGameIdentity(matches[0].game_id, matches[0].game_name);
+        const current = normalizeGameIdentity(row.game_id, row.game_name);
+        if (current.game_id === one.game_id && current.game_name === one.game_name) continue;
+        const conflict = await get(db, `
+            SELECT id
+            FROM user_blacklist_source
+            WHERE user_id = ?
+              AND game_account = ?
+              AND source = ?
+              AND game_id = ?
+              AND is_deleted = 0
+              AND id <> ?
+            LIMIT 1
+        `, [
+            Number(row.user_id || 0),
+            String(row.game_account || '').trim(),
+            String(row.source || '').trim(),
+            one.game_id,
+            Number(row.id || 0)
+        ]);
+        if (conflict) continue;
         await run(db, `
             UPDATE user_blacklist_source
             SET game_id = ?, game_name = ?, modify_date = ?
@@ -285,37 +305,44 @@ async function upsertBlacklistSource(userId, gameAccount, source, patch = {}, op
 
     const db = openDatabase();
     try {
-        return await inTx(db, async () => {
-            const now = nowText();
-            const oldRow = await get(db, `
-                SELECT *
-                FROM user_blacklist_source
-                WHERE user_id = ? AND game_id = ? AND game_account = ? AND source = ? AND is_deleted = 0
-                LIMIT 1
-            `, [uid, key.game_id, acc, src]);
+        const loadLatest = async () => get(db, `
+            SELECT *
+            FROM user_blacklist_source
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND source = ? AND is_deleted = 0
+            LIMIT 1
+        `, [uid, key.game_id, acc, src]);
 
-            if (!oldRow) {
+        try {
+            return await inTx(db, async () => {
+                const now = nowText();
                 await run(db, `
                     INSERT INTO user_blacklist_source
                     (user_id, game_account, game_id, game_name, source, active, reason, priority, detail, expire_at, create_date, modify_date, is_deleted, desc)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                    ON CONFLICT(user_id, game_id, game_account, source, is_deleted)
+                    DO UPDATE SET
+                      game_name = excluded.game_name,
+                      active = excluded.active,
+                      reason = excluded.reason,
+                      priority = excluded.priority,
+                      detail = excluded.detail,
+                      expire_at = excluded.expire_at,
+                      modify_date = excluded.modify_date,
+                      desc = excluded.desc
                 `, [uid, acc, key.game_id, key.game_name, src, active, reason, priority, detail, expireAt, now, now, desc]);
-            } else {
-                await run(db, `
-                    UPDATE user_blacklist_source
-                    SET game_name = ?, active = ?, reason = ?, priority = ?, detail = ?, expire_at = ?, modify_date = ?, desc = ?, is_deleted = 0
-                    WHERE id = ?
-                `, [key.game_name, active, reason, priority, detail, expireAt, now, desc, Number(oldRow.id)]);
-            }
-
-            const latest = await get(db, `
-                SELECT *
-                FROM user_blacklist_source
+                return rowToSource((await loadLatest()) || {});
+            });
+        } catch (e) {
+            const msg = String(e && e.message ? e.message : e || '');
+            if (!/UNIQUE constraint failed: user_blacklist_source\./i.test(msg)) throw e;
+            const now = nowText();
+            await run(db, `
+                UPDATE user_blacklist_source
+                SET game_name = ?, active = ?, reason = ?, priority = ?, detail = ?, expire_at = ?, modify_date = ?, desc = ?, is_deleted = 0
                 WHERE user_id = ? AND game_id = ? AND game_account = ? AND source = ? AND is_deleted = 0
-                LIMIT 1
-            `, [uid, key.game_id, acc, src]);
-            return rowToSource(latest || {});
-        });
+            `, [key.game_name, active, reason, priority, detail, expireAt, now, desc, uid, key.game_id, acc, src]);
+            return rowToSource((await loadLatest()) || {});
+        }
     } finally {
         db.close();
     }
