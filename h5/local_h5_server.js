@@ -67,6 +67,7 @@ const {
 } = require('../product/prod_channel_status');
 const { startProdRiskTaskWorker } = require('../product/prod_status_guard');
 const { resolveDisplayNameByRow } = require('../product/display_name');
+const { normalizeGameProfile } = require('../common/game_profile');
 const { listOrdersForUser, syncOrdersByUser } = require('../order/order');
 const { tryAcquireLock, releaseLock } = require('../database/lock_db');
 const { createAuthBff } = require('./h5_bff/auth_bff');
@@ -665,6 +666,7 @@ async function handleProducts(req, res, urlObj) {
         const forbiddenLabelRaw = String(forbiddenSnapshot.label || '').trim();
         return {
             id: x.id,
+            game_id: String((x && x.game_id) || '1').trim() || '1',
             game_name: x.game_name,
             game_account: acc,
             role_name: String(x.account_remark || '').trim() || acc,
@@ -1103,12 +1105,13 @@ async function handleBlacklistAdd(req, res) {
     const gameAccount = String(body.game_account || '').trim();
     const reason = String(body.reason || '').trim() || '人工下架';
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    const normalizedGame = normalizeGameProfile(body.game_id, body.game_name, { preserveUnknown: true });
     const out = await setReasonSourceAndReconcile(user.id, gameAccount, reason, {
         source: 'h5',
         operator: user.account || 'h5_user',
         desc: 'manual by h5',
-        game_id: String(body.game_id || '1').trim() || '1',
-        game_name: String(body.game_name || 'WZRY').trim() || 'WZRY',
+        game_id: String(normalizedGame.game_id || '1').trim() || '1',
+        game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY',
         detail: { trigger: 'h5_manual_add' }
     });
     return json(res, 200, { ok: true, data: out });
@@ -1119,14 +1122,15 @@ async function handleBlacklistRemove(req, res) {
     const body = await readJsonBody(req);
     const gameAccount = String(body.game_account || '').trim();
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    const normalizedGame = normalizeGameProfile(body.game_id, body.game_name, { preserveUnknown: true });
     const mode = Number(getBlacklistV2Mode());
     if (mode >= 2) {
         const out = await manualRemoveBlacklistMode2(user.id, gameAccount, {
             source: 'h5',
             operator: user.account || 'h5_user',
             desc: 'manual remove by h5 mode2',
-            game_id: String(body.game_id || '1').trim() || '1',
-            game_name: String(body.game_name || 'WZRY').trim() || 'WZRY'
+            game_id: String(normalizedGame.game_id || '1').trim() || '1',
+            game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY'
         });
         return json(res, 200, {
             ok: true,

@@ -1,6 +1,7 @@
 const { openDatabase } = require('../database/sqlite_client');
 const { initOrderDb, listRentingOrderWindowByAccounts } = require('../database/order_db');
 const { upsertBlacklistSource } = require('../database/user_blacklist_source_db');
+const { normalizeGameProfile } = require('../common/game_profile');
 const {
     SOURCE_RULES,
     getBlacklistV2Mode,
@@ -31,16 +32,18 @@ function normalizeSource(source = '') {
 
 function normalizeAccountKey(input, fallback = {}) {
     if (input && typeof input === 'object' && !Array.isArray(input)) {
+        const normalizedGame = normalizeGameProfile(input.game_id || fallback.game_id, input.game_name || fallback.game_name, { preserveUnknown: true });
         return {
             game_account: String(input.game_account || input.account || '').trim(),
-            game_id: String(input.game_id || fallback.game_id || '1').trim() || '1',
-            game_name: String(input.game_name || fallback.game_name || 'WZRY').trim() || 'WZRY'
+            game_id: String(normalizedGame.game_id || '1').trim() || '1',
+            game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY'
         };
     }
+    const normalizedGame = normalizeGameProfile(fallback.game_id, fallback.game_name, { preserveUnknown: true });
     return {
         game_account: String(input || '').trim(),
-        game_id: String(fallback.game_id || '1').trim() || '1',
-        game_name: String(fallback.game_name || 'WZRY').trim() || 'WZRY'
+        game_id: String(normalizedGame.game_id || '1').trim() || '1',
+        game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY'
     };
 }
 

@@ -161,6 +161,42 @@ function buildAccountConfigStatus(rows = []) {
     return { configured, missing };
 }
 
+function mergeAccountRowsByGameAccount(rows = []) {
+    const out = new Map();
+    for (const row of Array.isArray(rows) ? rows : []) {
+        const acc = String(row.game_account || '').trim();
+        if (!acc) continue;
+        const purchasePrice = toMoney2(row.purchase_price || 0);
+        const purchaseDate = String(row.purchase_date || '').slice(0, 10);
+        const current = out.get(acc);
+        if (!current) {
+            out.set(acc, {
+                ...row,
+                game_account: acc,
+                purchase_price: purchasePrice,
+                purchase_date: purchaseDate
+            });
+            continue;
+        }
+        const next = {
+            ...current,
+            game_account: acc,
+            purchase_price: Math.max(toMoney2(current.purchase_price || 0), purchasePrice),
+            purchase_date: (() => {
+                const oldDate = String(current.purchase_date || '').slice(0, 10);
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(oldDate)) return purchaseDate;
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(purchaseDate)) return oldDate;
+                return oldDate <= purchaseDate ? oldDate : purchaseDate;
+            })()
+        };
+        if (!String(next.display_name || '').trim() && String(row.display_name || '').trim()) next.display_name = row.display_name;
+        if (!String(next.role_name || '').trim() && String(row.role_name || '').trim()) next.role_name = row.role_name;
+        if (!String(next.game_name || '').trim() && String(row.game_name || '').trim()) next.game_name = row.game_name;
+        out.set(acc, next);
+    }
+    return Array.from(out.values());
+}
+
 async function loadAccountConfigByUser(userId, gameName = DEFAULT_GAME_NAME) {
     await initUserGameAccountDb();
     const uid = Number(userId || 0);
@@ -595,13 +631,16 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         : buildPeriodRange(options.period, now);
     const rows = await listOrderStatsRowsByScope(uid, periodInfo.startDate, periodInfo.endDate, gameName);
     const config = await loadAccountConfigByUser(uid, gameName);
+    const mergedConfigured = gameName === ALL_GAME_NAME ? mergeAccountRowsByGameAccount(config.configured || []) : (config.configured || []);
+    const mergedMissing = gameName === ALL_GAME_NAME ? mergeAccountRowsByGameAccount(config.missing || []) : (config.missing || []);
     const latestDisplayNameMap = new Map(
-        [...(config.configured || []), ...(config.missing || [])]
+        [...mergedConfigured, ...mergedMissing]
             .map((x) => {
                 const acc = String(x.game_account || '').trim();
                 const rowGameName = String(x.game_name || '').trim();
                 const key = gameName === ALL_GAME_NAME ? `${rowGameName}::${acc}` : acc;
-                return [key, String(x.display_name || x.role_name || '').trim()];
+                const normalizedKey = gameName === ALL_GAME_NAME ? acc : key;
+                return [normalizedKey, String(x.display_name || x.role_name || '').trim()];
             })
             .filter(([k]) => Boolean(k))
     );
@@ -613,10 +652,11 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const costMap = new Map((costRows || []).map((x) => [String(x.stat_date || '').slice(0, 10), toMoney2(x.cost_base || 0)]));
     const fallbackCostByDay = (dayText) => {
         const day = String(dayText || '').slice(0, 10);
-        const active = (config.configured || []).filter((x) => String(x.purchase_date || '').slice(0, 10) <= day);
+        const active = mergedConfigured.filter((x) => String(x.purchase_date || '').slice(0, 10) <= day);
         return toMoney2(active.reduce((sum, x) => sum + toMoney2(x.purchase_price || 0), 0));
     };
     const costSeries = periodDateList.map((d) => {
+        if (gameName === ALL_GAME_NAME) return fallbackCostByDay(d);
         if (costMap.has(d)) return toMoney2(costMap.get(d));
         return fallbackCostByDay(d);
     });
@@ -626,7 +666,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         const ch = String(row.channel || '').trim();
         const acc = String(row.game_account || '').trim();
         const rowGameName = String(row.game_name || '').trim();
-        const accountKey = gameName === ALL_GAME_NAME ? `${rowGameName}::${acc}` : acc;
+        const accountKey = gameName === ALL_GAME_NAME ? acc : acc;
         if (ch) {
             const prev = byChannelMap.get(ch) || [];
             prev.push(row);
@@ -644,11 +684,10 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     })).sort((a, b) => b.amount_rec_sum - a.amount_rec_sum);
 
     const configuredByAccount = new Map(
-        (config.configured || [])
+        mergedConfigured
             .map((x) => {
                 const acc = String(x.game_account || '').trim();
-                const rowGameName = String(x.game_name || '').trim();
-                const key = gameName === ALL_GAME_NAME ? `${rowGameName}::${acc}` : acc;
+                const key = acc;
                 return [key, x];
             })
             .filter(([k]) => Boolean(k))
@@ -689,13 +728,13 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
 
     // 年化收益率统一采用单利口径：
     // 年化 = 区间收益率 * (365 / 区间天数)
-    const purchaseBase = (config.configured || []).reduce((sum, x) => sum + toMoney2(x.purchase_price), 0);
+    const purchaseBase = mergedConfigured.reduce((sum, x) => sum + toMoney2(x.purchase_price), 0);
     const costBaseMode = periodInfo.period === 'today' ? 'today_snapshot' : 'period_avg';
     const costBaseValue = costBaseMode === 'today_snapshot'
         ? toMoney2(costSeries[costSeries.length - 1] || 0)
         : toMoney2(costSeries.reduce((sum, x) => sum + Number(x || 0), 0) / Math.max(1, periodDays));
     const periodReturnRate = costBaseValue > 0 ? (summary.amount_rec_sum / costBaseValue) : 0;
-    const earliestPurchaseDate = (config.configured || [])
+    const earliestPurchaseDate = mergedConfigured
         .map((x) => String(x.purchase_date || '').slice(0, 10))
         .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
         .sort()[0] || '';
@@ -704,7 +743,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
 
     const orderBase = Math.max(1, summary.order_cnt_total);
     const summaryHitDaysByAccount = by_account.reduce((sum, x) => sum + Number(x.target3_hit_days || 0), 0);
-    const configuredCount = Number((config.configured || []).length || 0);
+    const configuredCount = Number(mergedConfigured.length || 0);
     const target3RateOverall = configuredCount > 0
         ? Number((summaryHitDaysByAccount / (configuredCount * periodDays)).toFixed(4))
         : 0;
@@ -739,7 +778,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         },
         by_channel,
         by_account,
-        missing_purchase_accounts: config.missing || [],
+        missing_purchase_accounts: mergedMissing,
         configured_account_count: configuredCount
     };
 }
