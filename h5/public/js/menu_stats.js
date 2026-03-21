@@ -38,7 +38,7 @@
       const month = /^\d{4}-\d{2}$/.test(String(monthText || '').trim())
         ? String(monthText).trim()
         : (state.statsBoard.calendar && state.statsBoard.calendar.month) || currentMonthText();
-      const gameName = String((state.statsBoard && state.statsBoard.game_name) || 'WZRY').trim() || 'WZRY';
+      const gameName = String((state.statsBoard && state.statsBoard.game_name) || '全部').trim() || '全部';
       const data = await request(`/api/stats/calendar?month=${encodeURIComponent(month)}&game_name=${encodeURIComponent(gameName)}`);
       state.statsBoard.calendar = {
         month: String(data.month || month),
@@ -118,6 +118,7 @@
     function renderStatsView() {
       const s = state.statsBoard || {};
       const games = [
+        { k: '全部', t: '全部', icon: '' },
         { k: 'WZRY', t: '王者荣耀', icon: '/assets/game_icons/wzry.webp' },
         { k: '和平精英', t: '和平精英', icon: '/assets/game_icons/hpjy.png' },
         { k: 'CFM', t: 'CFM枪战王者', icon: '/assets/game_icons/cfm.png' }
@@ -135,8 +136,8 @@
 
       if (els.statsGameTabs) {
         els.statsGameTabs.innerHTML = games.map((x) => `
-          <button class="stats-game-tab ${String(s.game_name || 'WZRY') === x.k ? 'active' : ''}" data-stats-game="${x.k}">
-            <span class="game-avatar"><img src="${x.icon}" alt="${x.t}" loading="lazy" decoding="async"></span>
+          <button class="stats-game-tab ${String(s.game_name || '全部') === x.k ? 'active' : ''}" data-stats-game="${x.k}">
+            ${x.icon ? `<span class="game-avatar"><img src="${x.icon}" alt="${x.t}" loading="lazy" decoding="async"></span>` : ''}
             <span class="stats-game-tab-text">${x.t}</span>
           </button>
         `).join('');
@@ -208,7 +209,7 @@
               <p class="stats-acc-name">${x.display_name || x.role_name || x.game_account || '-'}</p>
               <span class="stats-acc-money">¥${Number(x.amount_rec_sum || 0).toFixed(2)}</span>
             </div>
-            <p class="stats-acc-meta">账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)} · 采购：${x.purchase_date || '-'}</p>
+            <p class="stats-acc-meta">${x.game_name || '-'} · 账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)} · 采购：${x.purchase_date || '-'}</p>
             <div class="stats-acc-grid">
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">账号成本</p><p class="stats-acc-chip-v">¥${Number(x.purchase_base || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">年化(单利)</p><p class="stats-acc-chip-v">${(Number(x.annualized_return_rate || 0) * 100).toFixed(2)}%</p></div>
@@ -236,8 +237,8 @@
       if (els.statsGameTabs) {
         Array.from(els.statsGameTabs.querySelectorAll('[data-stats-game]')).forEach((n) => {
           n.addEventListener('click', async () => {
-            const k = String(n.getAttribute('data-stats-game') || 'WZRY').trim();
-            if (k === String(state.statsBoard.game_name || 'WZRY')) return;
+            const k = String(n.getAttribute('data-stats-game') || '全部').trim();
+            if (k === String(state.statsBoard.game_name || '全部')) return;
             state.statsBoard.game_name = k;
             await loadStatsBoard();
             await loadStatsCalendar((state.statsBoard.calendar && state.statsBoard.calendar.month) || '');

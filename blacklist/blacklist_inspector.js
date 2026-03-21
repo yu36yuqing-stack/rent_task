@@ -69,6 +69,10 @@ function isExpectedMismatch(row = {}) {
     if (!legacyReason && projectedReason === '冷却期下架' && projectedSource === 'order_cooldown') {
         return true;
     }
+    // 冷却期释放后，旧主表残留尚未被清理也是预期过程，不做巡检告警。
+    if (legacyReason === '冷却期下架' && !projectedReason) {
+        return true;
+    }
     return false;
 }
 

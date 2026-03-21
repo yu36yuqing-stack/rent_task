@@ -146,9 +146,9 @@
         }
       },
       statsBoard: {
-        game_name: 'WZRY',
+        game_name: '全部',
         period: 'week',
-        selected_date: todayDateText(),
+        selected_date: '',
         range: { start_date: '', end_date: '' },
         summary: null,
         profitability: null,
@@ -846,7 +846,7 @@
     async function loadStatsBoard(options = {}) {
       const s = state.statsBoard || {};
       const period = String(s.period || 'today').trim();
-      const gameName = String(s.game_name || 'WZRY').trim() || 'WZRY';
+      const gameName = String(s.game_name || '全部').trim() || '全部';
       const statDateCandidate = String(options.stat_date === undefined ? (s.selected_date || '') : options.stat_date).trim();
       const hasStatDate = /^\d{4}-\d{2}-\d{2}$/.test(statDateCandidate);
       const data = await request(`/api/stats/dashboard?period=${encodeURIComponent(period)}&game_name=${encodeURIComponent(gameName)}${hasStatDate ? `&stat_date=${encodeURIComponent(statDateCandidate)}` : ''}`);
@@ -1108,9 +1108,9 @@
       state.cardNodeMap = {};
       state.pullRefresh = { dragging: false, ready: false, loading: false, startY: 0, distance: 0 };
       state.statsBoard = {
-        game_name: 'WZRY',
+        game_name: '全部',
         period: 'week',
-        selected_date: todayDateText(),
+        selected_date: '',
         range: { start_date: '', end_date: '' },
         summary: null,
         profitability: null,
@@ -1420,7 +1420,7 @@
     els.statsRefreshBtn.addEventListener('click', async () => {
       try {
         const days = calcRefreshDaysByStatsPeriod(state.statsBoard.period);
-        const gameName = String((state.statsBoard && state.statsBoard.game_name) || 'WZRY').trim() || 'WZRY';
+        const gameName = String((state.statsBoard && state.statsBoard.game_name) || '全部').trim() || '全部';
         await request('/api/stats/refresh', {
           method: 'POST',
           body: JSON.stringify({ days, game_name: gameName })

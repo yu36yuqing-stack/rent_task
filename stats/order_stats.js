@@ -27,6 +27,7 @@ const DEFAULT_TARGET_MINUTE = 0;
 const DEFAULT_WINDOW_SEC = 300;
 const DEFAULT_RECALC_DAYS = 60;
 const DEFAULT_GAME_NAME = 'WZRY';
+const ALL_GAME_NAME = '全部';
 
 function pad2(n) {
     return String(n).padStart(2, '0');
@@ -129,6 +130,7 @@ function buildAccountConfigStatus(rows = []) {
         }
         const displayName = resolveDisplayNameByRow({
             game_account: gameAccount,
+            game_name: String(row.game_name || '').trim(),
             account_remark: roleName,
             role_name: roleName,
             channel_prd_info: channelPrdInfo
@@ -139,6 +141,7 @@ function buildAccountConfigStatus(rows = []) {
         if (ok) {
             configured.push({
                 game_account: gameAccount,
+                game_name: String(row.game_name || '').trim(),
                 role_name: roleName,
                 display_name: displayName,
                 purchase_price: purchasePrice,
@@ -147,6 +150,7 @@ function buildAccountConfigStatus(rows = []) {
         } else {
             missing.push({
                 game_account: gameAccount,
+                game_name: String(row.game_name || '').trim(),
                 role_name: roleName,
                 display_name: displayName,
                 purchase_price: purchasePrice,
@@ -164,14 +168,22 @@ async function loadAccountConfigByUser(userId, gameName = DEFAULT_GAME_NAME) {
     const g = String(gameName || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
     const db = openDatabase();
     try {
-        const rows = await all(db, `
-            SELECT game_account, account_remark, channel_prd_info, purchase_price, purchase_date
-            FROM user_game_account
-            WHERE user_id = ?
-              AND is_deleted = 0
-              AND COALESCE(game_name, '') = ?
-            ORDER BY id DESC
-        `, [uid, g]);
+        const rows = g === ALL_GAME_NAME
+            ? await all(db, `
+                SELECT game_account, game_name, account_remark, channel_prd_info, purchase_price, purchase_date
+                FROM user_game_account
+                WHERE user_id = ?
+                  AND is_deleted = 0
+                ORDER BY id DESC
+            `, [uid])
+            : await all(db, `
+                SELECT game_account, game_name, account_remark, channel_prd_info, purchase_price, purchase_date
+                FROM user_game_account
+                WHERE user_id = ?
+                  AND is_deleted = 0
+                  AND COALESCE(game_name, '') = ?
+                ORDER BY id DESC
+            `, [uid, g]);
         return buildAccountConfigStatus(rows);
     } finally {
         db.close();
@@ -251,10 +263,12 @@ function reduceRows(rows = []) {
 function normalizeDailyRowsFromOrders(orderRows = [], configMap = new Map()) {
     return orderRows.map((r) => {
         const gameAccount = String(r.game_account || '').trim();
-        const cfg = configMap.get(gameAccount) || {};
+        const rowGameName = String(r.game_name || '').trim();
+        const cfg = configMap.get(`${rowGameName}::${gameAccount}`) || configMap.get(gameAccount) || {};
         return {
             channel: String(r.channel || '').trim(),
             game_account: gameAccount,
+            game_name: rowGameName,
             // 统计展示统一使用商品表中的最新角色名，避免订单历史脏角色名影响展示。
             role_name: String(cfg.role_name || r.role_name || '').trim(),
             purchase_price: toMoney2(cfg.purchase_price),
@@ -293,6 +307,7 @@ async function queryDailyRowsFromOrder(userId, statDate, gameName, configuredAcc
             SELECT
                 '' AS channel,
                 game_account,
+                COALESCE(game_name, '') AS game_name,
                 MAX(COALESCE(role_name, '')) AS role_name,
                 COUNT(*) AS order_cnt_total,
                 SUM(CASE
@@ -325,12 +340,32 @@ async function queryDailyRowsFromOrder(userId, statDate, gameName, configuredAcc
             FROM "order"
             WHERE user_id = ?
               AND is_deleted = 0
-              AND COALESCE(game_name, '') = ?
               AND game_account IN (${placeholders})
+              ${g === ALL_GAME_NAME ? '' : 'AND COALESCE(game_name, \'\') = ?'}
               AND end_time >= ?
               AND end_time < ?
-            GROUP BY game_account
-        `, [uid, g, ...accs, startText, endText]);
+            GROUP BY game_name, game_account
+        `, g === ALL_GAME_NAME ? [uid, ...accs, startText, endText] : [uid, ...accs, g, startText, endText]);
+    } finally {
+        db.close();
+    }
+}
+
+async function listConfiguredGamesByUser(userId) {
+    await initUserGameAccountDb();
+    const uid = Number(userId || 0);
+    if (!uid) return [];
+    const db = openDatabase();
+    try {
+        const rows = await all(db, `
+            SELECT DISTINCT COALESCE(game_name, '') AS game_name
+            FROM user_game_account
+            WHERE user_id = ?
+              AND is_deleted = 0
+              AND COALESCE(game_name, '') <> ''
+            ORDER BY game_name ASC
+        `, [uid]);
+        return rows.map((row) => String((row && row.game_name) || '').trim()).filter(Boolean);
     } finally {
         db.close();
     }
@@ -343,13 +378,31 @@ async function refreshOrderStatsDailyByUser(userId, options = {}) {
     if (!uid) throw new Error('user_id 不合法');
     const days = Math.max(1, Number(options.days || DEFAULT_RECALC_DAYS));
     const gameName = String(options.game_name || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
+    if (gameName === ALL_GAME_NAME) {
+        const games = await listConfiguredGamesByUser(uid);
+        const results = [];
+        for (const oneGame of games) {
+            results.push(await refreshOrderStatsDailyByUser(uid, {
+                ...options,
+                game_name: oneGame
+            }));
+        }
+        return {
+            user_id: uid,
+            game_name: ALL_GAME_NAME,
+            days,
+            all_games: true,
+            games,
+            results
+        };
+    }
     const now = options.now instanceof Date ? options.now : new Date();
     const baseDate = startOfDay(now);
     const desc = String(options.desc || 'daily refresh by stats/order_stats').trim();
 
     const config = await loadAccountConfigByUser(uid, gameName);
     const configured = Array.isArray(config.configured) ? config.configured : [];
-    const configMap = new Map(configured.map((x) => [x.game_account, x]));
+    const configMap = new Map(configured.map((x) => [`${String(x.game_name || '').trim()}::${x.game_account}`, x]));
 
     const touched = [];
     for (let i = 0; i < days; i += 1) {
@@ -396,6 +449,52 @@ async function refreshOrderStatsDailyForAllUsers(options = {}) {
         failed_users: out.filter((x) => !x.ok).length,
         results: out
     };
+}
+
+async function listOrderStatsRowsByScope(userId, startDate, endDate, gameName) {
+    const uid = Number(userId || 0);
+    const s = String(startDate || '').slice(0, 10);
+    const e = String(endDate || '').slice(0, 10);
+    const g = String(gameName || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
+    if (g !== ALL_GAME_NAME) return listOrderStatsRows(uid, s, e, g);
+    const db = openDatabase();
+    try {
+        return await all(db, `
+            SELECT *
+            FROM order_stats_daily
+            WHERE user_id = ?
+              AND stat_date >= ?
+              AND stat_date <= ?
+              AND is_deleted = 0
+            ORDER BY stat_date DESC, amount_rec_sum DESC, id DESC
+        `, [uid, s, e]);
+    } finally {
+        db.close();
+    }
+}
+
+async function listCostSnapshotsByScope(userId, startDate, endDate, gameName) {
+    await initOrderStatsCostDailyDb();
+    const uid = Number(userId || 0);
+    const s = String(startDate || '').slice(0, 10);
+    const e = String(endDate || '').slice(0, 10);
+    const g = String(gameName || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
+    if (g !== ALL_GAME_NAME) return listCostSnapshotsByUser(uid, s, e, g);
+    const db = openDatabase();
+    try {
+        return await all(db, `
+            SELECT stat_date, ROUND(SUM(cost_base), 2) AS cost_base, SUM(account_count) AS account_count
+            FROM order_stats_cost_daily
+            WHERE user_id = ?
+              AND stat_date >= ?
+              AND stat_date <= ?
+              AND is_deleted = 0
+            GROUP BY stat_date
+            ORDER BY stat_date ASC
+        `, [uid, s, e]);
+    } finally {
+        db.close();
+    }
 }
 
 function shouldTriggerDailyStatsNow(options = {}) {
@@ -494,18 +593,23 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const periodInfo = pickedDate
         ? { startDate: pickedDate, endDate: pickedDate, period: 'day' }
         : buildPeriodRange(options.period, now);
-    const rows = await listOrderStatsRows(uid, periodInfo.startDate, periodInfo.endDate, gameName);
+    const rows = await listOrderStatsRowsByScope(uid, periodInfo.startDate, periodInfo.endDate, gameName);
     const config = await loadAccountConfigByUser(uid, gameName);
     const latestDisplayNameMap = new Map(
         [...(config.configured || []), ...(config.missing || [])]
-            .map((x) => [String(x.game_account || '').trim(), String(x.display_name || x.role_name || '').trim()])
+            .map((x) => {
+                const acc = String(x.game_account || '').trim();
+                const rowGameName = String(x.game_name || '').trim();
+                const key = gameName === ALL_GAME_NAME ? `${rowGameName}::${acc}` : acc;
+                return [key, String(x.display_name || x.role_name || '').trim()];
+            })
             .filter(([k]) => Boolean(k))
     );
 
     const summary = reduceRows(rows);
     const periodDays = dateDiffDaysInclusive(periodInfo.startDate, periodInfo.endDate);
     const periodDateList = eachDateTextInclusive(periodInfo.startDate, periodInfo.endDate);
-    const costRows = await listCostSnapshotsByUser(uid, periodInfo.startDate, periodInfo.endDate, gameName);
+    const costRows = await listCostSnapshotsByScope(uid, periodInfo.startDate, periodInfo.endDate, gameName);
     const costMap = new Map((costRows || []).map((x) => [String(x.stat_date || '').slice(0, 10), toMoney2(x.cost_base || 0)]));
     const fallbackCostByDay = (dayText) => {
         const day = String(dayText || '').slice(0, 10);
@@ -521,15 +625,17 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     for (const row of rows) {
         const ch = String(row.channel || '').trim();
         const acc = String(row.game_account || '').trim();
+        const rowGameName = String(row.game_name || '').trim();
+        const accountKey = gameName === ALL_GAME_NAME ? `${rowGameName}::${acc}` : acc;
         if (ch) {
             const prev = byChannelMap.get(ch) || [];
             prev.push(row);
             byChannelMap.set(ch, prev);
         }
-        if (acc) {
-            const prev = byAccountMap.get(acc) || [];
+        if (accountKey) {
+            const prev = byAccountMap.get(accountKey) || [];
             prev.push(row);
-            byAccountMap.set(acc, prev);
+            byAccountMap.set(accountKey, prev);
         }
     }
     const by_channel = Array.from(byChannelMap.entries()).map(([channel, arr]) => ({
@@ -539,14 +645,20 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
 
     const configuredByAccount = new Map(
         (config.configured || [])
-            .map((x) => [String(x.game_account || '').trim(), x])
+            .map((x) => {
+                const acc = String(x.game_account || '').trim();
+                const rowGameName = String(x.game_name || '').trim();
+                const key = gameName === ALL_GAME_NAME ? `${rowGameName}::${acc}` : acc;
+                return [key, x];
+            })
             .filter(([k]) => Boolean(k))
     );
-    const by_account = Array.from(configuredByAccount.entries()).map(([game_account, cfgOne]) => {
-        const arr = byAccountMap.get(game_account) || [];
+    const by_account = Array.from(configuredByAccount.entries()).map(([accountKey, cfgOne]) => {
+        const arr = byAccountMap.get(accountKey) || [];
         const s = reduceRows(arr);
         const roleName = String((arr[0] && arr[0].role_name) || cfgOne.role_name || '').trim();
-        const displayName = String(latestDisplayNameMap.get(game_account) || roleName || game_account).trim();
+        const rawAccount = String(cfgOne.game_account || accountKey).trim();
+        const displayName = String(latestDisplayNameMap.get(accountKey) || roleName || rawAccount).trim();
         const hitDays = arr.reduce((sum, r) => sum + (Number(r.order_cnt_effective || 0) >= 3 ? 1 : 0), 0);
         const orderBase = Math.max(1, Number(s.order_cnt_effective || 0));
         const accountPurchaseBase = toMoney2(cfgOne.purchase_price || 0);
@@ -557,8 +669,9 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
             ? (accountPeriodReturnRate * (365 / Math.max(1, accountAnnualizedDays)))
             : 0;
         return {
-            game_account,
-            role_name: roleName || game_account,
+            game_account: rawAccount,
+            game_name: String(cfgOne.game_name || (arr[0] && arr[0].game_name) || gameName).trim() || gameName,
+            role_name: roleName || rawAccount,
             display_name: displayName,
             purchase_base: accountPurchaseBase,
             purchase_date: accountPurchaseDate,
@@ -656,7 +769,7 @@ async function getIncomeCalendarByUser(userId, options = {}) {
     const now = options.now instanceof Date ? options.now : new Date();
     const month = parseMonthText(options.month, now);
     const range = monthStartEnd(month);
-    const rows = await listOrderStatsRows(uid, range.startDate, range.endDate, gameName);
+    const rows = await listOrderStatsRowsByScope(uid, range.startDate, range.endDate, gameName);
     const dayMap = new Map();
     for (const r of rows) {
         const day = String(r.stat_date || '').slice(0, 10);
