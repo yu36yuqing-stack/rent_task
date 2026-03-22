@@ -73,6 +73,14 @@ function isExpectedMismatch(row = {}) {
     if (legacyReason === '冷却期下架' && !projectedReason) {
         return true;
     }
+    // 人工下架属于人工意图，旧链路无记录而新链路已投影，属于预期差异，不做巡检告警。
+    if (!legacyReason && projectedReason === '人工下架' && projectedSource === 'manual_block') {
+        return true;
+    }
+    // 人工移除后，旧主表残留尚未清理也是预期过程，不做巡检告警。
+    if (legacyReason === '人工下架' && !projectedReason) {
+        return true;
+    }
     return false;
 }
 
