@@ -815,17 +815,27 @@ async function handleOrders(req, res, urlObj) {
         const allRows = await listAllAccountsByUser(user.id);
         const accountMap = new Map(
             (allRows.list || [])
+                .map((x) => {
+                    const acc = String((x && x.game_account) || '').trim();
+                    const gid = String((x && x.game_id) || '').trim();
+                    return [`${gid}::${acc}`, x];
+                })
+                .filter(([key]) => !key.endsWith('::') && !key.startsWith('::'))
+        );
+        const fallbackAccountMap = new Map(
+            (allRows.list || [])
                 .map((x) => [String((x && x.game_account) || '').trim(), x])
-                .filter(([acc]) => Boolean(acc))
+                .filter(([acc]) => Boolean(acc) && !accountMap.has(`::${acc}`))
         );
         list = list.map((item) => {
             const acc = String((item && item.game_account) || '').trim();
-            const hit = accountMap.get(acc);
+            const gid = String((item && item.game_id) || '').trim();
+            const hit = accountMap.get(`${gid}::${acc}`) || fallbackAccountMap.get(acc);
             const fallback = String((item && item.role_name) || '').trim() || acc;
-            const displayName = hit ? resolveDisplayNameByRow(hit, acc) : fallback;
+            const displayName = fallback || (hit ? resolveDisplayNameByRow(hit, acc) : '');
             return {
                 ...item,
-                display_name: displayName || fallback
+                display_name: displayName || acc
             };
         });
     }
