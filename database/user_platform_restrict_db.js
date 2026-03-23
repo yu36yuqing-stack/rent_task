@@ -101,17 +101,44 @@ async function initUserPlatformRestrictDb() {
         const hasGameName = cols.some((x) => String(x.name || '').trim() === 'game_name');
         if (!hasGameId) await run(db, `ALTER TABLE user_platform_restrict ADD COLUMN game_id TEXT NOT NULL DEFAULT '1'`);
         if (!hasGameName) await run(db, `ALTER TABLE user_platform_restrict ADD COLUMN game_name TEXT NOT NULL DEFAULT 'WZRY'`);
+        // 仅对“同一用户+同一账号当前只存在一个游戏归属”的限挂记录做安全回填；
+        // 多游戏连体号不在这里强行猜测，避免把旧记录迁到另一游戏后撞唯一索引。
         await run(db, `
             UPDATE user_platform_restrict
             SET game_id = (
-                SELECT COALESCE(MAX(uga.game_id), '1')
+                SELECT uga.game_id
                 FROM user_game_account uga
                 WHERE uga.user_id = user_platform_restrict.user_id
                   AND uga.game_account = user_platform_restrict.game_account
                   AND uga.is_deleted = 0
+                GROUP BY uga.user_id, uga.game_account
+                HAVING COUNT(DISTINCT uga.game_id) = 1
             )
-            WHERE TRIM(COALESCE(game_id, '')) = ''
-               OR game_id = '1'
+            WHERE is_deleted = 0
+              AND TRIM(COALESCE(game_account, '')) <> ''
+              AND (
+                TRIM(COALESCE(game_id, '')) = ''
+                OR (
+                    game_id = '1'
+                    AND EXISTS (
+                        SELECT 1
+                        FROM user_game_account uga2
+                        WHERE uga2.user_id = user_platform_restrict.user_id
+                          AND uga2.game_account = user_platform_restrict.game_account
+                          AND uga2.game_id <> '1'
+                          AND uga2.is_deleted = 0
+                    )
+                )
+              )
+              AND EXISTS (
+                SELECT 1
+                FROM user_game_account uga3
+                WHERE uga3.user_id = user_platform_restrict.user_id
+                  AND uga3.game_account = user_platform_restrict.game_account
+                  AND uga3.is_deleted = 0
+                GROUP BY uga3.user_id, uga3.game_account
+                HAVING COUNT(DISTINCT uga3.game_id) = 1
+              )
         `);
         await run(db, `
             UPDATE user_platform_restrict

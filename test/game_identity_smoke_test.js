@@ -83,6 +83,20 @@ async function testPlatformRestrictMigrationAndIsolation() {
         game_name: '和平精英',
         account_remark: 'legacy-remark'
     });
+    await upsertUserGameAccount({
+        user_id: userId,
+        game_account: 'multi_game_legacy_account',
+        game_id: '1',
+        game_name: 'WZRY',
+        account_remark: 'multi-wzry'
+    });
+    await upsertUserGameAccount({
+        user_id: userId,
+        game_account: 'multi_game_legacy_account',
+        game_id: '3',
+        game_name: 'CFM',
+        account_remark: 'multi-cfm'
+    });
 
     const db = openSqlite(mainDbFile);
     try {
@@ -106,6 +120,18 @@ async function testPlatformRestrictMigrationAndIsolation() {
             (user_id, game_account, platform, reason, detail, create_date, modify_date, is_deleted, desc)
             VALUES (?, ?, 'uuzuhao', '平台限制上架', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, 'legacy row')
         `, [userId, 'legacy_only_account']);
+        await run(db, `ALTER TABLE user_platform_restrict ADD COLUMN game_id TEXT NOT NULL DEFAULT '1'`);
+        await run(db, `ALTER TABLE user_platform_restrict ADD COLUMN game_name TEXT NOT NULL DEFAULT 'WZRY'`);
+        await run(db, `
+            INSERT INTO user_platform_restrict
+            (user_id, game_account, game_id, game_name, platform, reason, detail, create_date, modify_date, is_deleted, desc)
+            VALUES (?, ?, '3', 'CFM', 'uuzuhao', '平台限制上架', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, 'multi legacy real gid')
+        `, [userId, 'multi_game_legacy_account']);
+        await run(db, `
+            INSERT INTO user_platform_restrict
+            (user_id, game_account, game_id, game_name, platform, reason, detail, create_date, modify_date, is_deleted, desc)
+            VALUES (?, ?, '1', 'WZRY', 'uuzuhao', '平台限制上架', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, 'multi legacy default gid')
+        `, [userId, 'multi_game_legacy_account']);
     } finally {
         await closeDb(db);
     }
@@ -127,6 +153,18 @@ async function testPlatformRestrictMigrationAndIsolation() {
         assert(migrated, '未找到迁移后的 legacy row');
         assert.strictEqual(String(migrated.game_id), '2', 'legacy 限挂记录 game_id 回填错误');
         assert.strictEqual(String(migrated.game_name), '和平精英', 'legacy 限挂记录 game_name 回填错误');
+
+        const multiRows = await all(db2, `
+            SELECT game_id, game_name
+            FROM user_platform_restrict
+            WHERE user_id = ? AND game_account = ?
+            ORDER BY id ASC
+        `, [userId, 'multi_game_legacy_account']);
+        assert.deepStrictEqual(
+            multiRows.map((x) => `${x.game_id}:${x.game_name}`),
+            ['3:CFM', '1:WZRY'],
+            '多游戏账号的历史限挂记录不应被强行回填到其他游戏'
+        );
 
         const idxCols = await all(db2, `PRAGMA index_info("uq_user_platform_restrict_active")`);
         assert.deepStrictEqual(
