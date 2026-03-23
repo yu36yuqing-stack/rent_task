@@ -113,11 +113,24 @@ async function main() {
     assertTrue(Boolean(lock && lock.acquired), 'runtime lock 获取失败');
     assertTrue(await releaseLock('runtime_smoke_lock', 'runtime release'), 'runtime lock 释放失败');
 
+    const runtimeDb = openRuntimeDatabase();
+    try {
+        await run(runtimeDb, `
+            INSERT INTO lock_db (lock_key, lease_until, modify_date, is_deleted, desc)
+            VALUES ('runtime_stale_pid_lock', ?, '2026-03-24 00:00:00', 0, 'cron/pipeline user_id=8 pid=999999')
+        `, [Math.floor(Date.now() / 1000) + 600]);
+    } finally {
+        runtimeDb.close();
+    }
+    const reclaimed = await tryAcquireLock('runtime_stale_pid_lock', 120, 'runtime reclaim');
+    assertTrue(Boolean(reclaimed && reclaimed.acquired), '应允许回收 owner pid 已不存在的 stale lock');
+    assertTrue(await releaseLock('runtime_stale_pid_lock', 'runtime stale release'), 'stale lock 释放失败');
+
     assertEqual(await countRows(openMainDatabase, 'user'), 1, 'user 应落主库');
     assertEqual(await countRows(openRuntimeDatabase, 'user_session'), 1, 'user_session 应落运行时库');
     assertEqual(await countRows(openRuntimeDatabase, 'order_sync_state'), 1, 'order_sync_state 应落运行时库');
     assertEqual(await countRows(openRuntimeDatabase, 'order_stats_job_state'), 1, 'order_stats_job_state 应落运行时库');
-    assertEqual(await countRows(openRuntimeDatabase, 'lock_db'), 1, 'lock_db 应落运行时库');
+    assertEqual(await countRows(openRuntimeDatabase, 'lock_db'), 2, 'lock_db 应落运行时库');
 
     const mainDb = openMainDatabase();
     try {

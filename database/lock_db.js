@@ -25,6 +25,24 @@ function get(db, sql, params = []) {
     });
 }
 
+function parseOwnerPid(ownerText = '') {
+    const raw = String(ownerText || '').trim();
+    if (!raw) return 0;
+    const m = raw.match(/(?:^|\s)pid=(\d+)(?:\s|$)/i);
+    return m ? Number(m[1] || 0) : 0;
+}
+
+function isPidAlive(pid) {
+    const n = Number(pid || 0);
+    if (!Number.isInteger(n) || n <= 0) return false;
+    try {
+        process.kill(n, 0);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 async function initLockDb() {
     const db = openRuntimeDatabase();
     try {
@@ -59,7 +77,7 @@ async function tryAcquireLock(lockKey, leaseSec = 1800, owner = '') {
     try {
         await run(db, 'BEGIN IMMEDIATE TRANSACTION');
         const row = await get(db, `
-            SELECT id, lease_until
+            SELECT id, lease_until, desc
             FROM ${LOCK_TABLE}
             WHERE lock_key = ? AND is_deleted = 0
             LIMIT 1
@@ -75,7 +93,9 @@ async function tryAcquireLock(lockKey, leaseSec = 1800, owner = '') {
         }
 
         const currentLease = Number(row.lease_until || 0);
-        if (currentLease > nowSec) {
+        const ownerPid = parseOwnerPid(row.desc);
+        const ownerAlive = ownerPid > 0 ? isPidAlive(ownerPid) : true;
+        if (currentLease > nowSec && ownerAlive) {
             await run(db, 'COMMIT');
             return { acquired: false, lock_key: key, lease_until: currentLease };
         }
