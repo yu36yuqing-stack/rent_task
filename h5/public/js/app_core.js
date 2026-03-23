@@ -213,6 +213,7 @@
       forbiddenSheet: {
         open: false,
         account: '',
+        game_id: '1',
         game_name: 'WZRY',
         role_name: '',
         result_text: '',
@@ -222,11 +223,13 @@
         query_status: '',
         query_text: ''
       },
-      moreOpsSheet: { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false },
+      moreOpsSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false },
       activeActionSheet: '',
       purchaseSheet: {
         open: false,
         account: '',
+        game_id: '1',
+        game_name: 'WZRY',
         role_name: '',
         purchase_price: '',
         purchase_date: '',
@@ -1084,6 +1087,7 @@
       state.forbiddenSheet = {
         open: false,
         account: '',
+        game_id: '1',
         game_name: 'WZRY',
         role_name: '',
         result_text: '',
@@ -1093,11 +1097,13 @@
         query_status: '',
         query_text: ''
       };
-      state.moreOpsSheet = { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false };
       state.activeActionSheet = '';
       state.purchaseSheet = {
         open: false,
         account: '',
+        game_id: '1',
+        game_name: 'WZRY',
         role_name: '',
         purchase_price: '',
         purchase_date: '',
@@ -1341,36 +1347,37 @@
     els.forbiddenSheet.addEventListener('click', (e) => {
       if (e.target === els.forbiddenSheet) closeForbiddenSheet();
     });
-    els.moreOpsForbiddenBtn.addEventListener('click', () => {
+    const findCurrentProductItem = () => {
       const account = String((state.moreOpsSheet || {}).account || '').trim();
-      if (!account) return;
-      const item = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
+      const gameId = String((state.moreOpsSheet || {}).game_id || '1').trim() || '1';
+      if (!account) return null;
+      return (state.list || []).find((x) => {
+        return String((x && x.game_account) || '').trim() === account
+          && String((x && x.game_id) || '1').trim() === gameId;
+      }) || null;
+    };
+    els.moreOpsForbiddenBtn.addEventListener('click', () => {
+      const item = findCurrentProductItem();
       if (!item) return;
       closeMoreOpsSheet();
       openForbiddenSheet(item);
     });
     if (els.moreOpsProdGuardBtn) {
       els.moreOpsProdGuardBtn.addEventListener('click', () => {
-        const account = String((state.moreOpsSheet || {}).account || '').trim();
-        if (!account) return;
-        const item = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
+        const item = findCurrentProductItem();
         if (!item) return;
         void toggleProdGuard(item);
       });
     }
     if (els.moreOpsMaintenanceBtn) {
       els.moreOpsMaintenanceBtn.addEventListener('click', () => {
-        const account = String((state.moreOpsSheet || {}).account || '').trim();
-        if (!account) return;
-        const item = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
+        const item = findCurrentProductItem();
         if (!item) return;
         void toggleMaintenance(item);
       });
     }
     els.moreOpsPurchaseBtn.addEventListener('click', () => {
-      const account = String((state.moreOpsSheet || {}).account || '').trim();
-      if (!account) return;
-      const item = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
+      const item = findCurrentProductItem();
       if (!item) return;
       closeMoreOpsSheet();
       openPurchaseSheet(item);

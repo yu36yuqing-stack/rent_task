@@ -167,8 +167,14 @@ async function rebuildUserBlacklistSourceTable(db) {
               AND is_deleted = 0
             ORDER BY id DESC
         `, [Number(row.user_id || 0), String(row.game_account || '').trim()]);
-        const targets = linked.length > 0
-            ? linked.map((x) => normalizeGameIdentity(x.game_id, x.game_name))
+        const uniqueLinked = Array.from(new Map(
+            linked.map((x) => {
+                const one = normalizeGameIdentity(x.game_id, x.game_name);
+                return [`${one.game_id}::${one.game_name}`, one];
+            })
+        ).values());
+        const targets = uniqueLinked.length === 1
+            ? uniqueLinked
             : [normalizeGameIdentity(row.game_id, row.game_name)];
         for (const target of targets) {
             await run(db, `

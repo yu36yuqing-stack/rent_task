@@ -202,12 +202,15 @@ async function ensureLinkedGameAccountsByOrders(userId) {
 
     const existingRows = await listAllUserGameAccountsByUser(uid);
     const byAccount = new Map();
+    const byIdentity = new Map();
     for (const row of existingRows) {
         const acc = String((row && row.game_account) || '').trim();
+        const gid = String((row && row.game_id) || '').trim();
         if (!acc) continue;
         const arr = byAccount.get(acc) || [];
         arr.push(row);
         byAccount.set(acc, arr);
+        if (gid) byIdentity.set(`${gid}::${acc}`, row);
     }
 
     const db = openDatabase();
@@ -234,8 +237,10 @@ async function ensureLinkedGameAccountsByOrders(userId) {
                 continue;
             }
 
+            const identityKey = `${gameId}::${acc}`;
             const current = byAccount.get(acc) || [];
-            const base = current[0];
+            const sameGameRow = byIdentity.get(identityKey) || current.find((x) => String(x.game_id || '').trim() === gameId) || null;
+            const base = sameGameRow || current[0];
             let baseRow = base;
             if (!baseRow) {
                 const deletedSnapshot = await dbGet(db, `
@@ -278,7 +283,6 @@ async function ensureLinkedGameAccountsByOrders(userId) {
                 }
             }
 
-            const sameGameRow = current.find((x) => String(x.game_id || '').trim() === gameId);
             if (sameGameRow && isNonEmptyObject(sameGameRow.channel_status) && isNonEmptyObject(sameGameRow.channel_prd_info)) {
                 continue;
             }
@@ -298,6 +302,7 @@ async function ensureLinkedGameAccountsByOrders(userId) {
             });
             current.push(next);
             byAccount.set(acc, current);
+            byIdentity.set(identityKey, next);
             mirrored += 1;
         }
 

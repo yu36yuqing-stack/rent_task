@@ -162,6 +162,7 @@ function buildAccountConfigStatus(rows = []) {
 }
 
 function mergeAccountRowsByGameAccount(rows = []) {
+    // “全部”看板按同 QQ 资产合并，故这里有意只按 game_account 归并。
     const out = new Map();
     for (const row of Array.isArray(rows) ? rows : []) {
         const acc = String(row.game_account || '').trim();
@@ -666,7 +667,8 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         const ch = String(row.channel || '').trim();
         const acc = String(row.game_account || '').trim();
         const rowGameName = String(row.game_name || '').trim();
-        const accountKey = gameName === ALL_GAME_NAME ? acc : acc;
+        // 单游戏看板天然已带游戏过滤；“全部”看板这里刻意按账号聚合资产收益。
+        const accountKey = acc;
         if (ch) {
             const prev = byChannelMap.get(ch) || [];
             prev.push(row);

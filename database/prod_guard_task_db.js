@@ -367,7 +367,7 @@ async function listGuardTasksByUser(userId, options = {}) {
         `, params);
         const rows = await all(db, `
             SELECT
-              id, user_id, game_account, risk_type, task_type, status, event_id, next_check_at,
+              id, user_id, game_account, game_id, game_name, risk_type, task_type, status, event_id, next_check_at,
               last_online_tag, blacklist_applied, forbidden_applied, retry_count, max_retry, probe_loop_count,
               last_error, forbidden_on_at, forbidden_off_at, finished_at, create_date, modify_date, desc
             FROM prod_guard_task
@@ -381,6 +381,8 @@ async function listGuardTasksByUser(userId, options = {}) {
                 id: Number(r.id || 0),
                 user_id: Number(r.user_id || 0),
                 game_account: String(r.game_account || '').trim(),
+                game_id: String(r.game_id || '1').trim() || '1',
+                game_name: String(r.game_name || 'WZRY').trim() || 'WZRY',
                 risk_type: String(r.risk_type || '').trim(),
                 task_type: String(r.task_type || '').trim(),
                 status: String(r.status || '').trim(),

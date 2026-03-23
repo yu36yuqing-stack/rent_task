@@ -6,7 +6,7 @@ const { buildTelegramMessage } = require('./telegram/tg_style.js');
 const { buildDingdingMessage } = require('./dingding/ding_style.js');
 const { listTodayPaidOrderCountByAccounts, listRolling24hPaidOrderCountByAccounts } = require('../database/order_db');
 const { listRecentProductOnoffByUser } = require('../database/product_onoff_history_db');
-const { listAccountRemarksByUserAndAccounts } = require('../database/user_game_account_db');
+const { listAccountRemarksByUserAndIdentities } = require('../database/user_game_account_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { listOpenProductSyncAnomaliesByUser } = require('../database/product_sync_anomaly_db');
 const { getUserRuleByName } = require('../database/user_rule_db');
@@ -85,8 +85,12 @@ async function buildRecentActionsForUser(userId, options = {}) {
     const rows = await listRecentProductOnoffByUser(uid, { window_ms: windowMs, limit: rawLimit });
     if (!Array.isArray(rows) || rows.length === 0) return [];
 
-    const accs = [...new Set(rows.map((r) => String(r.game_account || '').trim()).filter(Boolean))];
-    const remarkMap = await listAccountRemarksByUserAndAccounts(uid, accs);
+    const identities = rows.map((r) => ({
+        game_account: String(r.game_account || '').trim(),
+        game_id: String(r.game_id || '1').trim() || '1',
+        game_name: String(r.game_name || 'WZRY').trim() || 'WZRY'
+    })).filter((x) => x.game_account);
+    const remarkMap = await listAccountRemarksByUserAndIdentities(uid, identities);
     const platformName = (p) => {
         const key = String(p || '').trim();
         if (key === 'uuzuhao') return '悠悠';
@@ -102,8 +106,9 @@ async function buildRecentActionsForUser(userId, options = {}) {
         const direction = actionType.startsWith('off') ? 'off' : (actionType.startsWith('on') ? 'on' : '');
         if (!direction) continue;
         const acc = String(row.game_account || '').trim();
+        const gid = String(row.game_id || '1').trim() || '1';
         if (!acc) continue;
-        const key = `${direction}::${acc}`;
+        const key = `${direction}::${gid}::${acc}`;
         const ts = Number(row.event_time || 0);
         const skipped = Number(row.skipped || 0) > 0;
         const reason = String(row.reason || '').trim();
@@ -114,7 +119,9 @@ async function buildRecentActionsForUser(userId, options = {}) {
             g = {
                 direction,
                 account: acc,
-                remark: String(remarkMap[acc] || '').trim(),
+                game_id: gid,
+                game_name: String(row.game_name || 'WZRY').trim() || 'WZRY',
+                remark: String(remarkMap[`${gid}::${acc}`] || '').trim(),
                 latest_ts: ts,
                 latest_reason: reason,
                 count: 0,
@@ -130,7 +137,7 @@ async function buildRecentActionsForUser(userId, options = {}) {
         if (ts >= g.latest_ts) {
             g.latest_ts = ts;
             g.latest_reason = reason || g.latest_reason;
-            if (!g.remark) g.remark = String(remarkMap[acc] || '').trim();
+            if (!g.remark) g.remark = String(remarkMap[`${gid}::${acc}`] || '').trim();
         }
     }
 

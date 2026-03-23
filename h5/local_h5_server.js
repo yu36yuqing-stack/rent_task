@@ -590,14 +590,15 @@ async function handleProducts(req, res, urlObj) {
         ? await listRentingOrderWindowByAccounts(user.id, allAccs)
         : {};
     const restrictRowsRaw = allAccs.length > 0
-        ? await listPlatformRestrictByUserAndAccounts(user.id, allAccs.map((x) => x.game_account))
+        ? await listPlatformRestrictByUserAndAccounts(user.id, allAccs)
         : [];
     const restrictRows = [];
     for (const row of restrictRowsRaw) {
         const acc = String((row && row.game_account) || '').trim();
+        const gid = String((row && row.game_id) || '1').trim() || '1';
         const detail = row && typeof row.detail === 'object' ? row.detail : {};
         const platform = String((row && row.platform) || detail.platform || '').trim();
-        const hit = accountRowMap.get(acc);
+        const hit = accountRowMap.get(keyOfGameAccount(gid, acc));
         const channelStatus = hit && typeof hit.channel_status === 'object' ? hit.channel_status : {};
         const channelPrdInfo = hit && typeof hit.channel_prd_info === 'object' ? hit.channel_prd_info : {};
         const statusText = String((channelStatus && channelStatus[platform]) || '').trim();
@@ -609,7 +610,11 @@ async function handleProducts(req, res, urlObj) {
             ['上架', '租赁中', '出租中'].includes(statusText) || isUuzuhaoSellerOff
         );
         if (shouldClear) {
-            await removePlatformRestrict(user.id, acc, platform, `auto clear by products status=${statusText}`).catch(() => {});
+            await removePlatformRestrict(user.id, {
+                game_account: acc,
+                game_id: gid,
+                game_name: String((row && row.game_name) || 'WZRY').trim() || 'WZRY'
+            }, platform, `auto clear by products status=${statusText}`).catch(() => {});
             continue;
         }
         restrictRows.push(row);
@@ -618,11 +623,15 @@ async function handleProducts(req, res, urlObj) {
     const restrictPlatformMap = {};
     for (const row of restrictRows) {
         const acc = String((row && row.game_account) || '').trim();
+        const gid = String((row && row.game_id) || '1').trim() || '1';
         if (!acc) continue;
-        const matchedRows = scopedRows.filter((x) => String((x && x.game_account) || '').trim() === acc);
+        const matchedRows = scopedRows.filter((x) => {
+            return String((x && x.game_account) || '').trim() === acc
+                && String((x && x.game_id) || '1').trim() === gid;
+        });
         const matchedKeys = matchedRows.length > 0
             ? matchedRows.map((x) => keyOfGameAccount(x && x.game_id, x && x.game_account))
-            : [keyOfGameAccount('1', acc)];
+            : [keyOfGameAccount(gid, acc)];
         const detail = row && typeof row.detail === 'object' ? row.detail : {};
         const platform = String((row && row.platform) || detail.platform || '').trim();
         const msg = String(detail.msg || '').trim();
@@ -822,15 +831,10 @@ async function handleOrders(req, res, urlObj) {
                 })
                 .filter(([key]) => !key.endsWith('::') && !key.startsWith('::'))
         );
-        const fallbackAccountMap = new Map(
-            (allRows.list || [])
-                .map((x) => [String((x && x.game_account) || '').trim(), x])
-                .filter(([acc]) => Boolean(acc) && !accountMap.has(`::${acc}`))
-        );
         list = list.map((item) => {
             const acc = String((item && item.game_account) || '').trim();
             const gid = String((item && item.game_id) || '').trim();
-            const hit = accountMap.get(`${gid}::${acc}`) || fallbackAccountMap.get(acc);
+            const hit = accountMap.get(`${gid}::${acc}`) || null;
             const fallback = String((item && item.role_name) || '').trim() || acc;
             const displayName = fallback || (hit ? resolveDisplayNameByRow(hit, acc) : '');
             return {
@@ -1417,23 +1421,28 @@ async function handleRiskCenterList(req, res, urlObj) {
 
     const rowMap = new Map(
         (allRows.list || [])
-            .map((x) => [String((x && x.game_account) || '').trim(), x])
-            .filter(([acc]) => Boolean(acc))
+            .map((x) => {
+                const acc = String((x && x.game_account) || '').trim();
+                const gid = String((x && x.game_id) || '1').trim() || '1';
+                return [`${gid}::${acc}`, x];
+            })
+            .filter(([key]) => !key.endsWith('::') && !key.startsWith('::'))
     );
     const taskMapByEvent = new Map();
     const taskMapByAccountRisk = new Map();
     for (const task of (taskResult.list || [])) {
         const eventId = Number(task.event_id || 0);
         if (eventId > 0 && !taskMapByEvent.has(eventId)) taskMapByEvent.set(eventId, task);
-        const k = `${String(task.game_account || '').trim()}::${String(task.risk_type || '').trim()}`;
+        const k = `${String(task.game_id || '1').trim() || '1'}::${String(task.game_account || '').trim()}::${String(task.risk_type || '').trim()}`;
         if (!k.startsWith('::') && !taskMapByAccountRisk.has(k)) taskMapByAccountRisk.set(k, task);
     }
     const list = (eventResult.list || []).map((ev) => {
         const acc = String(ev.game_account || '').trim();
+        const gid = String(ev.game_id || '1').trim() || '1';
         const riskTypeText = String(ev.risk_type || '').trim();
-        const k = `${acc}::${riskTypeText}`;
+        const k = `${gid}::${acc}::${riskTypeText}`;
         const task = taskMapByEvent.get(Number(ev.id || 0)) || taskMapByAccountRisk.get(k) || null;
-        const row = rowMap.get(acc) || null;
+        const row = rowMap.get(`${gid}::${acc}`) || null;
         const snapshot = safeJsonParse(ev.snapshot, {});
         const latestOrder = snapshot && snapshot.latest_order && typeof snapshot.latest_order === 'object'
             ? snapshot.latest_order
@@ -1445,6 +1454,8 @@ async function handleRiskCenterList(req, res, urlObj) {
             event_status: ev.status,
             hit_at: ev.hit_at,
             resolved_at: ev.resolved_at,
+            game_id: gid,
+            game_name: String(ev.game_name || '').trim() || (row ? String(row.game_name || '').trim() : ''),
             game_account: acc,
             display_name: row ? resolveDisplayNameByRow(row, acc) : acc,
             snapshot,

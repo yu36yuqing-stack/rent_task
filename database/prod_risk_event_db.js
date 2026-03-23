@@ -297,7 +297,7 @@ async function listRiskEventsByUser(userId, options = {}) {
         `, params);
         const rows = await all(db, `
             SELECT
-              id, user_id, game_account, risk_type, risk_level, status,
+              id, user_id, game_account, game_id, game_name, risk_type, risk_level, status,
               hit_at, resolved_at, snapshot, create_date, modify_date, desc
             FROM prod_risk_event
             WHERE ${whereSql}
@@ -310,6 +310,8 @@ async function listRiskEventsByUser(userId, options = {}) {
                 id: Number(r.id || 0),
                 user_id: Number(r.user_id || 0),
                 game_account: String(r.game_account || '').trim(),
+                game_id: String(r.game_id || '1').trim() || '1',
+                game_name: String(r.game_name || 'WZRY').trim() || 'WZRY',
                 risk_type: String(r.risk_type || '').trim(),
                 risk_level: String(r.risk_level || '').trim(),
                 status: String(r.status || '').trim(),

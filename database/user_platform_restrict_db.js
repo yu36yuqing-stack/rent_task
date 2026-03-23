@@ -1,4 +1,5 @@
 const { openDatabase } = require('./sqlite_client');
+const { normalizeGameProfile } = require('../common/game_profile');
 
 const RESTRICT_REASON = '平台限制上架';
 
@@ -50,6 +51,27 @@ function normalizeDetail(v) {
     return {};
 }
 
+function normalizeRestrictKey(input, fallback = {}) {
+    if (input && typeof input === 'object' && !Array.isArray(input)) {
+        const normalizedGame = normalizeGameProfile(
+            input.game_id === undefined ? fallback.game_id : input.game_id,
+            input.game_name === undefined ? fallback.game_name : input.game_name,
+            { preserveUnknown: true }
+        );
+        return {
+            game_account: String(input.game_account || input.account || '').trim(),
+            game_id: String(normalizedGame.game_id || '1').trim() || '1',
+            game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY'
+        };
+    }
+    const normalizedGame = normalizeGameProfile(fallback.game_id, fallback.game_name, { preserveUnknown: true });
+    return {
+        game_account: String(input || '').trim(),
+        game_id: String(normalizedGame.game_id || '1').trim() || '1',
+        game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY'
+    };
+}
+
 async function initUserPlatformRestrictDb() {
     const db = openDatabase();
     try {
@@ -58,6 +80,8 @@ async function initUserPlatformRestrictDb() {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 game_account TEXT NOT NULL DEFAULT '',
+                game_id TEXT NOT NULL DEFAULT '1',
+                game_name TEXT NOT NULL DEFAULT 'WZRY',
                 platform TEXT NOT NULL DEFAULT '',
                 reason TEXT NOT NULL DEFAULT '',
                 detail TEXT NOT NULL DEFAULT '{}',
@@ -67,19 +91,53 @@ async function initUserPlatformRestrictDb() {
                 desc TEXT NOT NULL DEFAULT ''
             )
         `);
+        const cols = await all(db, `PRAGMA table_info("user_platform_restrict")`);
+        const hasGameId = cols.some((x) => String(x.name || '').trim() === 'game_id');
+        const hasGameName = cols.some((x) => String(x.name || '').trim() === 'game_name');
+        if (!hasGameId) await run(db, `ALTER TABLE user_platform_restrict ADD COLUMN game_id TEXT NOT NULL DEFAULT '1'`);
+        if (!hasGameName) await run(db, `ALTER TABLE user_platform_restrict ADD COLUMN game_name TEXT NOT NULL DEFAULT 'WZRY'`);
+        await run(db, `
+            UPDATE user_platform_restrict
+            SET game_id = (
+                SELECT COALESCE(MAX(uga.game_id), '1')
+                FROM user_game_account uga
+                WHERE uga.user_id = user_platform_restrict.user_id
+                  AND uga.game_account = user_platform_restrict.game_account
+                  AND uga.is_deleted = 0
+            )
+            WHERE TRIM(COALESCE(game_id, '')) = ''
+               OR game_id = '1'
+        `);
+        await run(db, `
+            UPDATE user_platform_restrict
+            SET game_name = COALESCE((
+                SELECT uga.game_name
+                FROM user_game_account uga
+                WHERE uga.user_id = user_platform_restrict.user_id
+                  AND uga.game_account = user_platform_restrict.game_account
+                  AND uga.game_id = user_platform_restrict.game_id
+                  AND uga.is_deleted = 0
+                ORDER BY uga.id DESC
+                LIMIT 1
+            ), game_name, 'WZRY')
+            WHERE TRIM(COALESCE(game_name, '')) = ''
+               OR game_name = 'WZRY'
+        `);
         // 迁移说明：
         // 历史索引把 is_deleted 也纳入唯一约束，会导致 active -> deleted 逻辑删除时
         // 与既有 deleted 行冲突（UNIQUE constraint failed）。
         // 这里改为“仅 active 行唯一”的部分索引，允许保留多条历史 deleted 记录。
         await run(db, `DROP INDEX IF EXISTS uq_user_platform_restrict_alive`);
+        await run(db, `DROP INDEX IF EXISTS uq_user_platform_restrict_active`);
+        await run(db, `DROP INDEX IF EXISTS idx_user_platform_restrict_user`);
         await run(db, `
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_user_platform_restrict_active
-            ON user_platform_restrict(user_id, game_account, platform)
+            CREATE UNIQUE INDEX uq_user_platform_restrict_active
+            ON user_platform_restrict(user_id, game_id, game_account, platform)
             WHERE is_deleted = 0
         `);
         await run(db, `
-            CREATE INDEX IF NOT EXISTS idx_user_platform_restrict_user
-            ON user_platform_restrict(user_id, is_deleted)
+            CREATE INDEX idx_user_platform_restrict_user
+            ON user_platform_restrict(user_id, game_id, is_deleted)
         `);
     } finally {
         db.close();
@@ -89,7 +147,10 @@ async function initUserPlatformRestrictDb() {
 async function upsertPlatformRestrict(userId, gameAccount, platform, detail = {}, desc = '') {
     await initUserPlatformRestrictDb();
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
+    const key = normalizeRestrictKey(gameAccount);
+    const acc = key.game_account;
+    const gid = key.game_id;
+    const gameName = key.game_name;
     const pf = normalizePlatform(platform);
     if (!uid) throw new Error('user_id 不合法');
     if (!acc) throw new Error('game_account 不能为空');
@@ -101,22 +162,22 @@ async function upsertPlatformRestrict(userId, gameAccount, platform, detail = {}
         const exists = await get(db, `
             SELECT id
             FROM user_platform_restrict
-            WHERE user_id = ? AND game_account = ? AND platform = ? AND is_deleted = 0
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND platform = ? AND is_deleted = 0
             LIMIT 1
-        `, [uid, acc, pf]);
+        `, [uid, gid, acc, pf]);
         const payload = JSON.stringify(normalizeDetail(detail));
         if (!exists) {
             await run(db, `
                 INSERT INTO user_platform_restrict
-                (user_id, game_account, platform, reason, detail, create_date, modify_date, is_deleted, desc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
-            `, [uid, acc, pf, RESTRICT_REASON, payload, now, now, String(desc || '').trim()]);
+                (user_id, game_account, game_id, game_name, platform, reason, detail, create_date, modify_date, is_deleted, desc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+            `, [uid, acc, gid, gameName, pf, RESTRICT_REASON, payload, now, now, String(desc || '').trim()]);
         } else {
             await run(db, `
                 UPDATE user_platform_restrict
-                SET reason = ?, detail = ?, modify_date = ?, desc = ?
+                SET game_name = ?, reason = ?, detail = ?, modify_date = ?, desc = ?
                 WHERE id = ?
-            `, [RESTRICT_REASON, payload, now, String(desc || '').trim(), Number(exists.id)]);
+            `, [gameName, RESTRICT_REASON, payload, now, String(desc || '').trim(), Number(exists.id)]);
         }
         return true;
     } finally {
@@ -127,7 +188,9 @@ async function upsertPlatformRestrict(userId, gameAccount, platform, detail = {}
 async function removePlatformRestrict(userId, gameAccount, platform, desc = '') {
     await initUserPlatformRestrictDb();
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
+    const key = normalizeRestrictKey(gameAccount);
+    const acc = key.game_account;
+    const gid = key.game_id;
     const pf = normalizePlatform(platform);
     if (!uid || !acc || !pf) return false;
 
@@ -136,8 +199,8 @@ async function removePlatformRestrict(userId, gameAccount, platform, desc = '') 
         const r = await run(db, `
             UPDATE user_platform_restrict
             SET is_deleted = 1, modify_date = ?, desc = ?
-            WHERE user_id = ? AND game_account = ? AND platform = ? AND is_deleted = 0
-        `, [nowText(), String(desc || '').trim(), uid, acc, pf]);
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND platform = ? AND is_deleted = 0
+        `, [nowText(), String(desc || '').trim(), uid, gid, acc, pf]);
         return Number(r.changes || 0) > 0;
     } finally {
         db.close();
@@ -148,23 +211,26 @@ async function listPlatformRestrictByUserAndAccounts(userId, gameAccounts = []) 
     await initUserPlatformRestrictDb();
     const uid = Number(userId || 0);
     if (!uid) return [];
-    const accs = [...new Set((Array.isArray(gameAccounts) ? gameAccounts : [])
-        .map((x) => String(x || '').trim())
-        .filter(Boolean))];
-    if (accs.length === 0) return [];
+    const keys = Array.from(new Map((Array.isArray(gameAccounts) ? gameAccounts : [])
+        .map((x) => normalizeRestrictKey(x))
+        .filter((x) => x.game_account)
+        .map((x) => [`${x.game_id}::${x.game_account}`, x])).values());
+    if (keys.length === 0) return [];
 
     const db = openDatabase();
     try {
-        const placeholders = accs.map(() => '?').join(',');
+        const tupleSql = keys.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
         const rows = await all(db, `
-            SELECT user_id, game_account, platform, reason, detail, create_date, modify_date, desc
+            SELECT user_id, game_account, game_id, game_name, platform, reason, detail, create_date, modify_date, desc
             FROM user_platform_restrict
-            WHERE user_id = ? AND is_deleted = 0 AND game_account IN (${placeholders})
+            WHERE user_id = ? AND is_deleted = 0 AND (${tupleSql})
             ORDER BY id ASC
-        `, [uid, ...accs]);
+        `, [uid, ...keys.flatMap((x) => [x.game_id, x.game_account])]);
         return rows.map((r) => ({
             user_id: Number(r.user_id || 0),
             game_account: String(r.game_account || '').trim(),
+            game_id: String(r.game_id || '1').trim() || '1',
+            game_name: String(r.game_name || 'WZRY').trim() || 'WZRY',
             platform: normalizePlatform(r.platform),
             reason: String(r.reason || '').trim(),
             detail: normalizeDetail(r.detail),

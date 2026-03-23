@@ -893,6 +893,47 @@ async function listAccountRemarksByUserAndAccounts(userId, gameAccounts = []) {
     }
 }
 
+async function listAccountRemarksByUserAndIdentities(userId, identities = []) {
+    await initUserGameAccountDb();
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+    const keys = Array.from(new Map((Array.isArray(identities) ? identities : [])
+        .map((x) => {
+            if (x && typeof x === 'object' && !Array.isArray(x)) {
+                const acc = String(x.game_account || x.account || '').trim();
+                const gid = canonicalGameId(x.game_id, x.game_name || 'WZRY');
+                return [`${gid}::${acc}`, { game_account: acc, game_id: gid }];
+            }
+            return null;
+        })
+        .filter(Boolean)).values());
+    if (keys.length === 0) return {};
+
+    const db = openDatabase();
+    try {
+        const tupleSql = keys.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
+        const rows = await all(db, `
+            SELECT game_id, game_account, account_remark, id
+            FROM user_game_account
+            WHERE user_id = ? AND is_deleted = 0
+              AND (${tupleSql})
+            ORDER BY id DESC
+        `, [uid, ...keys.flatMap((x) => [x.game_id, x.game_account])]);
+
+        const out = {};
+        for (const row of rows) {
+            const gid = canonicalGameId(row.game_id, '');
+            const acc = String(row.game_account || '').trim();
+            const key = `${gid}::${acc}`;
+            if (!acc || out[key] !== undefined) continue;
+            out[key] = String(row.account_remark || '').trim();
+        }
+        return out;
+    } finally {
+        db.close();
+    }
+}
+
 async function updateUserGameAccountPurchaseByUserAndAccount(userId, gameAccount, purchasePrice, purchaseDate, desc = '', gameId = '', gameName = '') {
     await initUserGameAccountDb();
     const uid = Number(userId || 0);
@@ -1130,6 +1171,7 @@ module.exports = {
     listUserGameAccounts,
     listOwnersByGameAccounts,
     listAccountRemarksByUserAndAccounts,
+    listAccountRemarksByUserAndIdentities,
     updateUserGameAccountPurchaseByUserAndAccount,
     updateUserGameAccountSwitchByUserAndAccount,
     getLatestUserGameAccountByUserAndAccount,

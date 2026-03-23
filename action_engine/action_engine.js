@@ -31,6 +31,8 @@ function isActiveShelfStatus(status) {
 async function clearPlatformRestrictReliable({
     userId,
     account,
+    gameId = '1',
+    gameName = 'WZRY',
     platform,
     desc,
     logger = console,
@@ -40,9 +42,10 @@ async function clearPlatformRestrictReliable({
 }) {
     const uid = Number(userId || 0);
     const acc = String(account || '').trim();
+    const gid = String(gameId || '1').trim() || '1';
     const pf = String(platform || '').trim();
     if (!uid || !acc || !pf) {
-        const msg = `[RestrictClear] invalid_args user_id=${uid} account=${acc} platform=${pf}`;
+        const msg = `[RestrictClear] invalid_args user_id=${uid} game_id=${gid} account=${acc} platform=${pf}`;
         logger.error(msg);
         if (Array.isArray(runErrors)) runErrors.push(msg);
         return { ok: false, attempts: 0, last_error: 'invalid_args' };
@@ -53,28 +56,29 @@ async function clearPlatformRestrictReliable({
     let stillActive = true;
     for (let attempt = 1; attempt <= retryCount; attempt += 1) {
         try {
-            await removePlatformRestrict(uid, acc, pf, `${String(desc || '').trim()}#attempt=${attempt}`);
-            const remains = await listPlatformRestrictByUserAndAccounts(uid, [acc]);
-            stillActive = remains.some((r) => String(r.game_account || '').trim() === acc && String(r.platform || '').trim() === pf);
+            const restrictKey = { game_account: acc, game_id: gid, game_name: gameName };
+            await removePlatformRestrict(uid, restrictKey, pf, `${String(desc || '').trim()}#attempt=${attempt}`);
+            const remains = await listPlatformRestrictByUserAndAccounts(uid, [restrictKey]);
+            stillActive = remains.some((r) => String(r.game_account || '').trim() === acc && String(r.game_id || '').trim() === gid && String(r.platform || '').trim() === pf);
             if (!stillActive) {
                 if (attempt > 1) {
-                    logger.warn(`[RestrictClear] recovered user_id=${uid} account=${acc} platform=${pf} attempts=${attempt}`);
+                    logger.warn(`[RestrictClear] recovered user_id=${uid} game_id=${gid} account=${acc} platform=${pf} attempts=${attempt}`);
                 }
                 return { ok: true, attempts: attempt, last_error: '' };
             }
             lastErr = 'still_active_after_remove';
-            logger.warn(`[RestrictClear] verify_still_active user_id=${uid} account=${acc} platform=${pf} attempt=${attempt}`);
+            logger.warn(`[RestrictClear] verify_still_active user_id=${uid} game_id=${gid} account=${acc} platform=${pf} attempt=${attempt}`);
         } catch (e) {
             const msg = String(e && e.message ? e.message : e || 'clear_failed');
             lastErr = msg;
-            logger.warn(`[RestrictClear] clear_error user_id=${uid} account=${acc} platform=${pf} attempt=${attempt} err=${msg}`);
+            logger.warn(`[RestrictClear] clear_error user_id=${uid} game_id=${gid} account=${acc} platform=${pf} attempt=${attempt} err=${msg}`);
         }
         if (attempt < retryCount) {
             await sleep(baseDelayMs * Math.pow(2, attempt - 1));
         }
     }
 
-    const failMsg = `[RestrictClear] failed user_id=${uid} account=${acc} platform=${pf} last_error=${lastErr || 'unknown'}`;
+    const failMsg = `[RestrictClear] failed user_id=${uid} game_id=${gid} account=${acc} platform=${pf} last_error=${lastErr || 'unknown'}`;
     logger.error(failMsg);
     if (Array.isArray(runErrors)) runErrors.push(failMsg);
     return { ok: false, attempts: retryCount, last_error: lastErr || 'unknown', still_active: stillActive };
@@ -187,21 +191,21 @@ function detectConflictsAndBuildSnapshot({
                 if (statZ === '上架') actions.push({ type: 'off_z', item: z, reason: `${reasonMsg}，同步下架租号王` });
             } else {
                 // 正常状态下：无租赁，且无系统惩罚 -> 全部上架
-                if (statY === '下架' && !platformRestrictSet.has(`${acc}::uuzuhao`) && canAutoOnY) {
+                if (statY === '下架' && !platformRestrictSet.has(`${identityKey}::uuzuhao`) && canAutoOnY) {
                     actions.push({
                         type: 'on_y',
                         item: { account: acc, game_id: one.game_id, game_name: one.game_name },
                         reason: '无租赁，自动补上架悠悠'
                     });
                 }
-                if (statU === '下架' && !platformRestrictSet.has(`${acc}::uhaozu`) && canAutoOnU) {
+                if (statU === '下架' && !platformRestrictSet.has(`${identityKey}::uhaozu`) && canAutoOnU) {
                     actions.push({
                         type: 'on_u',
                         item: { account: acc, game_id: one.game_id, game_name: one.game_name },
                         reason: '无租赁，自动补上架U号租'
                     });
                 }
-                if (statZ === '下架' && !platformRestrictSet.has(`${acc}::zuhaowang`) && canAutoOnZ) {
+                if (statZ === '下架' && !platformRestrictSet.has(`${identityKey}::zuhaowang`) && canAutoOnZ) {
                     actions.push({
                         type: 'on_z',
                         item: {
@@ -253,6 +257,8 @@ async function executeActions({
                     user_account: user && user.account,
                     action_type: action.type,
                     game_account: action.item && action.item.account,
+                    game_id: action.item && action.item.game_id,
+                    game_name: action.item && action.item.game_name,
                     reason: action.reason,
                     success: true,
                     skipped: true,
@@ -303,6 +309,8 @@ async function executeActions({
                     await clearPlatformRestrictReliable({
                         userId: user && user.id,
                         account: action.item && action.item.account,
+                        gameId: action.item && action.item.game_id,
+                        gameName: action.item && action.item.game_name,
                         platform,
                         desc: 'auto clear by on success',
                         logger: console,
@@ -315,6 +323,8 @@ async function executeActions({
                     user_account: user && user.account,
                     action_type: action.type,
                     game_account: action.item && action.item.account,
+                    game_id: action.item && action.item.game_id,
+                    game_name: action.item && action.item.game_name,
                     reason: action.reason,
                     success: true,
                     skipped: false,
@@ -327,7 +337,11 @@ async function executeActions({
                 if (platform === 'uuzuhao' && action.type === 'on_y' && Number(detail.code || 0) === 12101012) {
                     await upsertPlatformRestrict(
                         user && user.id,
-                        action.item && action.item.account,
+                        {
+                            game_account: action.item && action.item.account,
+                            game_id: action.item && action.item.game_id,
+                            game_name: action.item && action.item.game_name
+                        },
                         'uuzuhao',
                         {
                             platform: 'uuzuhao',
@@ -343,6 +357,8 @@ async function executeActions({
                         action_type: action.type,
                         platform: 'uuzuhao',
                         game_account: action.item && action.item.account,
+                        game_id: action.item && action.item.game_id,
+                        game_name: action.item && action.item.game_name,
                         reason: RESTRICT_REASON,
                         success: false,
                         skipped: true,
@@ -436,10 +452,19 @@ async function executeUserActionsIfNeeded({
     const authMap = buildAuthMap(authRows);
     const { youpinData, uhaozuData, zhwData } = buildPlatformRowsFromUserAccounts(rows);
     const platformStatusNormMap = buildPlatformStatusNormMapByAccount(rows);
-    const accounts = [...new Set((rows || []).map((r) => String((r && r.game_account) || '').trim()).filter(Boolean))];
+    const accounts = Array.from(new Map((rows || [])
+        .map((r) => {
+            const acc = String((r && r.game_account) || '').trim();
+            const gid = String((r && r.game_id) || '1').trim() || '1';
+            const gname = String((r && r.game_name) || 'WZRY').trim() || 'WZRY';
+            return [`${gid}::${acc}`, { game_account: acc, game_id: gid, game_name: gname }];
+        })
+        .filter(([key, x]) => Boolean(x.game_account) && !key.endsWith('::'))).values());
     const restrictRows = await listPlatformRestrictByUserAndAccounts(user.id, accounts);
     const platformRestrictSet = new Set(
-        restrictRows.map((r) => `${String(r.game_account || '').trim()}::${String(r.platform || '').trim()}`).filter(Boolean)
+        restrictRows
+            .map((r) => `${String(r.game_id || '1').trim() || '1'}::${String(r.game_account || '').trim()}::${String(r.platform || '').trim()}`)
+            .filter(Boolean)
     );
     const preCleanupErrors = [];
     const cleanupStats = { attempted: 0, cleared: 0, failed: 0 };
@@ -447,16 +472,20 @@ async function executeUserActionsIfNeeded({
     // 平台状态已恢复（上架/租赁中）时，自动清理限制标记，避免“平台限制上架”残留卡住。
     for (const row of rows || []) {
         const acc = String((row && row.game_account) || '').trim();
+        const gid = String((row && row.game_id) || '1').trim() || '1';
+        const gname = String((row && row.game_name) || 'WZRY').trim() || 'WZRY';
         const st = row && typeof row.channel_status === 'object' ? row.channel_status : {};
         if (!acc) continue;
         const y = String(st.uuzuhao || '').trim();
         const u = String(st.uhaozu || '').trim();
         const z = String(st.zuhaowang || '').trim();
-        if (['上架', '租赁中', '出租中'].includes(y) && platformRestrictSet.has(`${acc}::uuzuhao`)) {
+        if (['上架', '租赁中', '出租中'].includes(y) && platformRestrictSet.has(`${gid}::${acc}::uuzuhao`)) {
             cleanupStats.attempted += 1;
             const out = await clearPlatformRestrictReliable({
                 userId: user.id,
                 account: acc,
+                gameId: gid,
+                gameName: gname,
                 platform: 'uuzuhao',
                 desc: `auto clear by status=${y}`,
                 logger: console,
@@ -464,16 +493,18 @@ async function executeUserActionsIfNeeded({
             });
             if (out.ok) {
                 cleanupStats.cleared += 1;
-                platformRestrictSet.delete(`${acc}::uuzuhao`);
+                platformRestrictSet.delete(`${gid}::${acc}::uuzuhao`);
             } else {
                 cleanupStats.failed += 1;
             }
         }
-        if (['上架', '租赁中', '出租中'].includes(u) && platformRestrictSet.has(`${acc}::uhaozu`)) {
+        if (['上架', '租赁中', '出租中'].includes(u) && platformRestrictSet.has(`${gid}::${acc}::uhaozu`)) {
             cleanupStats.attempted += 1;
             const out = await clearPlatformRestrictReliable({
                 userId: user.id,
                 account: acc,
+                gameId: gid,
+                gameName: gname,
                 platform: 'uhaozu',
                 desc: `auto clear by status=${u}`,
                 logger: console,
@@ -481,16 +512,18 @@ async function executeUserActionsIfNeeded({
             });
             if (out.ok) {
                 cleanupStats.cleared += 1;
-                platformRestrictSet.delete(`${acc}::uhaozu`);
+                platformRestrictSet.delete(`${gid}::${acc}::uhaozu`);
             } else {
                 cleanupStats.failed += 1;
             }
         }
-        if (['上架', '租赁中', '出租中'].includes(z) && platformRestrictSet.has(`${acc}::zuhaowang`)) {
+        if (['上架', '租赁中', '出租中'].includes(z) && platformRestrictSet.has(`${gid}::${acc}::zuhaowang`)) {
             cleanupStats.attempted += 1;
             const out = await clearPlatformRestrictReliable({
                 userId: user.id,
                 account: acc,
+                gameId: gid,
+                gameName: gname,
                 platform: 'zuhaowang',
                 desc: `auto clear by status=${z}`,
                 logger: console,
@@ -498,7 +531,7 @@ async function executeUserActionsIfNeeded({
             });
             if (out.ok) {
                 cleanupStats.cleared += 1;
-                platformRestrictSet.delete(`${acc}::zuhaowang`);
+                platformRestrictSet.delete(`${gid}::${acc}::zuhaowang`);
             } else {
                 cleanupStats.failed += 1;
             }

@@ -81,6 +81,27 @@
       return String(reasonText || '').trim() === '维护中';
     }
 
+    function productIdentityKey(input, fallbackGameId = '1') {
+      if (!input || typeof input !== 'object') {
+        const acc = String(input || '').trim();
+        const gid = String(fallbackGameId || '1').trim() || '1';
+        return `${gid}::${acc}`;
+      }
+      const acc = String((input && input.game_account) || input.account || '').trim();
+      const gid = String((input && input.game_id) || fallbackGameId || '1').trim() || '1';
+      return `${gid}::${acc}`;
+    }
+
+    function findProductItemByIdentity(gameId, account) {
+      const gid = String(gameId || '1').trim() || '1';
+      const acc = String(account || '').trim();
+      if (!acc) return null;
+      return (state.list || []).find((x) => {
+        return String((x && x.game_account) || '').trim() === acc
+          && String((x && x.game_id) || '1').trim() === gid;
+      }) || null;
+    }
+
     function normalizeGameName(gameName, gameId) {
       const n = String(gameName || '').trim();
       const lower = n.toLowerCase();
@@ -232,13 +253,15 @@
 
     async function queryStatus(item) {
       const account = String(item && item.game_account || '').trim();
+      const gameId = String(item && item.game_id || '1').trim() || '1';
       const gameName = String(item && item.game_name || 'WZRY').trim() || 'WZRY';
+      const identityKey = productIdentityKey(item);
       const prodGuardEnabled = item && item.prod_guard_enabled === undefined ? true : Boolean(item && item.prod_guard_enabled);
       if (!account) return;
-      state.forbiddenLoadingMap[account] = true;
-      if (prodGuardEnabled) state.onlineLoadingMap[account] = true;
-      renderOnlinePart(account);
-      renderForbiddenPart(account);
+      state.forbiddenLoadingMap[identityKey] = true;
+      if (prodGuardEnabled) state.onlineLoadingMap[identityKey] = true;
+      renderOnlinePart(identityKey);
+      renderForbiddenPart(identityKey);
       try {
         const [onlineRes, forbiddenRes] = await Promise.all([
           prodGuardEnabled
@@ -253,16 +276,16 @@
           })
         ]);
         const forbiddenEnabled = Boolean(forbiddenRes && forbiddenRes.data && forbiddenRes.data.enabled);
-        const hit = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
+        const hit = findProductItemByIdentity(gameId, account);
         if (hit) {
           if (prodGuardEnabled) {
             const online = Boolean(onlineRes && onlineRes.data && onlineRes.data.online);
             const tag = online ? '在线' : '离线';
-            state.onlineStatusMap[account] = tag;
+            state.onlineStatusMap[identityKey] = tag;
             hit.online_tag = tag;
             hit.online_query_time = String((onlineRes && onlineRes.data && onlineRes.data.query_time) || '').trim();
           } else {
-            delete state.onlineStatusMap[account];
+            delete state.onlineStatusMap[identityKey];
             hit.online_tag = '';
             hit.online_query_time = '';
           }
@@ -272,18 +295,19 @@
       } catch (e) {
         alert(e.message || '状态查询失败');
       } finally {
-        state.onlineLoadingMap[account] = false;
-        state.forbiddenLoadingMap[account] = false;
-        renderOnlinePart(account);
-        renderForbiddenPart(account);
+        state.onlineLoadingMap[identityKey] = false;
+        state.forbiddenLoadingMap[identityKey] = false;
+        renderOnlinePart(identityKey);
+        renderForbiddenPart(identityKey);
         renderMoreOpsSheet();
       }
     }
 
-    function buildOnlineChipHtml(account) {
-      const acc = String(account || '').trim();
-      const mapText = String(state.onlineStatusMap[acc] || '').trim();
-      const hit = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === acc);
+    function buildOnlineChipHtml(identityKey) {
+      const key = String(identityKey || '').trim();
+      const mapText = String(state.onlineStatusMap[key] || '').trim();
+      const [gid, acc] = key.split('::');
+      const hit = findProductItemByIdentity(gid, acc);
       const rowText = String((hit && hit.online_tag) || '').trim();
       const onlineText = mapText || rowText;
       if (!onlineText) return '';
@@ -293,9 +317,10 @@
       return `<span class="chip ${onlineClass}"${title}>${onlineText}</span>`;
     }
 
-    function buildForbiddenChipHtml(account) {
-      const acc = String(account || '').trim();
-      const hit = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === acc);
+    function buildForbiddenChipHtml(identityKey) {
+      const key = String(identityKey || '').trim();
+      const [gid, acc] = key.split('::');
+      const hit = findProductItemByIdentity(gid, acc);
       const txt = String((hit && hit.forbidden_status) || '').trim();
       if (!txt) return '';
       const queryTime = String((hit && hit.forbidden_query_time) || '').trim();
@@ -347,10 +372,10 @@
       return `<span class="plat plat-renting rent-countdown-chip" data-slot="rent-countdown" data-end-ms="${endMs}">租赁倒计时：${remain}</span>`;
     }
 
-    function renderRentCountdownPart(account) {
-      const acc = String(account || '').trim();
-      if (!acc) return;
-      const card = state.cardNodeMap[acc];
+    function renderRentCountdownPart(identityKey) {
+      const key = String(identityKey || '').trim();
+      if (!key) return;
+      const card = state.cardNodeMap[key];
       if (!card) return;
       const slot = card.querySelector('[data-slot="rent-countdown"]');
       if (!slot) return;
@@ -373,11 +398,11 @@
       state.rentCountdownTimer = setInterval(() => {
         let active = 0;
         for (const item of (state.list || [])) {
-          const acc = String((item && item.game_account) || '').trim();
-          if (!acc) continue;
-          const card = state.cardNodeMap[acc];
+          const key = productIdentityKey(item);
+          if (!key) continue;
+          const card = state.cardNodeMap[key];
           if (card && card.querySelector('[data-slot="rent-countdown"]')) active += 1;
-          renderRentCountdownPart(acc);
+          renderRentCountdownPart(key);
         }
         if (active <= 0 && state.rentCountdownTimer) {
           clearInterval(state.rentCountdownTimer);
@@ -391,10 +416,10 @@
       return mode === 'rolling_24h' ? '近24h订单' : '今日订单';
     }
 
-    function renderOnlinePart(account) {
-      const acc = String(account || '').trim();
-      if (!acc) return;
-      const card = state.cardNodeMap[acc];
+    function renderOnlinePart(identityKey) {
+      const key = String(identityKey || '').trim();
+      if (!key) return;
+      const card = state.cardNodeMap[key];
       if (!card) {
         renderList();
         return;
@@ -402,30 +427,30 @@
 
       const chipSlot = card.querySelector('[data-slot="online-chip"]');
       if (chipSlot) {
-        chipSlot.innerHTML = buildOnlineChipHtml(acc);
+        chipSlot.innerHTML = buildOnlineChipHtml(key);
       }
       const forbiddenSlot = card.querySelector('[data-slot="forbidden-chip"]');
       if (forbiddenSlot) {
-        forbiddenSlot.innerHTML = buildForbiddenChipHtml(acc);
+        forbiddenSlot.innerHTML = buildForbiddenChipHtml(key);
       }
 
       const btn = card.querySelector('[data-op="online-query"]');
       if (btn) {
-        const querying = Boolean(state.onlineLoadingMap[acc] || state.forbiddenLoadingMap[acc]);
+        const querying = Boolean(state.onlineLoadingMap[key] || state.forbiddenLoadingMap[key]);
         btn.disabled = querying;
         btn.textContent = querying ? '查询中...' : '状态查询';
       }
     }
 
-    function renderForbiddenPart(account) {
-      const acc = String(account || '').trim();
-      if (!acc) return;
-      const card = state.cardNodeMap[acc];
+    function renderForbiddenPart(identityKey) {
+      const key = String(identityKey || '').trim();
+      if (!key) return;
+      const card = state.cardNodeMap[key];
       if (!card) return;
 
       const btn = card.querySelector('[data-op="forbidden-play"]');
       if (btn) {
-        const loading = Boolean(state.forbiddenLoadingMap[acc]);
+        const loading = Boolean(state.forbiddenLoadingMap[key]);
         btn.disabled = loading;
         btn.textContent = loading ? '处理中...' : '处理禁玩';
       }
@@ -453,9 +478,9 @@
       els.moreOpsSheet.classList.toggle('hidden', !opened);
       if (!opened) return;
       const name = String(state.moreOpsSheet.role_name || state.moreOpsSheet.account || '').trim();
-      const account = String(state.moreOpsSheet.account || '').trim();
-      const querying = Boolean(state.onlineLoadingMap[account]);
-      const handling = Boolean(state.forbiddenLoadingMap[account]);
+      const identityKey = productIdentityKey(state.moreOpsSheet);
+      const querying = Boolean(state.onlineLoadingMap[identityKey]);
+      const handling = Boolean(state.forbiddenLoadingMap[identityKey]);
       const maintenanceLoading = Boolean(state.moreOpsSheet.maintenance_loading);
       const maintenanceEnabled = Boolean(state.moreOpsSheet.maintenance_enabled);
       const prodGuardLoading = Boolean(state.moreOpsSheet.prod_guard_loading);
@@ -481,10 +506,11 @@
 
     function closeActionSheets() {
       state.activeActionSheet = '';
-      state.moreOpsSheet = { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false };
       state.forbiddenSheet = {
         open: false,
         account: '',
+        game_id: '1',
         game_name: 'WZRY',
         role_name: '',
         result_text: '',
@@ -501,12 +527,13 @@
     function openForbiddenSheet(item) {
       const account = String(item && item.game_account || '').trim();
       if (!account) return;
-      state.moreOpsSheet = { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false };
       state.activeActionSheet = 'forbidden';
       renderMoreOpsSheet();
       state.forbiddenSheet = {
         open: true,
         account,
+        game_id: String(item && item.game_id || '1').trim() || '1',
         game_name: String(item && item.game_name || 'WZRY').trim() || 'WZRY',
         role_name: String(item && (item.role_name || item.game_account) || '').trim(),
         result_text: '',
@@ -526,6 +553,7 @@
       state.forbiddenSheet = {
         open: false,
         account: '',
+        game_id: '1',
         game_name: 'WZRY',
         role_name: '',
         result_text: '',
@@ -544,6 +572,7 @@
       state.forbiddenSheet = {
         open: false,
         account: '',
+        game_id: '1',
         game_name: 'WZRY',
         role_name: '',
         result_text: '',
@@ -557,6 +586,8 @@
       state.moreOpsSheet = {
         open: true,
         account,
+        game_id: String(item && item.game_id || '1').trim() || '1',
+        game_name: String(item && item.game_name || 'WZRY').trim() || 'WZRY',
         role_name: String(item && (item.role_name || item.game_account) || '').trim(),
         maintenance_enabled: Boolean(item && item.blacklisted && isMaintenanceReason(item.blacklist_reason)),
         maintenance_loading: false,
@@ -569,7 +600,7 @@
 
     function closeMoreOpsSheet() {
       if (state.activeActionSheet === 'more') state.activeActionSheet = '';
-      state.moreOpsSheet = { open: false, account: '', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false };
       renderMoreOpsSheet();
     }
 
@@ -602,6 +633,8 @@
       state.purchaseSheet = {
         open: true,
         account,
+        game_id: String(item && item.game_id || '1').trim() || '1',
+        game_name: String(item && item.game_name || 'WZRY').trim() || 'WZRY',
         role_name: String(item && (item.role_name || item.game_account) || '').trim(),
         purchase_price: price,
         purchase_date: String(item && item.purchase_date || '').slice(0, 10),
@@ -616,6 +649,8 @@
       state.purchaseSheet = {
         open: false,
         account: '',
+        game_id: '1',
+        game_name: 'WZRY',
         role_name: '',
         purchase_price: '',
         purchase_date: '',
@@ -628,6 +663,7 @@
 
     async function submitPurchaseConfig() {
       const account = String((state.purchaseSheet || {}).account || '').trim();
+      const gameId = String((state.purchaseSheet || {}).game_id || '1').trim() || '1';
       if (!account) return;
       const priceRaw = String(els.purchasePriceInput.value || '').trim();
       const dateVal = String(els.purchaseDateInput.value || '').trim();
@@ -661,7 +697,7 @@
         const savedPrice = Number(out && out.data && out.data.purchase_price || 0);
         const savedDate = String(out && out.data && out.data.purchase_date || '').slice(0, 10);
         state.list = (state.list || []).map((x) => {
-          if (String(x && x.game_account || '').trim() !== account) return x;
+          if (String(x && x.game_account || '').trim() !== account || String((x && x.game_id) || '1').trim() !== gameId) return x;
           return {
             ...x,
             purchase_price: Number(savedPrice.toFixed(2)),
@@ -688,14 +724,16 @@
 
     async function submitForbidden(enabled) {
       const account = String((state.forbiddenSheet || {}).account || '').trim();
+      const gameId = String((state.forbiddenSheet || {}).game_id || '1').trim() || '1';
       const gameName = String((state.forbiddenSheet || {}).game_name || 'WZRY').trim() || 'WZRY';
+      const identityKey = productIdentityKey({ game_account: account, game_id: gameId });
       if (!account) return;
       state.forbiddenSheet.loading = true;
       state.forbiddenSheet.result_text = '处理中...';
       state.forbiddenSheet.result_type = '';
       renderForbiddenSheet();
-      state.forbiddenLoadingMap[account] = true;
-      renderForbiddenPart(account);
+      state.forbiddenLoadingMap[identityKey] = true;
+      renderForbiddenPart(identityKey);
       try {
         const out = await request('/api/products/forbidden/play', {
           method: 'POST',
@@ -709,7 +747,7 @@
         state.forbiddenSheet.query_text = queryTime
           ? `${on ? '禁玩中' : '未禁玩'} · ${queryTime.slice(5, 16)}`
           : (on ? '禁玩中' : '未禁玩');
-        const hit = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
+        const hit = findProductItemByIdentity(gameId, account);
         if (hit) {
           hit.forbidden_status = on ? '禁玩中' : '未禁玩';
           hit.forbidden_query_time = queryTime;
@@ -720,22 +758,24 @@
       } finally {
         state.forbiddenSheet.loading = false;
         renderForbiddenSheet();
-        state.forbiddenLoadingMap[account] = false;
-        renderForbiddenPart(account);
+        state.forbiddenLoadingMap[identityKey] = false;
+        renderForbiddenPart(identityKey);
         renderMoreOpsSheet();
       }
     }
 
     async function queryForbidden() {
       const account = String((state.forbiddenSheet || {}).account || '').trim();
+      const gameId = String((state.forbiddenSheet || {}).game_id || '1').trim() || '1';
       const gameName = String((state.forbiddenSheet || {}).game_name || 'WZRY').trim() || 'WZRY';
+      const identityKey = productIdentityKey({ game_account: account, game_id: gameId });
       if (!account) return;
       state.forbiddenSheet.query_loading = true;
       state.forbiddenSheet.result_text = '';
       state.forbiddenSheet.result_type = '';
       renderForbiddenSheet();
-      state.forbiddenLoadingMap[account] = true;
-      renderForbiddenPart(account);
+      state.forbiddenLoadingMap[identityKey] = true;
+      renderForbiddenPart(identityKey);
       try {
         const out = await request('/api/products/forbidden/query', {
           method: 'POST',
@@ -749,7 +789,7 @@
           : (on ? '禁玩中' : '未禁玩');
         state.forbiddenSheet.result_text = '';
         state.forbiddenSheet.result_type = '';
-        const hit = (state.list || []).find((x) => String((x && x.game_account) || '').trim() === account);
+        const hit = findProductItemByIdentity(gameId, account);
         if (hit) {
           hit.forbidden_status = on ? '禁玩中' : '未禁玩';
           hit.forbidden_query_time = queryTime;
@@ -762,8 +802,8 @@
       } finally {
         state.forbiddenSheet.query_loading = false;
         renderForbiddenSheet();
-        state.forbiddenLoadingMap[account] = false;
-        renderForbiddenPart(account);
+        state.forbiddenLoadingMap[identityKey] = false;
+        renderForbiddenPart(identityKey);
         renderMoreOpsSheet();
       }
     }
@@ -884,8 +924,9 @@
             return `<span class="plat ${cls}"${title}>${text}</span>`;
           }).join('');
           const account = String(item.game_account || '').trim();
-          const querying = Boolean(state.onlineLoadingMap[account] || state.forbiddenLoadingMap[account]);
-          const forbiddenLoading = Boolean(state.forbiddenLoadingMap[account]);
+          const identityKey = productIdentityKey(item);
+          const querying = Boolean(state.onlineLoadingMap[identityKey] || state.forbiddenLoadingMap[identityKey]);
+          const forbiddenLoading = Boolean(state.forbiddenLoadingMap[identityKey]);
           const blacklistDisplayDate = String(item.blacklist_display_date || item.blacklist_create_date || '').trim();
           const blacklistTime = formatBlacklistTimeForCard(blacklistDisplayDate);
           const overall = item && item.overall_status_norm && typeof item.overall_status_norm === 'object'
@@ -906,8 +947,8 @@
             <div class="order-card-top product-card-top">
               <p class="order-card-role product-card-role">${buildGameAvatarHtml(item)}<span class="product-role-text">${item.display_name || item.role_name || item.game_account}</span></p>
               <div class="card-top-chips">
-                <span data-slot="online-chip">${buildOnlineChipHtml(account)}</span>
-                <span data-slot="forbidden-chip">${buildForbiddenChipHtml(account)}</span>
+                <span data-slot="online-chip">${buildOnlineChipHtml(identityKey)}</span>
+                <span data-slot="forbidden-chip">${buildForbiddenChipHtml(identityKey)}</span>
                 <span class="chip ${statusClass} status-main-chip" title="${escapeAttr(statusText)}">
                   ${statusText}
                 </span>
@@ -947,7 +988,7 @@
           node.querySelector('[data-op=\"online-query\"]').addEventListener('click', () => queryStatus(item));
           node.querySelector('[data-op=\"blacklist-toggle\"]').addEventListener('click', () => toggleBlacklist(item));
           node.querySelector('[data-op=\"more-ops\"]').addEventListener('click', () => openMoreOpsSheet(item));
-          state.cardNodeMap[account] = node;
+          state.cardNodeMap[identityKey] = node;
           root.appendChild(node);
         });
       }

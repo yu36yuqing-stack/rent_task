@@ -347,6 +347,8 @@ async function backfillBlacklistGameIdentityByAccount(db) {
           AND COALESCE(game_id, '1') = '1'
     `);
     for (const row of rows) {
+        // 仅在账号当前唯一归属到一个游戏时才回填；
+        // 连体号/多游戏账号保留原始维度，避免把旧主表误迁到另一游戏。
         const matches = await all(db, `
             SELECT DISTINCT game_id, game_name
             FROM user_game_account
