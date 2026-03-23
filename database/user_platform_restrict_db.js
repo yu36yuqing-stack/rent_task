@@ -72,6 +72,11 @@ function normalizeRestrictKey(input, fallback = {}) {
     };
 }
 
+function isActiveRestrictUniqueConstraintError(err) {
+    const msg = String(err && err.message ? err.message : err || '');
+    return /UNIQUE constraint failed:\s*user_platform_restrict\.user_id,\s*user_platform_restrict\.game_id,\s*user_platform_restrict\.game_account,\s*user_platform_restrict\.platform/i.test(msg);
+}
+
 async function initUserPlatformRestrictDb() {
     const db = openDatabase();
     try {
@@ -159,26 +164,39 @@ async function upsertPlatformRestrict(userId, gameAccount, platform, detail = {}
     const db = openDatabase();
     try {
         const now = nowText();
-        const exists = await get(db, `
+        const payload = JSON.stringify(normalizeDetail(detail));
+        let exists = await get(db, `
             SELECT id
             FROM user_platform_restrict
             WHERE user_id = ? AND game_id = ? AND game_account = ? AND platform = ? AND is_deleted = 0
             LIMIT 1
         `, [uid, gid, acc, pf]);
-        const payload = JSON.stringify(normalizeDetail(detail));
         if (!exists) {
-            await run(db, `
-                INSERT INTO user_platform_restrict
-                (user_id, game_account, game_id, game_name, platform, reason, detail, create_date, modify_date, is_deleted, desc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-            `, [uid, acc, gid, gameName, pf, RESTRICT_REASON, payload, now, now, String(desc || '').trim()]);
-        } else {
-            await run(db, `
-                UPDATE user_platform_restrict
-                SET game_name = ?, reason = ?, detail = ?, modify_date = ?, desc = ?
-                WHERE id = ?
-            `, [gameName, RESTRICT_REASON, payload, now, String(desc || '').trim(), Number(exists.id)]);
+            try {
+                await run(db, `
+                    INSERT INTO user_platform_restrict
+                    (user_id, game_account, game_id, game_name, platform, reason, detail, create_date, modify_date, is_deleted, desc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                `, [uid, acc, gid, gameName, pf, RESTRICT_REASON, payload, now, now, String(desc || '').trim()]);
+                return true;
+            } catch (err) {
+                // 并发场景下，另一请求可能在 exists 查询后已完成插入。
+                // 这里回退为重查并更新，保证 upsert 幂等。
+                if (!isActiveRestrictUniqueConstraintError(err)) throw err;
+                exists = await get(db, `
+                    SELECT id
+                    FROM user_platform_restrict
+                    WHERE user_id = ? AND game_id = ? AND game_account = ? AND platform = ? AND is_deleted = 0
+                    LIMIT 1
+                `, [uid, gid, acc, pf]);
+                if (!exists) throw err;
+            }
         }
+        await run(db, `
+            UPDATE user_platform_restrict
+            SET game_name = ?, reason = ?, detail = ?, modify_date = ?, desc = ?
+            WHERE id = ?
+        `, [gameName, RESTRICT_REASON, payload, now, String(desc || '').trim(), Number(exists.id)]);
         return true;
     } finally {
         db.close();
