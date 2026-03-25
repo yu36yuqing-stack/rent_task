@@ -69,6 +69,14 @@ const { startProdRiskTaskWorker } = require('../product/prod_status_guard');
 const { resolveDisplayNameByRow } = require('../product/display_name');
 const { normalizeGameProfile } = require('../common/game_profile');
 const { listOrdersForUser, syncOrdersByUser } = require('../order/order');
+const {
+    COOLDOWN_RELEASE_RULE_NAME,
+    DEFAULT_COOLDOWN_RELEASE_DELAY_MIN,
+    MIN_COOLDOWN_RELEASE_DELAY_MIN,
+    MAX_COOLDOWN_RELEASE_DELAY_MIN,
+    normalizeCooldownReleaseDelayMin,
+    getCooldownConfigByUser
+} = require('../order/order_cooldown_config');
 const { tryAcquireLock, releaseLock } = require('../database/lock_db');
 const { createAuthBff } = require('./h5_bff/auth_bff');
 const { createOrderBff } = require('./h5_bff/order_bff');
@@ -115,6 +123,10 @@ function normalizeOrderOffMode(v, fallback = ORDER_OFF_MODE_NATURAL_DAY) {
 
 function orderOffModeLabel(mode) {
     return mode === ORDER_OFF_MODE_ROLLING_24H ? '滑动窗口' : '自然日';
+}
+
+function cooldownReleaseDelayLabel(delayMin) {
+    return `${normalizeCooldownReleaseDelayMin(delayMin, DEFAULT_COOLDOWN_RELEASE_DELAY_MIN)}分钟`;
 }
 
 function normalizeAtMode(modeText, fallback = 'none') {
@@ -1024,6 +1036,7 @@ async function handleGetProfile(req, res) {
     const atMode = primaryAtMode !== 'none' ? primaryAtMode : fallbackAtMode;
     const atMobiles = primaryAtMobiles.length > 0 ? primaryAtMobiles : fallbackAtMobiles;
     const rule = await getOrderOffRuleByUser(fullUser.id);
+    const cooldown = await getCooldownConfigByUser(fullUser.id);
     return json(res, 200, {
         ok: true,
         profile: {
@@ -1040,6 +1053,10 @@ async function handleGetProfile(req, res) {
                 threshold: rule.threshold,
                 mode: rule.mode,
                 mode_label: orderOffModeLabel(rule.mode)
+            },
+            order_cooldown: {
+                release_delay_min: cooldown.release_delay_min,
+                release_delay_label: cooldownReleaseDelayLabel(cooldown.release_delay_min)
             }
         }
     });
@@ -1109,6 +1126,36 @@ async function handleSetProfileOrderOff(req, res) {
             threshold,
             mode,
             mode_label: orderOffModeLabel(mode)
+        }
+    });
+}
+
+async function handleSetProfileOrderCooldown(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const releaseDelayRaw = body.release_delay_min;
+    const releaseDelayNum = Number(releaseDelayRaw);
+    if (!Number.isFinite(releaseDelayNum)
+        || Math.floor(releaseDelayNum) !== releaseDelayNum
+        || releaseDelayNum < MIN_COOLDOWN_RELEASE_DELAY_MIN
+        || releaseDelayNum > MAX_COOLDOWN_RELEASE_DELAY_MIN) {
+        return json(res, 400, {
+            ok: false,
+            message: `release_delay_min 必须是 ${MIN_COOLDOWN_RELEASE_DELAY_MIN}~${MAX_COOLDOWN_RELEASE_DELAY_MIN} 的整数`
+        });
+    }
+    const releaseDelayMin = normalizeCooldownReleaseDelayMin(releaseDelayNum, DEFAULT_COOLDOWN_RELEASE_DELAY_MIN);
+    await upsertUserRuleByName(user.id, {
+        rule_name: COOLDOWN_RELEASE_RULE_NAME,
+        rule_detail: { release_delay_min: releaseDelayMin }
+    }, {
+        desc: 'set by h5 profile'
+    });
+    return json(res, 200, {
+        ok: true,
+        order_cooldown: {
+            release_delay_min: releaseDelayMin,
+            release_delay_label: cooldownReleaseDelayLabel(releaseDelayMin)
         }
     });
 }
@@ -1576,6 +1623,7 @@ async function bootstrap() {
             if (req.method === 'GET' && urlObj.pathname === '/api/profile') return await handleGetProfile(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/profile/notify') return await handleSetProfileNotify(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/profile/order-off') return await handleSetProfileOrderOff(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/profile/order-cooldown') return await handleSetProfileOrderCooldown(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/user-rules/order-off-threshold') return await handleGetOrderOffThreshold(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/user-rules/order-off-threshold') return await handleSetOrderOffThreshold(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/online') return await handleProductOnlineQuery(req, res);

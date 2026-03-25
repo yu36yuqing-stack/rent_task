@@ -7,6 +7,10 @@ const {
     listUserBlacklistByUserWithMeta
 } = require('../database/user_blacklist_db');
 const { upsertSourceAndReconcile } = require('../blacklist/blacklist_source_gateway');
+const {
+    getCooldownConfigByUser,
+    DEFAULT_COOLDOWN_RELEASE_DELAY_MIN
+} = require('./order_cooldown_config');
 
 const CHANNEL_UUZUHAO = 'uuzuhao';
 const CHANNEL_UHAOZU = 'uhaozu';
@@ -16,7 +20,7 @@ const CHANNEL_ZHW_YUANBAO = 'zuhaowang-yuanbao';
 const COOLDOWN_REASON = '冷却期下架';
 const COOLDOWN_SOURCE = 'order_cooldown';
 const COOLDOWN_NEAR_END_SEC = 10 * 60;
-const COOLDOWN_END_DELAY_SEC = 10 * 60;
+const COOLDOWN_END_DELAY_SEC = DEFAULT_COOLDOWN_RELEASE_DELAY_MIN * 60;
 const COOLDOWN_SYNC_FRESH_WINDOW_SEC = 12 * 60;
 
 function dbAll(db, sql, params = []) {
@@ -256,7 +260,9 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
     if (!uid) throw new Error('user_id 不合法');
     const nowSec = Math.floor(Date.now() / 1000);
     const nearEndSec = Math.max(0, Number(options.near_end_sec || COOLDOWN_NEAR_END_SEC));
-    const endDelaySec = Math.max(0, Number(options.end_delay_sec || COOLDOWN_END_DELAY_SEC));
+    const cooldownCfg = await getCooldownConfigByUser(uid);
+    const defaultEndDelaySec = Math.max(0, Number(cooldownCfg.release_delay_min || 0) * 60);
+    const endDelaySec = Math.max(0, Number(options.end_delay_sec ?? defaultEndDelaySec ?? COOLDOWN_END_DELAY_SEC));
     const rentingOrders = await listActiveRentingOrdersByUser(uid);
     const cooldownByAccount = new Map();
 
@@ -328,6 +334,7 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
         source: COOLDOWN_SOURCE,
         scanned_orders: rentingOrders.length,
         hit_accounts: cooldownByAccount.size,
+        release_delay_min: Math.floor(endDelaySec / 60),
         added,
         updated,
         skipped_conflict

@@ -192,12 +192,14 @@
       },
       userRules: {
         order_off_threshold: 3,
-        order_off_mode: ORDER_OFF_MODE_NATURAL_DAY
+        order_off_mode: ORDER_OFF_MODE_NATURAL_DAY,
+        cooldown_release_delay_min: 10
       },
       profile: {
         loading: false,
         notify_saving: false,
         order_off_saving: false,
+        order_cooldown_saving: false,
         notify: {
           at_mode: 'none',
           at_mobiles: []
@@ -205,6 +207,9 @@
         order_off: {
           threshold: 3,
           mode: ORDER_OFF_MODE_NATURAL_DAY
+        },
+        order_cooldown: {
+          release_delay_min: 10
         }
       },
       onlineStatusMap: {},
@@ -363,6 +368,8 @@
       profileOrderOffModeNatural: document.getElementById('profileOrderOffModeNatural'),
       profileOrderOffModeRolling: document.getElementById('profileOrderOffModeRolling'),
       profileOrderOffSaveBtn: document.getElementById('profileOrderOffSaveBtn'),
+      profileCooldownReleaseDelay: document.getElementById('profileCooldownReleaseDelay'),
+      profileCooldownSaveBtn: document.getElementById('profileCooldownSaveBtn'),
       statsMissingOverlay: document.getElementById('statsMissingOverlay'),
       statsMissingList: document.getElementById('statsMissingList'),
       statsMissingClose: document.getElementById('statsMissingClose'),

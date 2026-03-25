@@ -11,6 +11,7 @@ process.env.RUNTIME_DB_FILE_PATH = path.join(tempDir, 'rent_robot_runtime.db');
 
 const { initUserBlacklistDb, listUserBlacklistByUser } = require('../database/user_blacklist_db');
 const { initUserBlacklistSourceDb, upsertBlacklistSource, listBlacklistSourcesByUser } = require('../database/user_blacklist_source_db');
+const { initUserGameAccountDb } = require('../database/user_game_account_db');
 const { initUserPlatformAuthDb, upsertUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { initOrderSyncDb, setLastSyncTimestamp } = require('../database/order_sync_db');
 const { releaseOrderCooldownBlacklistByUser } = require('../order/order_cooldown');
@@ -32,6 +33,7 @@ async function main() {
 
     await initUserBlacklistDb();
     await initUserBlacklistSourceDb();
+    await initUserGameAccountDb();
     await initUserPlatformAuthDb();
     await initOrderSyncDb();
 

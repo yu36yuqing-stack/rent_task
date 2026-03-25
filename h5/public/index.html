@@ -180,6 +180,22 @@
           <button id="profileOrderOffSaveBtn" class="btn btn-ghost">保存X单下架参数</button>
         </div>
       </div>
+
+      <div class="panel profile-card">
+        <div class="profile-head-row">
+          <p class="auth-title">冷却期释放参数</p>
+        </div>
+        <div class="field profile-field profile-threshold-row">
+          <label for="profileCooldownReleaseDelay">订单结束后延迟释放</label>
+          <div class="profile-threshold-input-wrap">
+            <input id="profileCooldownReleaseDelay" class="profile-threshold-input" type="number" step="1" min="0" max="120" inputmode="numeric" placeholder="0~120">
+            <span class="profile-threshold-unit">分钟</span>
+          </div>
+        </div>
+        <div class="profile-actions">
+          <button id="profileCooldownSaveBtn" class="btn btn-ghost">保存冷却期参数</button>
+        </div>
+      </div>
     </section>
 
     <div id="drawerMask" class="drawer-mask hidden"></div>

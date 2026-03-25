@@ -20,12 +20,17 @@ async function loadProfile() {
       : ((out && out.data && typeof out.data === 'object') ? out.data : {});
     const notify = profile && profile.notify ? profile.notify : {};
     const orderOff = profile && profile.order_off ? profile.order_off : {};
+    const orderCooldown = profile && profile.order_cooldown ? profile.order_cooldown : {};
 
     const thresholdRaw = Number(orderOff.threshold);
     const threshold = Number.isFinite(thresholdRaw)
       ? Math.max(1, Math.min(10, Math.floor(thresholdRaw)))
       : 3;
     const mode = normalizeOrderOffMode(orderOff.mode, ORDER_OFF_MODE_NATURAL_DAY);
+    const releaseDelayRaw = Number(orderCooldown.release_delay_min);
+    const releaseDelayMin = Number.isFinite(releaseDelayRaw)
+      ? Math.max(0, Math.min(120, Math.floor(releaseDelayRaw)))
+      : 10;
 
     state.profile.notify = {
       at_mode: String(notify.at_mode || 'none'),
@@ -35,8 +40,12 @@ async function loadProfile() {
       threshold,
       mode
     };
+    state.profile.order_cooldown = {
+      release_delay_min: releaseDelayMin
+    };
     state.userRules.order_off_threshold = threshold;
     state.userRules.order_off_mode = mode;
+    state.userRules.cooldown_release_delay_min = releaseDelayMin;
   } finally {
     state.profile.loading = false;
     renderProfileView();
@@ -48,9 +57,11 @@ function renderProfileView() {
 
   const notify = state.profile && state.profile.notify ? state.profile.notify : {};
   const orderOff = state.profile && state.profile.order_off ? state.profile.order_off : {};
+  const orderCooldown = state.profile && state.profile.order_cooldown ? state.profile.order_cooldown : {};
   const loading = Boolean(state.profile && state.profile.loading);
   const notifySaving = Boolean(state.profile && state.profile.notify_saving);
   const orderOffSaving = Boolean(state.profile && state.profile.order_off_saving);
+  const orderCooldownSaving = Boolean(state.profile && state.profile.order_cooldown_saving);
 
   if (els.profileAtMode) {
     const mode = String(notify.at_mode || 'none');
@@ -94,6 +105,18 @@ function renderProfileView() {
   if (els.profileOrderOffSaveBtn) {
     els.profileOrderOffSaveBtn.disabled = loading || orderOffSaving;
     els.profileOrderOffSaveBtn.textContent = orderOffSaving ? '保存中...' : '保存X单下架参数';
+  }
+  const releaseDelayRaw = Number(orderCooldown.release_delay_min);
+  const releaseDelayMin = Number.isFinite(releaseDelayRaw)
+    ? Math.max(0, Math.min(120, Math.floor(releaseDelayRaw)))
+    : 10;
+  const preserveCooldownInput = orderCooldownSaving || (typeof document !== 'undefined' && document.activeElement === els.profileCooldownReleaseDelay);
+  if (els.profileCooldownReleaseDelay && !preserveCooldownInput) {
+    els.profileCooldownReleaseDelay.value = String(releaseDelayMin);
+  }
+  if (els.profileCooldownSaveBtn) {
+    els.profileCooldownSaveBtn.disabled = loading || orderCooldownSaving;
+    els.profileCooldownSaveBtn.textContent = orderCooldownSaving ? '保存中...' : '保存冷却期参数';
   }
 }
 
@@ -145,6 +168,30 @@ async function submitProfileOrderOff() {
   state.userRules.order_off_mode = savedMode;
 }
 
+async function submitProfileOrderCooldown() {
+  const releaseDelayRaw = String((els.profileCooldownReleaseDelay && els.profileCooldownReleaseDelay.value) || '').trim();
+  const releaseDelayNum = Number(releaseDelayRaw);
+  if (!Number.isFinite(releaseDelayNum) || releaseDelayNum < 0 || releaseDelayNum > 120) {
+    throw new Error('请输入 0~120 的整数');
+  }
+  const releaseDelayMin = Math.floor(releaseDelayNum);
+  const out = await request('/api/profile/order-cooldown', {
+    method: 'POST',
+    body: JSON.stringify({ release_delay_min: releaseDelayMin })
+  });
+  const saved = out && out.order_cooldown && typeof out.order_cooldown === 'object'
+    ? out.order_cooldown
+    : ((out && out.data && out.data.order_cooldown && typeof out.data.order_cooldown === 'object') ? out.data.order_cooldown : {});
+  const savedDelayRaw = Number(saved.release_delay_min);
+  const savedDelayMin = Number.isFinite(savedDelayRaw)
+    ? Math.max(0, Math.min(120, Math.floor(savedDelayRaw)))
+    : releaseDelayMin;
+  state.profile.order_cooldown = {
+    release_delay_min: savedDelayMin
+  };
+  state.userRules.cooldown_release_delay_min = savedDelayMin;
+}
+
 if (els.profileNotifySaveBtn) {
   els.profileNotifySaveBtn.addEventListener('click', async () => {
     if (state.profile.notify_saving) return;
@@ -175,6 +222,24 @@ if (els.profileOrderOffSaveBtn) {
       showToast(e.message || 'X单下架参数保存失败');
     } finally {
       state.profile.order_off_saving = false;
+      renderProfileView();
+    }
+  });
+}
+
+if (els.profileCooldownSaveBtn) {
+  els.profileCooldownSaveBtn.addEventListener('click', async () => {
+    if (state.profile.order_cooldown_saving) return;
+    state.profile.order_cooldown_saving = true;
+    renderProfileView();
+    try {
+      await submitProfileOrderCooldown();
+      await loadList();
+      showToast(`已设置为订单结束后${Number(state.profile.order_cooldown.release_delay_min || 0)}分钟释放`);
+    } catch (e) {
+      showToast(e.message || '冷却期参数保存失败');
+    } finally {
+      state.profile.order_cooldown_saving = false;
       renderProfileView();
     }
   });
@@ -224,3 +289,4 @@ window.loadProfile = loadProfile;
 window.renderProfileView = renderProfileView;
 window.submitProfileNotify = submitProfileNotify;
 window.submitProfileOrderOff = submitProfileOrderOff;
+window.submitProfileOrderCooldown = submitProfileOrderCooldown;
