@@ -25,7 +25,9 @@ const STATS_JOB_KEY_ALL_USERS = 'order_stats_daily_all_users';
 const DEFAULT_TARGET_HOUR = 2;
 const DEFAULT_TARGET_MINUTE = 0;
 const DEFAULT_WINDOW_SEC = 300;
-const DEFAULT_RECALC_DAYS = 60;
+const DEFAULT_RECALC_DAYS = 14;
+const MAX_NORMAL_RECALC_DAYS = 14;
+const MAX_BACKFILL_RECALC_DAYS = 180;
 const DEFAULT_GAME_NAME = 'WZRY';
 const ALL_GAME_NAME = '全部';
 
@@ -263,6 +265,33 @@ function normalizeStatDateText(dateText = '') {
     return raw;
 }
 
+function normalizeStatsRefreshRange(options = {}) {
+    const mode = String(options.mode || 'normal').trim().toLowerCase() === 'backfill' ? 'backfill' : 'normal';
+    const now = options.now instanceof Date ? options.now : new Date();
+    const baseDate = startOfDay(now);
+    const rawStartDate = normalizeStatDateText(options.start_date);
+    if (mode !== 'backfill' && rawStartDate) {
+        throw new Error('常规刷新不支持 start_date');
+    }
+
+    let resolvedDays = Number(options.days);
+    if (rawStartDate) {
+        resolvedDays = dateDiffDaysInclusive(rawStartDate, toDateText(baseDate));
+    }
+    if (!Number.isFinite(resolvedDays)) resolvedDays = DEFAULT_RECALC_DAYS;
+
+    const maxDays = mode === 'backfill' ? MAX_BACKFILL_RECALC_DAYS : MAX_NORMAL_RECALC_DAYS;
+    const days = Math.max(1, Math.min(maxDays, Math.floor(resolvedDays)));
+    const startDate = toDateText(addDays(baseDate, -(days - 1)));
+    return {
+        mode,
+        days,
+        start_date: startDate,
+        end_date: toDateText(baseDate),
+        capped: Math.floor(resolvedDays) !== days
+    };
+}
+
 function reduceRows(rows = []) {
     const out = {
         order_cnt_total: 0,
@@ -413,7 +442,8 @@ async function refreshOrderStatsDailyByUser(userId, options = {}) {
     await initOrderStatsCostDailyDb();
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
-    const days = Math.max(1, Number(options.days || DEFAULT_RECALC_DAYS));
+    const refreshRange = normalizeStatsRefreshRange(options);
+    const days = refreshRange.days;
     const gameName = String(options.game_name || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
     if (gameName === ALL_GAME_NAME) {
         const games = await listConfiguredGamesByUser(uid);
@@ -833,6 +863,10 @@ async function getIncomeCalendarByUser(userId, options = {}) {
 
 module.exports = {
     STATS_JOB_KEY_ALL_USERS,
+    DEFAULT_RECALC_DAYS,
+    MAX_NORMAL_RECALC_DAYS,
+    MAX_BACKFILL_RECALC_DAYS,
+    normalizeStatsRefreshRange,
     shouldTriggerDailyStatsNow,
     startOrderStatsWorkerIfNeeded,
     refreshOrderStatsDailyByUser,

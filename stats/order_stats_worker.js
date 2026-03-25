@@ -3,7 +3,11 @@ const fs = require('fs');
 const util = require('util');
 const { tryAcquireLock, releaseLock } = require('../database/lock_db');
 const { setLastRunDate } = require('../database/order_stats_job_state_db');
-const { refreshOrderStatsDailyForAllUsers, STATS_JOB_KEY_ALL_USERS } = require('./order_stats');
+const {
+    refreshOrderStatsDailyForAllUsers,
+    normalizeStatsRefreshRange,
+    STATS_JOB_KEY_ALL_USERS
+} = require('./order_stats');
 
 const TASK_DIR = path.join(__dirname, '..');
 const LOG_DIR = path.join(TASK_DIR, 'log');
@@ -47,10 +51,12 @@ setupLogger();
     }
 
     try {
-        const recalcDays = Math.max(1, Number(process.env.ORDER_STATS_DAILY_RECALC_DAYS || 60));
-        console.log(`[OrderStatsWorker] 启动 pid=${process.pid} recalc_days=${recalcDays}`);
+        const requestedDays = Math.max(1, Number(process.env.ORDER_STATS_DAILY_RECALC_DAYS || 14));
+        const refreshRange = normalizeStatsRefreshRange({ mode: 'normal', days: requestedDays });
+        console.log(`[OrderStatsWorker] 启动 pid=${process.pid} recalc_days=${refreshRange.days} requested_days=${requestedDays}`);
         const summary = await refreshOrderStatsDailyForAllUsers({
-            days: recalcDays,
+            mode: 'normal',
+            days: refreshRange.days,
             desc: 'daily by order_stats_worker'
         });
         console.log(`[OrderStatsWorker] 完成 total=${summary.total_users} ok=${summary.ok_users} failed=${summary.failed_users}`);

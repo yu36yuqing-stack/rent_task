@@ -3,6 +3,7 @@ const { refreshOrderStatsDailyForAllUsers } = require('../stats/order_stats');
 
 async function main() {
     const summary = await refreshOrderStatsDailyForAllUsers({
+        mode: 'backfill',
         days: 90,
         game_name: '全部',
         desc: 'rebuild 90d after stats db migration'

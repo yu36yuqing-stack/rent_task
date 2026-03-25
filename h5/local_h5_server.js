@@ -917,7 +917,7 @@ async function handleStatsCalendar(req, res, urlObj) {
 async function handleStatsRefresh(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
-    const days = Math.max(1, Math.min(60, Number(body.days || 60)));
+    const days = Math.max(1, Math.min(14, Number(body.days || 14)));
     const gameName = String(body.game_name || 'WZRY').trim() || 'WZRY';
     const needSyncOrders = body.sync_orders === undefined ? true : Boolean(body.sync_orders);
     const lockOwner = `h5/stats/refresh user_id=${user.id} pid=${process.pid}`;
@@ -964,6 +964,7 @@ async function handleStatsRefresh(req, res) {
         }
 
         const out = await refreshOrderStatsDailyByUser(user.id, {
+            mode: 'normal',
             days,
             game_name: gameName,
             desc: 'manual by h5 stats refresh'

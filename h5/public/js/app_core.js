@@ -279,21 +279,6 @@
       els.reasonOverlay.classList.add('hidden');
     }
 
-    function calcRefreshDaysByStatsPeriod(period) {
-      const p = String(period || 'today').trim().toLowerCase();
-      if (p === 'today') return 1;
-      if (p === 'yesterday') return 2;
-      if (p === 'week' || p === 'last7') return 7;
-      if (p === 'last30') return 30;
-      if (p === 'month') {
-        const now = new Date();
-        const start = new Date(now.getFullYear(), now.getMonth(), 1);
-        const diff = Math.floor((now.getTime() - start.getTime()) / (24 * 3600 * 1000)) + 1;
-        return Math.max(1, Math.min(60, diff));
-      }
-      return 3;
-    }
-
     const els = {
       loginView: document.getElementById('loginView'),
       listView: document.getElementById('listView'),
@@ -1433,18 +1418,17 @@
     });
     els.statsRefreshBtn.addEventListener('click', async () => {
       try {
-        const days = calcRefreshDaysByStatsPeriod(state.statsBoard.period);
         const gameName = String((state.statsBoard && state.statsBoard.game_name) || '全部').trim() || '全部';
         await request('/api/stats/refresh', {
           method: 'POST',
-          body: JSON.stringify({ days, game_name: gameName })
+          body: JSON.stringify({ game_name: gameName })
         });
         await loadStatsBoard();
         if (typeof loadStatsCalendar === 'function') {
           await loadStatsCalendar((state.statsBoard.calendar && state.statsBoard.calendar.month) || '');
         }
         renderStatsView();
-        showToast('统计已刷新');
+        showToast('统计已刷新（最近14天）');
       } catch (e) {
         alert(e.message || '统计刷新失败');
       }
