@@ -664,6 +664,7 @@
     async function submitPurchaseConfig() {
       const account = String((state.purchaseSheet || {}).account || '').trim();
       const gameId = String((state.purchaseSheet || {}).game_id || '1').trim() || '1';
+      const gameName = String((state.purchaseSheet || {}).game_name || 'WZRY').trim() || 'WZRY';
       if (!account) return;
       const priceRaw = String(els.purchasePriceInput.value || '').trim();
       const dateVal = String(els.purchaseDateInput.value || '').trim();
@@ -690,6 +691,8 @@
           method: 'POST',
           body: JSON.stringify({
             game_account: account,
+            game_id: gameId,
+            game_name: gameName,
             purchase_price: Number(priceNum.toFixed(2)),
             purchase_date: dateVal
           })

@@ -1396,6 +1396,7 @@ async function handleProductPurchaseConfig(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
     const gameAccount = String(body.game_account || '').trim();
+    const normalizedGame = normalizeGameProfile(body.game_id, body.game_name, { preserveUnknown: true });
     const purchasePrice = Number(body.purchase_price);
     const purchaseDate = String(body.purchase_date || '').trim();
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
@@ -1410,7 +1411,9 @@ async function handleProductPurchaseConfig(req, res) {
         gameAccount,
         purchasePrice,
         purchaseDate,
-        'manual purchase config by h5'
+        'manual purchase config by h5',
+        normalizedGame.game_id,
+        normalizedGame.game_name
     );
     return json(res, 200, {
         ok: true,
