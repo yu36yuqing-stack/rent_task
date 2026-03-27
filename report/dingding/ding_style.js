@@ -44,7 +44,9 @@ function pickIcon(acc, authorizedPlatforms = []) {
     const anyRent = states.includes('租赁中');
     const allUp = states.length > 0 && states.every((s) => s === '上架');
     const allDown = states.length > 0 && states.every((s) => s === '下架');
+    const hasRentingOrder = Boolean(acc && acc.has_renting_order);
 
+    if (hasRentingOrder) return '💰';
     if (anyRent) return '💰';
     if (allUp) return '✅';
     if (allDown) return '⬇️';

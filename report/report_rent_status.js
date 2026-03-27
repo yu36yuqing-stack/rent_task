@@ -4,7 +4,11 @@ const { sendTelegramMessage } = require('./telegram/tg_notify.js');
 const { sendDingdingMessage } = require('./dingding/ding_notify.js');
 const { buildTelegramMessage } = require('./telegram/tg_style.js');
 const { buildDingdingMessage } = require('./dingding/ding_style.js');
-const { listTodayPaidOrderCountByAccounts, listRolling24hPaidOrderCountByAccounts } = require('../database/order_db');
+const {
+    listTodayPaidOrderCountByAccounts,
+    listRolling24hPaidOrderCountByAccounts,
+    listRentingOrderWindowByAccounts
+} = require('../database/order_db');
 const { listRecentProductOnoffByUser } = require('../database/product_onoff_history_db');
 const { listAccountRemarksByUserAndIdentities } = require('../database/user_game_account_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
@@ -471,6 +475,36 @@ async function fillTodayOrderCounts(userId, accounts = []) {
     }
 }
 
+async function fillRentingOrderFacts(userId, accounts = []) {
+    const uid = Number(userId || 0);
+    if (!uid || !Array.isArray(accounts) || accounts.length === 0) return;
+    try {
+        const accList = accounts
+            .map((a) => ({
+                game_account: String((a && a.account) || '').trim(),
+                game_id: String((a && a.game_id) || '1').trim() || '1'
+            }))
+            .filter((a) => a.game_account);
+        const rentingMap = await listRentingOrderWindowByAccounts(uid, accList);
+        for (const acc of accounts) {
+            const gameId = String((acc && acc.game_id) || '1').trim() || '1';
+            const account = String((acc && acc.account) || '').trim();
+            const fullKey = accountKeyOf(gameId, account);
+            const renting = rentingMap[fullKey] || null;
+            acc.has_renting_order = Boolean(renting && Number(renting.count || 0) > 0);
+            acc.renting_order_count = Number((renting && renting.count) || 0);
+            acc.renting_order_end_time = String((renting && renting.end_time) || '').trim();
+        }
+    } catch (e) {
+        for (const acc of accounts) {
+            acc.has_renting_order = false;
+            acc.renting_order_count = 0;
+            acc.renting_order_end_time = '';
+        }
+        console.warn(`[Report] 查询进行中订单失败 user=${uid}: ${e.message}`);
+    }
+}
+
 if (require.main === module) {
     (async () => {
         try {
@@ -490,6 +524,7 @@ module.exports = {
     sendDingding,
     toReportAccountFromUserGameRow,
     fillTodayOrderCounts,
+    fillRentingOrderFacts,
     formatActionForDisplay,
     buildRecentActionsForUser,
     buildPayloadForOneUser,

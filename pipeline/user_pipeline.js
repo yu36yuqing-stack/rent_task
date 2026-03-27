@@ -1,6 +1,7 @@
 const {
     toReportAccountFromUserGameRow,
     fillTodayOrderCounts,
+    fillRentingOrderFacts,
     buildRecentActionsForUser,
     buildPayloadForOneUser,
     notifyUserByPayload,
@@ -93,6 +94,7 @@ async function runFullUserPipeline(user, options = {}) {
 
         accounts = rows.map((r) => toReportAccountFromUserGameRow(r, blacklistSet, blacklistReasonMap));
         await fillTodayOrderCounts(uid, accounts);
+        await fillRentingOrderFacts(uid, accounts);
         const onlineProbe = await probeProdOnlineStatus(user, accounts, { logger, include_rows: true });
         const onlineTagMap = {};
         for (const row of (onlineProbe && Array.isArray(onlineProbe.probe_rows) ? onlineProbe.probe_rows : [])) {
