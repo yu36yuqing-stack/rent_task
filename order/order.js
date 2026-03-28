@@ -865,7 +865,7 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     return {
         enabled: order3OffEnabled,
         mode: orderOffMode,
-        count_basis: 'rec_amount_gt_0_or_renting',
+        count_basis: 'rec_amount_gt_0_or_renting_or_settling',
         threshold: orderOffThreshold,
         reason: orderOffReason,
         total_accounts: allAccounts.length,

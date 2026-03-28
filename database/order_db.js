@@ -635,7 +635,7 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
               AND start_time >= ?
               AND start_time < datetime(?, '+1 day')
               AND (
-                  COALESCE(order_status, '') IN ('租赁中', '出租中')
+                  COALESCE(order_status, '') IN ('租赁中', '出租中', '结算中')
                   OR COALESCE(rec_amount, 0) > 0
               )
             GROUP BY game_id, game_account
@@ -687,7 +687,7 @@ async function listRolling24hPaidOrderCountByAccounts(userId, gameAccounts = [])
               AND start_time >= ?
               AND start_time < ?
               AND (
-                  COALESCE(order_status, '') IN ('租赁中', '出租中')
+                  COALESCE(order_status, '') IN ('租赁中', '出租中', '结算中')
                   OR COALESCE(rec_amount, 0) > 0
               )
             GROUP BY game_id, game_account
