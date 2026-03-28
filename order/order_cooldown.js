@@ -334,6 +334,7 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
         source: COOLDOWN_SOURCE,
         scanned_orders: rentingOrders.length,
         hit_accounts: cooldownByAccount.size,
+        hit_account_keys: Array.from(cooldownByAccount.keys()),
         release_delay_min: Math.floor(endDelaySec / 60),
         added,
         updated,

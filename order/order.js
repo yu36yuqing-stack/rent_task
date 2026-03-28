@@ -879,6 +879,56 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     };
 }
 
+async function reconcileOrderOffByUser(user = {}, options = {}) {
+    const uid = Number(user.id || 0);
+    if (!uid) throw new Error('user_id 不合法');
+
+    const out = {
+        user_id: uid,
+        cooldown: null,
+        n_off: null,
+        summary: {
+            active_rules: [],
+            cooldown_hit_accounts: 0,
+            n_off_hit_accounts: 0,
+            cooldown_added: 0,
+            cooldown_updated: 0,
+            n_off_added: 0,
+            n_off_deleted: 0
+        }
+    };
+
+    out.cooldown = await reconcileOrderCooldownEntryByUser(uid, options.cooldown || {});
+    out.summary.cooldown_hit_accounts = Number((out.cooldown && out.cooldown.hit_accounts) || 0);
+    out.summary.cooldown_added = Number((out.cooldown && out.cooldown.added) || 0);
+    out.summary.cooldown_updated = Number((out.cooldown && out.cooldown.updated) || 0);
+    if (out.summary.cooldown_hit_accounts > 0) out.summary.active_rules.push('order_cooldown');
+
+    out.n_off = await reconcileOrder3OffBlacklistByUser(user);
+    out.summary.n_off_hit_accounts = Number((out.n_off && out.n_off.hit_accounts) || 0);
+    out.summary.n_off_added = Number((out.n_off && out.n_off.added) || 0);
+    out.summary.n_off_deleted = Number((out.n_off && out.n_off.deleted) || 0);
+    if (out.summary.n_off_hit_accounts > 0) out.summary.active_rules.push('order_n_off');
+
+    console.log(`[OrderOff] user_id=${uid} summary=${JSON.stringify({
+        active_rules: out.summary.active_rules,
+        cooldown_hit_accounts: out.summary.cooldown_hit_accounts,
+        cooldown_added: out.summary.cooldown_added,
+        cooldown_updated: out.summary.cooldown_updated,
+        cooldown_hit_account_keys: Array.isArray(out.cooldown && out.cooldown.hit_account_keys)
+            ? out.cooldown.hit_account_keys
+            : [],
+        n_off_hit_accounts: out.summary.n_off_hit_accounts,
+        n_off_added: out.summary.n_off_added,
+        n_off_deleted: out.summary.n_off_deleted,
+        n_off_target_accounts: Array.isArray(out.n_off && out.n_off.target_accounts)
+            ? out.n_off.target_accounts
+            : []
+    })}`);
+
+    return out;
+}
+
 // 拉取 uuzuhao 订单并入库：
 // - game_account / role_name 通过 productId 关联 user_game_account 获取
 // - 订单接口参数支持 orderStatus/updateStartTime/updateEndTime/page/pageSize
@@ -1368,39 +1418,36 @@ async function syncOrdersByUser(userId, options = {}) {
 
     if (canReconcileOrder3Off) {
         try {
-            result.order_cooldown = await reconcileOrderCooldownEntryByUser(uid);
-        } catch (e) {
-            result.order_cooldown = { error: String(e.message || e) };
-            result.ok = false;
-        }
-    } else {
-        result.order_cooldown = {
-            skipped: true,
-            reason: expectedPlatforms.length === 0
-                ? 'no_authorized_platform'
-                : 'authorized_platform_sync_incomplete',
-            missing_platforms: missingPlatforms
-        };
-    }
-
-    if (canReconcileOrder3Off) {
-        try {
             const currentUser = options.user && Number(options.user.id) === uid
                 ? options.user
                 : { id: uid, switch: { order_3_off: true } };
-            result.order_3_off = await reconcileOrder3OffBlacklistByUser(currentUser);
+            result.order_off = await reconcileOrderOffByUser(currentUser);
+            result.order_cooldown = result.order_off.cooldown;
+            result.order_3_off = result.order_off.n_off;
         } catch (e) {
-            result.order_3_off = { error: String(e.message || e) };
+            const error = { error: String(e.message || e) };
+            result.order_off = error;
+            result.order_cooldown = error;
+            result.order_3_off = error;
             result.ok = false;
         }
     } else {
-        result.order_3_off = {
+        const skipped = {
             skipped: true,
             reason: expectedPlatforms.length === 0
                 ? 'no_authorized_platform'
                 : 'authorized_platform_sync_incomplete',
             missing_platforms: missingPlatforms
         };
+        result.order_off = {
+            skipped: true,
+            reason: skipped.reason,
+            missing_platforms: skipped.missing_platforms,
+            cooldown: skipped,
+            n_off: skipped
+        };
+        result.order_cooldown = skipped;
+        result.order_3_off = skipped;
     }
 
     result.finished_at = new Date().toISOString();
@@ -1459,6 +1506,7 @@ module.exports = {
     syncZuhaowangOrdersToDb,
     syncOrdersByUser,
     syncOrdersForAllUsers,
+    reconcileOrderOffByUser,
     listOrdersForUser,
     getOrderComplaintDetailByUser,
     getOrderDetailViewByUser,
