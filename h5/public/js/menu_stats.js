@@ -160,6 +160,10 @@
           <p class="stats-kpi-value stats-kpi-value-order-cnt">${Number(summary.order_cnt_effective || 0)}</p>
         </div>
         <div class="stats-kpi-card">
+          <p class="stats-kpi-key">历史总收入</p>
+          <p class="stats-kpi-value money">¥${Number(summary.total_rec_amount_all_time || 0).toFixed(2)}</p>
+        </div>
+        <div class="stats-kpi-card">
           <p class="stats-kpi-key">实收总额</p>
           <p class="stats-kpi-value money">¥${Number(summary.amount_rec_sum || 0).toFixed(2)}</p>
         </div>
@@ -217,9 +221,10 @@
               <p class="stats-acc-name">${gameIconByName(x.game_name) ? `<span class="game-avatar"><img src="${gameIconByName(x.game_name)}" alt="${x.game_name || ''}" loading="lazy" decoding="async"></span>` : ''}${x.display_name || x.role_name || x.game_account || '-'}</p>
               <span class="stats-acc-money">¥${Number(x.amount_rec_sum || 0).toFixed(2)}</span>
             </div>
-            <p class="stats-acc-meta">账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)} · 采购：${x.purchase_date || '-'}</p>
+            <p class="stats-acc-meta">账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)} · 历史总收入：¥${Number(x.total_rec_amount_all_time || 0).toFixed(2)} · 采购：${x.purchase_date || '-'}</p>
             <div class="stats-acc-grid">
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">账号成本</p><p class="stats-acc-chip-v">¥${Number(x.purchase_base || 0).toFixed(2)}</p></div>
+              <div class="stats-acc-chip"><p class="stats-acc-chip-k">历史总收入</p><p class="stats-acc-chip-v">¥${Number(x.total_rec_amount_all_time || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">年化(单利)</p><p class="stats-acc-chip-v">${(Number(x.annualized_return_rate || 0) * 100).toFixed(2)}%</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">日均单数</p><p class="stats-acc-chip-v">${Number(x.avg_daily_order_cnt || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">日均时长</p><p class="stats-acc-chip-v">${Number(x.avg_daily_rent_hour || 0).toFixed(2)}h</p></div>

@@ -16,6 +16,7 @@ const { initOrderDb } = require('./order_db');
 const { initOrderSyncDb } = require('./order_sync_db');
 const { initOrderStatsDailyDb } = require('./order_stats_daily_db');
 const { initOrderStatsCostDailyDb } = require('./order_stats_cost_daily_db');
+const { initOrderStatsWeeklySnapshotDb } = require('./order_stats_weekly_snapshot_db');
 const { initOrderStatsJobStateDb } = require('./order_stats_job_state_db');
 const { initOrderComplaintDb } = require('./order_complaint_db');
 const { initOrderDetailDb } = require('./order_detail_db');
@@ -50,6 +51,7 @@ async function main() {
     await initOrderSyncDb();
     await initOrderStatsDailyDb();
     await initOrderStatsCostDailyDb();
+    await initOrderStatsWeeklySnapshotDb();
     await initOrderStatsJobStateDb();
     await initOrderComplaintDb();
     await initOrderDetailDb();

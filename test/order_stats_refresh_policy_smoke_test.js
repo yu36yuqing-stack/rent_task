@@ -32,8 +32,13 @@ const {
     listOrderStatsRows
 } = require('../database/order_stats_daily_db');
 const {
+    initOrderStatsWeeklySnapshotDb,
+    listWeeklySnapshotsByUser
+} = require('../database/order_stats_weekly_snapshot_db');
+const {
     normalizeStatsRefreshRange,
-    refreshOrderStatsDailyByUser
+    refreshOrderStatsDailyByUser,
+    getOrderStatsDashboardByUser
 } = require('../stats/order_stats');
 
 function fail(msg) {
@@ -76,6 +81,7 @@ async function seedUserAndOrders(now) {
     await initUserGameAccountDb();
     await initOrderDb();
     await initOrderStatsDailyDb();
+    await initOrderStatsWeeklySnapshotDb();
 
     const user = await createUserByAdmin({
         account: `stats_smoke_${Date.now()}`,
@@ -162,6 +168,15 @@ async function main() {
 
     const rows14 = await listOrderStatsRows(userId, '2026-03-12', '2026-03-25', 'WZRY');
     assertTrue(rows14.length > 0, 'normal/backfill 后统计表可读');
+    const weeklyRows = await listWeeklySnapshotsByUser(userId, 'WZRY', '2026-03-25');
+    assertTrue(weeklyRows.length > 0, '刷新后已生成周累计快照');
+    const dashboard = await getOrderStatsDashboardByUser(userId, {
+        game_name: 'WZRY',
+        period: 'last7',
+        now
+    });
+    assertTrue(Number((((dashboard || {}).summary || {}).total_rec_amount_all_time || 0)) > 0, '看板返回历史总收入 KPI');
+    assertTrue(Number(((((dashboard || {}).by_account || [])[0] || {}).total_rec_amount_all_time || 0)) > 0, '看板返回账号历史总收入');
 
     const workerOut = execFileSync(process.execPath, [path.join(__dirname, '..', 'stats', 'order_stats_worker.js')], {
         cwd: path.join(__dirname, '..'),

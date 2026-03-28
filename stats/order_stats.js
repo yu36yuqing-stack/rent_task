@@ -15,6 +15,11 @@ const {
     listCostSnapshotsByUser
 } = require('../database/order_stats_cost_daily_db');
 const {
+    initOrderStatsWeeklySnapshotDb,
+    replaceWeeklySnapshotsFromDate,
+    listWeeklySnapshotsByUser
+} = require('../database/order_stats_weekly_snapshot_db');
+const {
     initOrderStatsJobStateDb,
     getLastRunDate,
     setLastRunDate
@@ -292,6 +297,21 @@ function normalizeStatsRefreshRange(options = {}) {
     };
 }
 
+function compareDateText(a, b) {
+    return String(a || '').localeCompare(String(b || ''));
+}
+
+function getWeekStartDateText(dateText) {
+    const base = getNaturalDayStartByDateText(dateText);
+    const weekday = base.getDay() || 7;
+    return toDateText(addDays(base, 1 - weekday));
+}
+
+function getWeekEndDateText(dateText) {
+    const weekStart = getNaturalDayStartByDateText(getWeekStartDateText(dateText));
+    return toDateText(addDays(weekStart, 6));
+}
+
 function reduceRows(rows = []) {
     const out = {
         order_cnt_total: 0,
@@ -437,9 +457,124 @@ async function listConfiguredGamesByUser(userId) {
     }
 }
 
+async function listDailyIncomeRowsForAccountByGame(userId, gameName, endDate) {
+    await initOrderStatsDailyDb();
+    const uid = Number(userId || 0);
+    const g = String(gameName || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
+    const end = String(endDate || '').slice(0, 10);
+    if (!uid) throw new Error('user_id 不合法');
+    if (!end) throw new Error('end_date 不能为空');
+    const db = openStatsDatabase();
+    try {
+        return await all(db, `
+            SELECT stat_date, game_account, ROUND(SUM(amount_rec_sum), 2) AS amount_rec_sum
+            FROM order_stats_daily
+            WHERE user_id = ?
+              AND game_name = ?
+              AND stat_date <= ?
+              AND is_deleted = 0
+            GROUP BY stat_date, game_account
+            ORDER BY stat_date ASC, game_account ASC
+        `, [uid, g, end]);
+    } finally {
+        db.close();
+    }
+}
+
+async function refreshWeeklySnapshotsByUserAndGame(userId, gameName, options = {}) {
+    await initOrderStatsWeeklySnapshotDb();
+    const uid = Number(userId || 0);
+    const g = String(gameName || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
+    if (!uid) throw new Error('user_id 不合法');
+    if (g === ALL_GAME_NAME) throw new Error('周快照刷新不支持 全部 游戏聚合');
+    const refreshRange = normalizeStatsRefreshRange(options);
+    const rebuildWeekEnd = getWeekEndDateText(refreshRange.start_date);
+    const sourceRows = await listDailyIncomeRowsForAccountByGame(uid, g, refreshRange.end_date);
+    const cumulativeByAccount = new Map();
+    const snapshotRowMap = new Map();
+    for (const row of sourceRows) {
+        const statDate = String(row.stat_date || '').slice(0, 10);
+        const account = String(row.game_account || '').trim();
+        if (!statDate || !account) continue;
+        const nextTotal = toMoney2(Number(cumulativeByAccount.get(account) || 0) + Number(row.amount_rec_sum || 0));
+        cumulativeByAccount.set(account, nextTotal);
+        const weekEnd = getWeekEndDateText(statDate);
+        if (compareDateText(weekEnd, rebuildWeekEnd) < 0) continue;
+        snapshotRowMap.set(`${weekEnd}::${account}`, {
+            game_account: account,
+            week_start_date: getWeekStartDateText(statDate),
+            week_end_date: weekEnd,
+            snapshot_date: weekEnd,
+            total_rec_amount: nextTotal
+        });
+    }
+    const rows = Array.from(snapshotRowMap.values())
+        .sort((a, b) => compareDateText(a.snapshot_date, b.snapshot_date) || String(a.game_account || '').localeCompare(String(b.game_account || '')));
+    await replaceWeeklySnapshotsFromDate(uid, g, rebuildWeekEnd, rows, String(options.desc || 'weekly snapshot refresh by stats/order_stats').trim());
+    return {
+        user_id: uid,
+        game_name: g,
+        rebuild_from_week_end: rebuildWeekEnd,
+        snapshot_count: rows.length
+    };
+}
+
+async function buildHistoricalTotalMapByUser(userId, gameName, targetDate, configuredRows = []) {
+    const uid = Number(userId || 0);
+    const target = String(targetDate || '').slice(0, 10);
+    const g = String(gameName || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
+    if (!uid || !target) return new Map();
+    if (g === ALL_GAME_NAME) {
+        const byGame = new Map();
+        for (const row of Array.isArray(configuredRows) ? configuredRows : []) {
+            const rowGame = String(row.game_name || '').trim();
+            if (!rowGame) continue;
+            const arr = byGame.get(rowGame) || [];
+            arr.push(row);
+            byGame.set(rowGame, arr);
+        }
+        const merged = new Map();
+        for (const [oneGame, rows] of byGame.entries()) {
+            const oneMap = await buildHistoricalTotalMapByUser(uid, oneGame, target, rows);
+            for (const [account, amount] of oneMap.entries()) {
+                merged.set(account, toMoney2(Number(merged.get(account) || 0) + Number(amount || 0)));
+            }
+        }
+        return merged;
+    }
+
+    const accountSet = new Set((configuredRows || []).map((row) => String(row.game_account || '').trim()).filter(Boolean));
+    if (accountSet.size === 0) return new Map();
+
+    const snapshotRows = await listWeeklySnapshotsByUser(uid, g, target);
+    const latestSnapshotByAccount = new Map();
+    for (const row of snapshotRows) {
+        const account = String(row.game_account || '').trim();
+        if (!accountSet.has(account)) continue;
+        if (!latestSnapshotByAccount.has(account)) latestSnapshotByAccount.set(account, row);
+    }
+    const dailyRows = await listDailyIncomeRowsForAccountByGame(uid, g, target);
+    const totalMap = new Map();
+    for (const account of accountSet) {
+        const base = latestSnapshotByAccount.get(account);
+        totalMap.set(account, toMoney2(base ? base.total_rec_amount : 0));
+    }
+    for (const row of dailyRows) {
+        const account = String(row.game_account || '').trim();
+        if (!accountSet.has(account)) continue;
+        const statDate = String(row.stat_date || '').slice(0, 10);
+        const base = latestSnapshotByAccount.get(account);
+        const snapshotDate = String(base && base.snapshot_date || '').slice(0, 10);
+        if (snapshotDate && compareDateText(statDate, snapshotDate) <= 0) continue;
+        totalMap.set(account, toMoney2(Number(totalMap.get(account) || 0) + Number(row.amount_rec_sum || 0)));
+    }
+    return totalMap;
+}
+
 async function refreshOrderStatsDailyByUser(userId, options = {}) {
     await initOrderStatsDailyDb();
     await initOrderStatsCostDailyDb();
+    await initOrderStatsWeeklySnapshotDb();
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
     const refreshRange = normalizeStatsRefreshRange(options);
@@ -484,12 +619,18 @@ async function refreshOrderStatsDailyByUser(userId, options = {}) {
     const todayConfigured = configured.filter((x) => String(x.purchase_date || '').slice(0, 10) <= todayStatDate);
     const todayCostBase = toMoney2(todayConfigured.reduce((sum, x) => sum + toMoney2(x.purchase_price || 0), 0));
     await upsertCostSnapshotForDay(uid, todayStatDate, gameName, todayCostBase, todayConfigured.length, desc);
+    const weeklySnapshot = await refreshWeeklySnapshotsByUserAndGame(uid, gameName, {
+        ...options,
+        game_name: gameName,
+        desc
+    });
 
     return {
         user_id: uid,
         game_name: gameName,
         days,
         touched,
+        weekly_snapshot: weeklySnapshot,
         configured_accounts: configured.length,
         missing_accounts: (config.missing || []).length
     };
@@ -654,6 +795,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
     await initOrderStatsDailyDb();
+    await initOrderStatsWeeklySnapshotDb();
     const gameName = String(options.game_name || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
     const now = options.now instanceof Date ? options.now : new Date();
     const pickedDate = normalizeStatDateText(options.stat_date);
@@ -675,6 +817,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
             })
             .filter(([k]) => Boolean(k))
     );
+    const historicalTotalMap = await buildHistoricalTotalMapByUser(uid, gameName, periodInfo.endDate, config.configured || []);
 
     const summary = reduceRows(rows);
     const periodDays = dateDiffDaysInclusive(periodInfo.startDate, periodInfo.endDate);
@@ -739,6 +882,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         const accountAnnualizedRate = accountPurchaseBase > 0
             ? (accountPeriodReturnRate * (365 / Math.max(1, accountAnnualizedDays)))
             : 0;
+        const totalRecAmountAllTime = toMoney2(historicalTotalMap.get(accountKey) || 0);
         return {
             game_account: rawAccount,
             game_name: String(cfgOne.game_name || (arr[0] && arr[0].game_name) || gameName).trim() || gameName,
@@ -746,6 +890,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
             display_name: displayName,
             purchase_base: accountPurchaseBase,
             purchase_date: accountPurchaseDate,
+            total_rec_amount_all_time: totalRecAmountAllTime,
             avg_daily_order_cnt: Number((Number(s.order_cnt_effective || 0) / periodDays).toFixed(4)),
             avg_daily_rent_hour: Number((Number(s.rent_hour_sum || 0) / periodDays).toFixed(4)),
             avg_order_price: Number((Number(s.amount_order_sum || 0) / orderBase).toFixed(4)),
@@ -779,6 +924,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const target3RateOverall = configuredCount > 0
         ? Number((summaryHitDaysByAccount / (configuredCount * periodDays)).toFixed(4))
         : 0;
+    const totalRecAmountAllTime = toMoney2(by_account.reduce((sum, x) => sum + Number(x.total_rec_amount_all_time || 0), 0));
 
     return {
         period: periodInfo.period,
@@ -790,6 +936,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         game_name: gameName,
         summary: {
             ...summary,
+            total_rec_amount_all_time: totalRecAmountAllTime,
             refund_rate: Number((summary.order_cnt_refund / orderBase).toFixed(4)),
             cancel_rate: Number((summary.order_cnt_cancel / orderBase).toFixed(4)),
             avg_daily_order_cnt: Number((Number(summary.order_cnt_effective || 0) / periodDays).toFixed(4)),
