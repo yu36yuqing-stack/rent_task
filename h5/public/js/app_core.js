@@ -187,6 +187,66 @@
         channels: [],
         rows: []
       },
+      board: {
+        loading: false,
+        query: '',
+        filter: 'all',
+        summary: {
+          board_count: 0,
+          mobile_count: 0,
+          account_count: 0
+        },
+        list: [],
+        smsSheet: {
+          open: false,
+          sending: false,
+          board_id: 0,
+          board_name: '',
+          mobile_id: 0,
+          mobile: '',
+          recipient: '',
+          content: '',
+          result_text: '',
+          result_type: ''
+        },
+        createSheet: {
+          open: false,
+          saving: false,
+          board_name: '',
+          board_ip: '',
+          result_text: '',
+          result_type: ''
+        },
+        mobileSlotSheet: {
+          open: false,
+          saving: false,
+          board_id: 0,
+          board_name: '',
+          slot_index: '',
+          mobile: '',
+          result_text: '',
+          result_type: ''
+        },
+        mobileAccountSheet: {
+          open: false,
+          saving: false,
+          board_id: 0,
+          mobile_slot_id: 0,
+          mobile: '',
+          account: '',
+          result_text: '',
+          result_type: ''
+        },
+        smsRecordSheet: {
+          open: false,
+          loading: false,
+          mobile_slot_id: 0,
+          title: '',
+          result_text: '',
+          result_type: '',
+          list: []
+        }
+      },
       authEditor: {
         open: false,
         platform: '',
@@ -281,6 +341,7 @@
       if (k === 'risk') return '风控中心';
       if (k === 'stats') return '统计看板';
       if (k === 'auth') return '授权管理';
+      if (k === 'board') return '板卡管理';
       if (k === 'profile') return '个人中心';
       return '商品列表';
     }
@@ -289,7 +350,7 @@
       try {
         const url = new URL(window.location.href);
         const m = String(url.searchParams.get('menu') || '').trim().toLowerCase();
-        if (m === 'orders' || m === 'risk' || m === 'stats' || m === 'auth' || m === 'profile' || m === 'products') return m;
+        if (m === 'orders' || m === 'risk' || m === 'stats' || m === 'auth' || m === 'board' || m === 'profile' || m === 'products') return m;
       } catch (_) {}
       return 'products';
     }
@@ -311,6 +372,7 @@
       orderComplaintView: document.getElementById('orderComplaintView'),
       statsView: document.getElementById('statsView'),
       authView: document.getElementById('authView'),
+      boardView: document.getElementById('boardView'),
       profileView: document.getElementById('profileView'),
       heroLoginView: document.getElementById('heroLoginView'),
       heroAppView: document.getElementById('heroAppView'),
@@ -366,6 +428,11 @@
       statsAccountTitle: document.getElementById('statsAccountTitle'),
       statsAccountList: document.getElementById('statsAccountList'),
       authChannelList: document.getElementById('authChannelList'),
+      boardAddBtn: document.getElementById('boardAddBtn'),
+      boardSearchInput: document.getElementById('boardSearchInput'),
+      boardFilterTabs: document.getElementById('boardFilterTabs'),
+      boardSummaryText: document.getElementById('boardSummaryText'),
+      boardListContainer: document.getElementById('boardListContainer'),
       profileAtMode: document.getElementById('profileAtMode'),
       profileAtModeNone: document.getElementById('profileAtModeNone'),
       profileAtModeOwner: document.getElementById('profileAtModeOwner'),
@@ -387,6 +454,38 @@
       statsCostDetailSummary: document.getElementById('statsCostDetailSummary'),
       statsCostDetailList: document.getElementById('statsCostDetailList'),
       statsCostDetailClose: document.getElementById('statsCostDetailClose'),
+      boardSmsSheet: document.getElementById('boardSmsSheet'),
+      boardSmsSheetTitle: document.getElementById('boardSmsSheetTitle'),
+      boardSmsSheetResult: document.getElementById('boardSmsSheetResult'),
+      boardSmsSender: document.getElementById('boardSmsSender'),
+      boardSmsRecipient: document.getElementById('boardSmsRecipient'),
+      boardSmsContent: document.getElementById('boardSmsContent'),
+      boardSmsSendBtn: document.getElementById('boardSmsSendBtn'),
+      boardSmsCloseBtn: document.getElementById('boardSmsCloseBtn'),
+      boardCreateSheet: document.getElementById('boardCreateSheet'),
+      boardCreateSheetResult: document.getElementById('boardCreateSheetResult'),
+      boardCreateName: document.getElementById('boardCreateName'),
+      boardCreateIp: document.getElementById('boardCreateIp'),
+      boardCreateSaveBtn: document.getElementById('boardCreateSaveBtn'),
+      boardCreateCloseBtn: document.getElementById('boardCreateCloseBtn'),
+      boardMobileSlotSheet: document.getElementById('boardMobileSlotSheet'),
+      boardMobileSlotSheetTitle: document.getElementById('boardMobileSlotSheetTitle'),
+      boardMobileSlotSheetResult: document.getElementById('boardMobileSlotSheetResult'),
+      boardMobileSlotMobile: document.getElementById('boardMobileSlotMobile'),
+      boardMobileSlotIndex: document.getElementById('boardMobileSlotIndex'),
+      boardMobileSlotSaveBtn: document.getElementById('boardMobileSlotSaveBtn'),
+      boardMobileSlotCloseBtn: document.getElementById('boardMobileSlotCloseBtn'),
+      boardMobileAccountSheet: document.getElementById('boardMobileAccountSheet'),
+      boardMobileAccountSheetTitle: document.getElementById('boardMobileAccountSheetTitle'),
+      boardMobileAccountSheetResult: document.getElementById('boardMobileAccountSheetResult'),
+      boardMobileAccountValue: document.getElementById('boardMobileAccountValue'),
+      boardMobileAccountSaveBtn: document.getElementById('boardMobileAccountSaveBtn'),
+      boardMobileAccountCloseBtn: document.getElementById('boardMobileAccountCloseBtn'),
+      boardSmsRecordSheet: document.getElementById('boardSmsRecordSheet'),
+      boardSmsRecordSheetTitle: document.getElementById('boardSmsRecordSheetTitle'),
+      boardSmsRecordSheetResult: document.getElementById('boardSmsRecordSheetResult'),
+      boardSmsRecordList: document.getElementById('boardSmsRecordList'),
+      boardSmsRecordCloseBtn: document.getElementById('boardSmsRecordCloseBtn'),
       prevPage: document.getElementById('prevPage'),
       nextPage: document.getElementById('nextPage'),
       pageInfo: document.getElementById('pageInfo'),
@@ -942,11 +1041,36 @@
       }
     }
 
+    async function loadBoardCardsSafe() {
+      if (typeof window.loadBoardCards === 'function') {
+        await window.loadBoardCards();
+      }
+    }
+
     function renderProfileViewSafe() {
       if (typeof window.renderProfileView === 'function') {
         window.renderProfileView();
       }
     }
+
+    function renderBoardViewSafe() {
+      if (typeof window.renderBoardView === 'function') {
+        window.renderBoardView();
+      }
+    }
+
+    function closeBoardSmsSheetSafe() {
+      if (typeof window.closeBoardSmsSheet === 'function') {
+        window.closeBoardSmsSheet();
+      }
+    }
+
+    function closeBoardEditorSheetsSafe() {
+      if (typeof window.closeBoardEditorSheets === 'function') {
+        window.closeBoardEditorSheets();
+      }
+    }
+
     function renderDrawer() {
       const opened = Boolean(state.drawerOpen);
       els.drawerMask.classList.toggle('hidden', !opened);
@@ -1024,6 +1148,7 @@
       const showRisk = loggedIn && state.currentMenu === 'risk';
       const showStats = loggedIn && state.currentMenu === 'stats';
       const showAuth = loggedIn && state.currentMenu === 'auth';
+      const showBoard = loggedIn && state.currentMenu === 'board';
       const showProfile = loggedIn && state.currentMenu === 'profile';
       els.listView.classList.toggle('hidden', !showProducts);
       els.orderView.classList.toggle('hidden', !showOrders || showOrderComplaint || showOrderDetail);
@@ -1032,6 +1157,7 @@
       if (els.orderDetailView) els.orderDetailView.classList.toggle('hidden', !showOrderDetail);
       els.statsView.classList.toggle('hidden', !showStats);
       els.authView.classList.toggle('hidden', !showAuth);
+      if (els.boardView) els.boardView.classList.toggle('hidden', !showBoard);
       if (els.profileView) els.profileView.classList.toggle('hidden', !showProfile);
       els.heroLoginView.classList.toggle('hidden', loggedIn);
       els.heroAppView.classList.toggle('hidden', !loggedIn);
@@ -1065,6 +1191,7 @@
         if (showRisk) renderRiskCenterView();
         if (showStats) renderStatsView();
         if (showAuth) renderAuthView();
+        if (showBoard) renderBoardViewSafe();
         if (showProfile) renderProfileViewSafe();
         renderDrawer();
         renderMoreOpsSheet();
@@ -1094,6 +1221,8 @@
         closeOrderOffThresholdSheet();
         closeAuthUuzuhaoSheet();
         closeAuthUhaozuSheet();
+        closeBoardSmsSheetSafe();
+        closeBoardEditorSheetsSafe();
         closeOrderOffModeHelp();
         els.statsMissingOverlay.classList.add('hidden');
         resetPullRefreshUi();
@@ -1129,6 +1258,66 @@
       };
       state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false };
       state.activeActionSheet = '';
+      state.board = {
+        loading: false,
+        query: '',
+        filter: 'all',
+        summary: {
+          board_count: 0,
+          mobile_count: 0,
+          account_count: 0
+        },
+        list: [],
+        smsSheet: {
+          open: false,
+          sending: false,
+          board_id: 0,
+          board_name: '',
+          mobile_id: 0,
+          mobile: '',
+          recipient: '',
+          content: '',
+          result_text: '',
+          result_type: ''
+        },
+        createSheet: {
+          open: false,
+          saving: false,
+          board_name: '',
+          board_ip: '',
+          result_text: '',
+          result_type: ''
+        },
+        mobileSlotSheet: {
+          open: false,
+          saving: false,
+          board_id: 0,
+          board_name: '',
+          slot_index: '',
+          mobile: '',
+          result_text: '',
+          result_type: ''
+        },
+        mobileAccountSheet: {
+          open: false,
+          saving: false,
+          board_id: 0,
+          mobile_slot_id: 0,
+          mobile: '',
+          account: '',
+          result_text: '',
+          result_type: ''
+        },
+        smsRecordSheet: {
+          open: false,
+          loading: false,
+          mobile_slot_id: 0,
+          title: '',
+          result_text: '',
+          result_type: '',
+          list: []
+        }
+      };
       state.purchaseSheet = {
         open: false,
         account: '',
@@ -1626,6 +1815,18 @@
           })();
           return;
         }
+        if (key === 'board') {
+          render();
+          (async () => {
+            try {
+              await loadBoardCardsSafe();
+              render();
+            } catch (e) {
+              showToast(e.message || '板卡管理加载失败');
+            }
+          })();
+          return;
+        }
         if (key === 'profile') {
           render();
           (async () => {
@@ -1717,6 +1918,9 @@
           await loadOrders();
           await loadRiskCenter();
           await loadStatsBoard();
+          if (state.currentMenu === 'board') {
+            await loadBoardCardsSafe();
+          }
         } catch {
           clearAuthState();
         }

@@ -3,6 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
+const { fetch } = require('undici');
 const { initUserDb, verifyUserLogin, getActiveUserById, updateUserNotifyConfigByUserId } = require('../database/user_db');
 const {
     initUserGameAccountDb,
@@ -88,6 +89,17 @@ const {
 const { tryAcquireLock, releaseLock } = require('../database/lock_db');
 const { createAuthBff } = require('./h5_bff/auth_bff');
 const { createOrderBff } = require('./h5_bff/order_bff');
+const {
+    DEFAULT_MGR_PATH,
+    initBoardCardDb,
+    listBoardCardsByUserTree,
+    getBoardCardByUser,
+    createBoardCardForUser,
+    createBoardMobileSlotForUser,
+    createBoardMobileAccountForUser,
+    listBoardSmsRecordsForUser,
+    sendBoardSmsByUser
+} = require('../board/board_service');
 const {
     getOrderStatsDashboardByUser,
     refreshOrderStatsDailyByUser,
@@ -195,6 +207,19 @@ function parseBearer(req) {
     return auth.slice(7).trim();
 }
 
+function escapeHtml(text) {
+    return String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeRegExp(text) {
+    return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 async function readJsonBody(req) {
     const chunks = [];
     for await (const c of req) chunks.push(c);
@@ -217,6 +242,19 @@ async function requireAuth(req) {
         throw httpError(401, e.message || 'token 无效或已过期');
     }
     return user;
+}
+
+async function requireBoardConsoleAuth(req, urlObj) {
+    const bearer = parseBearer(req);
+    const accessToken = bearer || String(urlObj.searchParams.get('access_token') || '').trim();
+    if (!accessToken) throw httpError(401, '未登录或 token 缺失');
+    let user = null;
+    try {
+        ({ user } = await parseAccessTokenOrThrow(accessToken));
+    } catch (e) {
+        throw httpError(401, e.message || 'token 无效或已过期');
+    }
+    return { user, accessToken };
 }
 
 function normalizePage(v, fallback) {
@@ -1632,6 +1670,219 @@ async function handleRiskCenterList(req, res, urlObj) {
     });
 }
 
+async function handleBoardCards(req, res) {
+    const user = await requireAuth(req);
+    const data = await listBoardCardsByUserTree(user);
+    return json(res, 200, {
+        ok: true,
+        summary: data.summary,
+        boards: data.boards
+    });
+}
+
+async function handleBoardCreate(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const data = await createBoardCardForUser(user, body || {});
+    return json(res, 200, {
+        ok: true,
+        message: '板卡已新增',
+        summary: data.summary,
+        boards: data.boards
+    });
+}
+
+async function handleBoardCreateMobileSlot(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const data = await createBoardMobileSlotForUser(user, body || {});
+    return json(res, 200, {
+        ok: true,
+        message: '卡位手机号已新增',
+        summary: data.summary,
+        boards: data.boards
+    });
+}
+
+async function handleBoardCreateMobileAccount(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const data = await createBoardMobileAccountForUser(user, body || {});
+    return json(res, 200, {
+        ok: true,
+        message: '手机号账号已新增',
+        summary: data.summary,
+        boards: data.boards
+    });
+}
+
+async function handleBoardSendSms(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const out = await sendBoardSmsByUser(user, body || {});
+    return json(res, 200, {
+        ok: true,
+        message: out.message,
+        data: out
+    });
+}
+
+async function handleBoardSmsRecords(req, res, urlObj) {
+    const user = await requireAuth(req);
+    const mobileSlotId = Number(urlObj.searchParams.get('mobile_slot_id') || 0);
+    if (!mobileSlotId) throw httpError(400, 'mobile_slot_id 不能为空');
+    const list = await listBoardSmsRecordsForUser(user, mobileSlotId);
+    return json(res, 200, {
+        ok: true,
+        list
+    });
+}
+
+function buildBoardProxyPrefix(boardId) {
+    return `/board-console/proxy/${encodeURIComponent(String(boardId || ''))}`;
+}
+
+function buildBoardProxyUrl(boardId, pathname, search = '', accessToken = '') {
+    const safePath = String(pathname || DEFAULT_MGR_PATH).startsWith('/')
+        ? String(pathname || DEFAULT_MGR_PATH)
+        : `/${String(pathname || DEFAULT_MGR_PATH)}`;
+    const query = new URLSearchParams(String(search || '').replace(/^\?/, ''));
+    if (accessToken) query.set('access_token', accessToken);
+    const queryText = query.toString();
+    return `${buildBoardProxyPrefix(boardId)}${safePath}${queryText ? `?${queryText}` : ''}`;
+}
+
+function rewriteBoardConsoleHtml(html, board, accessToken = '') {
+    const boardId = Number(board && board.id || 0);
+    const boardIp = String(board && board.board_ip || '').trim();
+    const proxyPrefix = buildBoardProxyPrefix(boardId);
+    const originPattern = new RegExp(`https?:\\/\\/${escapeRegExp(boardIp)}`, 'g');
+    let out = String(html || '').replace(originPattern, proxyPrefix);
+    out = out.replace(/(href|src|action)=("|')\/(?!\/)/g, `$1=$2${proxyPrefix}/`);
+    out = out.replace(/url\((['"]?)\/(?!\/)/g, `url($1${proxyPrefix}/`);
+    out = out.replace(/fetch\((['"])\/(?!\/)/g, `fetch($1${proxyPrefix}/`);
+    out = out.replace(/location\.href\s*=\s*(['"])\/(?!\/)/g, `location.href=$1${proxyPrefix}/`);
+    if (accessToken) {
+        out = out.replace(new RegExp(`${escapeRegExp(proxyPrefix)}([^"'\\s?#]*)`, 'g'), (all) => {
+            if (all.includes('access_token=')) return all;
+            return all.includes('?') ? `${all}&access_token=${encodeURIComponent(accessToken)}` : `${all}?access_token=${encodeURIComponent(accessToken)}`;
+        });
+    }
+    return out;
+}
+
+function rewriteBoardLocationHeader(location, board, accessToken = '') {
+    const raw = String(location || '').trim();
+    if (!raw) return '';
+    const boardId = Number(board && board.id || 0);
+    const boardIp = String(board && board.board_ip || '').trim();
+    if (raw.startsWith('/')) return buildBoardProxyUrl(boardId, raw, '', accessToken);
+    if (raw.startsWith(`http://${boardIp}`) || raw.startsWith(`https://${boardIp}`)) {
+        try {
+            const urlObj = new URL(raw);
+            return buildBoardProxyUrl(boardId, urlObj.pathname, urlObj.search, accessToken);
+        } catch {
+            return buildBoardProxyUrl(boardId, DEFAULT_MGR_PATH, '', accessToken);
+        }
+    }
+    return raw;
+}
+
+async function handleBoardConsoleView(req, res, urlObj) {
+    const { user, accessToken } = await requireBoardConsoleAuth(req, urlObj);
+    const boardId = Number(urlObj.searchParams.get('board_id') || 0);
+    const board = await getBoardCardByUser(user, boardId);
+    if (!board) throw httpError(404, '板卡不存在或无权限访问');
+    const title = `${escapeHtml(board.board_name)} · ${escapeHtml(board.board_ip)}`;
+    const iframeSrc = buildBoardProxyUrl(board.id, board.board_mgr_path || DEFAULT_MGR_PATH, '', accessToken);
+    const html = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>${title}</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #eef3f8; color: #203246; }
+    .page { min-height: 100vh; display: grid; grid-template-rows: auto 1fr; }
+    .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: #ffffff; border-bottom: 1px solid #dce6ef; }
+    .meta { display: grid; gap: 4px; }
+    .title { font-size: 15px; font-weight: 700; }
+    .sub { font-size: 12px; color: #607a94; }
+    .frame-wrap { padding: 10px; }
+    iframe { width: 100%; height: calc(100vh - 86px); border: 1px solid #dce6ef; border-radius: 14px; background: #fff; }
+    .btn { border: 1px solid #ccd9e5; background: #fff; color: #29435f; border-radius: 10px; padding: 8px 12px; font-size: 13px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="head">
+      <div class="meta">
+        <div class="title">${title}</div>
+        <div class="sub">内网管理页同源代理入口</div>
+      </div>
+      <button class="btn" type="button" onclick="window.close()">关闭</button>
+    </div>
+    <div class="frame-wrap">
+      <iframe src="${escapeHtml(iframeSrc)}" referrerpolicy="no-referrer"></iframe>
+    </div>
+  </div>
+</body>
+</html>`;
+    return text(res, 200, html, 'text/html; charset=utf-8');
+}
+
+async function handleBoardConsoleProxy(req, res, urlObj) {
+    const { user, accessToken } = await requireBoardConsoleAuth(req, urlObj);
+    const match = String(urlObj.pathname || '').match(/^\/board-console\/proxy\/(\d+)(\/.*)?$/);
+    const boardId = Number(match && match[1] || 0);
+    const proxyPath = String(match && match[2] || DEFAULT_MGR_PATH).trim() || DEFAULT_MGR_PATH;
+    const board = await getBoardCardByUser(user, boardId);
+    if (!board) throw httpError(404, '板卡不存在或无权限访问');
+    const targetUrl = `http://${board.board_ip}${proxyPath}${urlObj.search || ''}`;
+    const headers = {};
+    for (const [key, value] of Object.entries(req.headers || {})) {
+        const lowerKey = String(key || '').toLowerCase();
+        if (!value) continue;
+        if (lowerKey === 'host' || lowerKey === 'content-length' || lowerKey === 'authorization') continue;
+        headers[key] = value;
+    }
+    headers.host = board.board_ip;
+    const body = (req.method === 'GET' || req.method === 'HEAD') ? undefined : Buffer.concat(await (async () => {
+        const chunks = [];
+        for await (const one of req) chunks.push(one);
+        return chunks;
+    })());
+    const upstream = await fetch(targetUrl, {
+        method: req.method,
+        headers,
+        body,
+        redirect: 'manual'
+    });
+    const location = rewriteBoardLocationHeader(upstream.headers.get('location'), board, accessToken);
+    const responseHeaders = {
+        'Cache-Control': 'no-store'
+    };
+    const contentType = String(upstream.headers.get('content-type') || '').trim();
+    if (location) responseHeaders.Location = location;
+    if (contentType) responseHeaders['Content-Type'] = contentType;
+    if (req.method === 'HEAD') {
+        res.writeHead(upstream.status, responseHeaders);
+        res.end();
+        return;
+    }
+    if (contentType.includes('text/html')) {
+        const rawHtml = await upstream.text();
+        const outHtml = rewriteBoardConsoleHtml(rawHtml, board, accessToken);
+        res.writeHead(upstream.status, responseHeaders);
+        res.end(outHtml);
+        return;
+    }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    res.writeHead(upstream.status, responseHeaders);
+    res.end(buf);
+}
+
 function tryServeStatic(req, urlObj, res) {
     const reqPath = urlObj.pathname === '/' ? '/index.html' : urlObj.pathname;
     const fullPath = path.resolve(PUBLIC_DIR, `.${reqPath}`);
@@ -1702,6 +1953,7 @@ async function bootstrap() {
     await initUserRuleDb();
     await initProdRiskEventDb();
     await initProdGuardTaskDb();
+    await initBoardCardDb();
     await authBff.init();
     await orderBff.init();
     startProdRiskTaskWorker({ logger: console });
@@ -1740,6 +1992,14 @@ async function bootstrap() {
             if (req.method === 'GET' && urlObj.pathname === '/api/auth/platforms') return await authBff.handleGetPlatformAuthList(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/auth/platforms/upsert') return await authBff.handleUpsertPlatformAuth(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/auth/platforms/upsert-from-curl') return await authBff.handleUpsertPlatformAuthFromCurl(req, res);
+            if (req.method === 'GET' && urlObj.pathname === '/api/board-cards') return await handleBoardCards(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/board-cards') return await handleBoardCreate(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/board-cards/mobile-slots') return await handleBoardCreateMobileSlot(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/board-cards/mobile-accounts') return await handleBoardCreateMobileAccount(req, res);
+            if (req.method === 'GET' && urlObj.pathname === '/api/board-cards/sms-records') return await handleBoardSmsRecords(req, res, urlObj);
+            if (req.method === 'POST' && urlObj.pathname === '/api/board-cards/send-sms') return await handleBoardSendSms(req, res);
+            if (req.method === 'GET' && urlObj.pathname === '/board-console/view') return await handleBoardConsoleView(req, res, urlObj);
+            if (urlObj.pathname.startsWith('/board-console/proxy/')) return await handleBoardConsoleProxy(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/ping') return json(res, 200, { ok: true, ts: Date.now() });
 
             if ((req.method === 'GET' || req.method === 'HEAD') && tryServeStatic(req, urlObj, res)) return;

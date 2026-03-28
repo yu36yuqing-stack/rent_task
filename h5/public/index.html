@@ -122,6 +122,25 @@
       <div id="authChannelList" class="auth-channel-list"></div>
     </section>
 
+    <section id="boardView" class="hidden orders-view">
+      <div class="board-top-row">
+        <p class="auth-title">板卡管理</p>
+        <button id="boardAddBtn" class="btn btn-ghost btn-page-action">新增板卡</button>
+      </div>
+      <div class="board-head-bar">
+        <div class="field board-search-field">
+          <label for="boardSearchInput">搜索板卡 / 手机号 / account</label>
+          <input id="boardSearchInput" placeholder="输入板卡 IP、手机号或 account">
+        </div>
+      </div>
+      <div id="boardFilterTabs" class="orders-tabs board-filter-tabs">
+        <button class="orders-tab header-tab active" data-board-filter="all">全部</button>
+        <button class="orders-tab header-tab" data-board-filter="has_mobile">有手机号</button>
+      </div>
+      <p id="boardSummaryText" class="head-summary-text">共 0 张板卡，0 个手机号，0 个 account</p>
+      <div id="boardListContainer"></div>
+    </section>
+
     <section id="profileView" class="hidden profile-view">
       <div class="panel profile-card">
         <div class="profile-head-row">
@@ -212,6 +231,7 @@
         <button class="drawer-item" data-menu="stats" data-label="统计看板">统计看板</button>
         <button class="drawer-item" data-menu="risk" data-label="风控中心">风控中心</button>
         <button class="drawer-item" data-menu="auth" data-label="授权管理">授权管理</button>
+        <button class="drawer-item" data-menu="board" data-label="板卡管理">板卡管理</button>
         <button class="drawer-item" data-menu="profile" data-label="个人中心">个人中心</button>
       </div>
     </aside>
@@ -452,6 +472,113 @@
       </div>
     </div>
   </div>
+  <div id="boardSmsSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon">短</span>
+          <div id="boardSmsSheetTitle" class="sheet-title">发送短信</div>
+        </div>
+        <div id="boardSmsSheetResult" class="sheet-result"></div>
+      </div>
+      <div class="field" style="margin-top:0;">
+        <label for="boardSmsSender">发件人</label>
+        <input id="boardSmsSender" readonly>
+      </div>
+      <div class="field">
+        <label for="boardSmsRecipient">收件人</label>
+        <input id="boardSmsRecipient" placeholder="请输入收件人号码">
+      </div>
+      <div class="field">
+        <label for="boardSmsContent">短信</label>
+        <textarea id="boardSmsContent" class="sheet-textarea" rows="4" placeholder="请输入短信内容"></textarea>
+      </div>
+      <div class="sheet-actions">
+        <button id="boardSmsSendBtn" class="sheet-btn">发送</button>
+        <button id="boardSmsCloseBtn" class="sheet-btn">关闭</button>
+      </div>
+    </div>
+  </div>
+  <div id="boardCreateSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon">板</span>
+          <div class="sheet-title">新增板卡</div>
+        </div>
+        <div id="boardCreateSheetResult" class="sheet-result"></div>
+      </div>
+      <div class="field" style="margin-top:0;">
+        <label for="boardCreateName">板卡名称</label>
+        <input id="boardCreateName" placeholder="例如 板卡 C02">
+      </div>
+      <div class="field">
+        <label for="boardCreateIp">板卡 IP</label>
+        <input id="boardCreateIp" placeholder="例如 192.168.31.130">
+      </div>
+      <div class="sheet-actions">
+        <button id="boardCreateSaveBtn" class="sheet-btn">保存</button>
+        <button id="boardCreateCloseBtn" class="sheet-btn">关闭</button>
+      </div>
+    </div>
+  </div>
+  <div id="boardMobileSlotSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon">卡</span>
+          <div id="boardMobileSlotSheetTitle" class="sheet-title">新增卡位手机号</div>
+        </div>
+        <div id="boardMobileSlotSheetResult" class="sheet-result"></div>
+      </div>
+      <div class="field" style="margin-top:0;">
+        <label for="boardMobileSlotMobile">手机号</label>
+        <input id="boardMobileSlotMobile" placeholder="请输入 11 位手机号">
+      </div>
+      <div class="field">
+        <label for="boardMobileSlotIndex">卡槽</label>
+        <input id="boardMobileSlotIndex" placeholder="请输入 卡1 或 卡2">
+      </div>
+      <div class="sheet-actions">
+        <button id="boardMobileSlotSaveBtn" class="sheet-btn">保存</button>
+        <button id="boardMobileSlotCloseBtn" class="sheet-btn">关闭</button>
+      </div>
+    </div>
+  </div>
+  <div id="boardMobileAccountSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon">号</span>
+          <div id="boardMobileAccountSheetTitle" class="sheet-title">新增手机号账号</div>
+        </div>
+        <div id="boardMobileAccountSheetResult" class="sheet-result"></div>
+      </div>
+      <div class="field sheet-inline-field board-inline-entry" style="margin-top:0;">
+        <label for="boardMobileAccountValue">账号</label>
+        <input id="boardMobileAccountValue" placeholder="请输入账号">
+      </div>
+      <div class="sheet-actions">
+        <button id="boardMobileAccountSaveBtn" class="sheet-btn">保存</button>
+        <button id="boardMobileAccountCloseBtn" class="sheet-btn">关闭</button>
+      </div>
+    </div>
+  </div>
+  <div id="boardSmsRecordSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon">记</span>
+          <div id="boardSmsRecordSheetTitle" class="sheet-title">短信发送记录</div>
+        </div>
+        <div id="boardSmsRecordSheetResult" class="sheet-result"></div>
+      </div>
+      <div id="boardSmsRecordList" class="board-sms-record-list"></div>
+      <div class="sheet-actions">
+        <button id="boardSmsRecordCloseBtn" class="sheet-btn">关闭</button>
+      </div>
+    </div>
+  </div>
   <div id="globalLoading" class="global-loading hidden" aria-live="polite" aria-busy="true">
     <div class="global-loading-card">
       <span class="global-loading-spinner"></span>
@@ -464,5 +591,6 @@
   <script defer src="/js/menu_orders.js?v=20260303a"></script>
   <script defer src="/js/menu_risk.js?v=20260303a"></script>
   <script defer src="/js/menu_stats.js?v=20260328a"></script>
+  <script defer src="/js/menu_board.js?v=20260329a"></script>
 </body>
 </html>

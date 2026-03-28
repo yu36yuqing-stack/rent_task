@@ -1463,6 +1463,194 @@
       justify-content: center;
     }
 
+    #boardView.orders-view {
+      gap: 10px;
+    }
+
+    #boardView .board-top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    #boardView .board-head-bar {
+      display: grid;
+      gap: 8px;
+    }
+
+    #boardView .board-search-field {
+      margin-top: 0;
+    }
+
+    #boardView .board-filter-tabs {
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    #boardView .board-card {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid #d9e4ef;
+      background: #ffffff;
+    }
+
+    #boardView .board-card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    #boardView .board-card-title,
+    #boardView .board-mobile-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+      color: #1f3148;
+    }
+
+    #boardView .board-card-meta,
+    #boardView .board-mobile-meta {
+      margin: 4px 0 0;
+      font-size: 12px;
+      color: #607a94;
+    }
+
+    #boardView .board-mobile-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    #boardView .board-mobile-card {
+      border: 1px solid #e3ebf4;
+      border-radius: 12px;
+      padding: 10px;
+      background: #fbfdff;
+      display: grid;
+      gap: 8px;
+    }
+
+    #boardView .board-mobile-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    #boardView .board-card-actions,
+    #boardView .board-mobile-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .board-inline-entry {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .board-inline-entry label {
+      margin-bottom: 0;
+      white-space: nowrap;
+      min-width: 32px;
+    }
+
+    .board-sms-record-list {
+      display: grid;
+      gap: 8px;
+      max-height: 48vh;
+      overflow: auto;
+    }
+
+    .board-sms-record-item {
+      border: 1px solid #dfe8f1;
+      border-radius: 12px;
+      padding: 10px;
+      background: #fbfdff;
+      display: grid;
+      gap: 6px;
+    }
+
+    .board-sms-record-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .board-sms-record-time {
+      font-size: 12px;
+      color: #607a94;
+    }
+
+    .board-sms-record-status {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      background: #edf4fb;
+      color: #35506d;
+    }
+
+    .board-sms-record-status.ok {
+      background: #ecfbf3;
+      color: #0b6a40;
+    }
+
+    .board-sms-record-status.err {
+      background: #fff4f5;
+      color: #b5423b;
+    }
+
+    .board-sms-record-line {
+      font-size: 13px;
+      color: #29435f;
+      line-height: 1.45;
+      word-break: break-all;
+    }
+
+    .board-sms-record-empty {
+      padding: 12px;
+      text-align: center;
+      font-size: 13px;
+      color: #607a94;
+    }
+
+    #boardView .board-account-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    #boardView .board-account-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #edf4fb;
+      color: #35506d;
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    #boardView .board-account-empty,
+    #boardView .board-empty {
+      font-size: 13px;
+      color: #607a94;
+    }
+
+    #boardView .board-empty {
+      padding: 14px 12px;
+    }
+
     .products-tabs-row {
       display: flex;
       align-items: center;

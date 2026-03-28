@@ -56,6 +56,13 @@
   - `#profileView .profile-threshold-input-wrap`：阈值输入容器（含单位）
   - `#profileView .profile-threshold-input`：阈值数字输入框样式
   - `#profileView .profile-threshold-unit`：阈值单位文案
+- Board（页面锚点变体）
+  - `#boardView .board-top-row`：板卡页标题和新增按钮行
+  - `#boardView .board-card`：板卡主卡片容器（基于 `.panel` 的页面变体）
+  - `#boardView .board-card-head`：板卡卡片头部横向布局
+  - `#boardView .board-mobile-card`：手机号子卡片
+  - `#boardView .board-account-list`：account 标签列表
+  - `#boardView .board-account-tag`：account 标签
 - Products（页面锚点变体）
   - `#listView .product-filters`：商品页筛选容器（复用 `.orders-tabs`）
   - `#listView .product-filter-tab`：商品页筛选项（复用 `.orders-tab`）

@@ -869,6 +869,26 @@ async function listOwnersByGameAccounts(gameAccounts = [], gameName = '') {
     }
 }
 
+async function getAliveUserGameAccountByUserAndAccount(userId, gameAccount) {
+    await initUserGameAccountDb();
+    const uid = Number(userId || 0);
+    const acc = String(gameAccount || '').trim();
+    if (!uid || !acc) return null;
+    const db = openDatabase();
+    try {
+        const row = await get(db, `
+            SELECT *
+            FROM user_game_account
+            WHERE user_id = ? AND game_account = ? AND is_deleted = 0
+            ORDER BY modify_date DESC, id DESC
+            LIMIT 1
+        `, [uid, acc]);
+        return row ? rowToAccount(row) : null;
+    } finally {
+        db.close();
+    }
+}
+
 async function listAccountRemarksByUserAndAccounts(userId, gameAccounts = []) {
     await initUserGameAccountDb();
     const uid = Number(userId || 0);
@@ -1211,6 +1231,7 @@ module.exports = {
     softDeleteEmptyAccountsByUser,
     listUserGameAccounts,
     listOwnersByGameAccounts,
+    getAliveUserGameAccountByUserAndAccount,
     listAccountRemarksByUserAndAccounts,
     listAccountRemarksByUserAndIdentities,
     updateUserGameAccountPurchaseByUserAndAccount,
