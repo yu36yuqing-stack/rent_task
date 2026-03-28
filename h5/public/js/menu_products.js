@@ -338,11 +338,19 @@
     function buildPurchaseBriefHtml(item) {
       const p = Number(item && item.purchase_price);
       const d = String(item && item.purchase_date || '').slice(0, 10);
-      if (!Number.isFinite(p) || p <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return '';
+      const totalCost = Number(item && item.total_cost_amount || 0);
+      if ((!Number.isFinite(p) || p <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(d)) && (!Number.isFinite(totalCost) || totalCost <= 0)) return '';
+      const parts = [];
+      if (Number.isFinite(p) && p > 0 && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        parts.push(`<span class="purchase-brief-line">采购价 ¥${p.toFixed(2)}</span>`);
+        parts.push(`<span class="purchase-brief-line">采购日期 ${d}</span>`);
+      }
+      if (Number.isFinite(totalCost) && totalCost > 0 && (!Number.isFinite(p) || p <= 0 || Math.abs(totalCost - p) >= 0.01)) {
+        parts.push(`<span class="purchase-brief-line">总成本 ¥${totalCost.toFixed(2)}</span>`);
+      }
       return `
         <div class="purchase-brief">
-          <span class="purchase-brief-line">采购价 ¥${p.toFixed(2)}</span>
-          <span class="purchase-brief-line">采购日期 ${d}</span>
+          ${parts.join('')}
         </div>
       `;
     }
@@ -506,6 +514,9 @@
           : (maintenanceEnabled ? '结束维护' : '开启维护');
       }
       els.moreOpsPurchaseBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+      if (els.moreOpsCostBtn) {
+        els.moreOpsCostBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+      }
       els.moreOpsCloseBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
       els.moreOpsForbiddenBtn.textContent = handling ? '处理中...' : '处理禁玩';
     }
@@ -667,6 +678,65 @@
       renderPurchaseSheet();
     }
 
+    function renderCostSheet() {
+      const opened = Boolean(state.costSheet && state.costSheet.open);
+      els.costSheet.classList.toggle('hidden', !opened);
+      if (!opened) return;
+
+      const titleName = String(state.costSheet.role_name || state.costSheet.account || '').trim() || '当前账号';
+      const resultText = String(state.costSheet.result_text || '').trim();
+      const resultType = String(state.costSheet.result_type || '').trim();
+      const loading = Boolean(state.costSheet.loading);
+
+      els.costSheetTitle.textContent = `维护成本记录 · ${titleName}`;
+      els.costSheetResult.className = `sheet-result ${resultType}`;
+      els.costSheetResult.textContent = resultText;
+      els.costAmountInput.value = String(state.costSheet.cost_amount || '');
+      els.costDateInput.value = String(state.costSheet.cost_date || '');
+      els.costDescInput.value = String(state.costSheet.cost_desc || '');
+      els.costAmountInput.disabled = loading;
+      els.costDateInput.disabled = loading;
+      els.costDescInput.disabled = loading;
+      els.costSaveBtn.disabled = loading;
+      els.costCancelBtn.disabled = loading;
+    }
+
+    function openCostSheet(item) {
+      const account = String(item && item.game_account || '').trim();
+      if (!account) return;
+      state.costSheet = {
+        open: true,
+        account,
+        game_id: String(item && item.game_id || '1').trim() || '1',
+        game_name: String(item && item.game_name || 'WZRY').trim() || 'WZRY',
+        role_name: String(item && (item.role_name || item.game_account) || '').trim(),
+        cost_amount: '',
+        cost_date: '',
+        cost_desc: '',
+        result_text: '',
+        result_type: '',
+        loading: false
+      };
+      renderCostSheet();
+    }
+
+    function closeCostSheet() {
+      state.costSheet = {
+        open: false,
+        account: '',
+        game_id: '1',
+        game_name: 'WZRY',
+        role_name: '',
+        cost_amount: '',
+        cost_date: '',
+        cost_desc: '',
+        result_text: '',
+        result_type: '',
+        loading: false
+      };
+      renderCostSheet();
+    }
+
     async function submitPurchaseConfig() {
       const account = String((state.purchaseSheet || {}).account || '').trim();
       const gameId = String((state.purchaseSheet || {}).game_id || '1').trim() || '1';
@@ -705,12 +775,14 @@
         });
         const savedPrice = Number(out && out.data && out.data.purchase_price || 0);
         const savedDate = String(out && out.data && out.data.purchase_date || '').slice(0, 10);
+        const savedTotalCost = Number(out && out.data && out.data.total_cost_amount || 0);
         state.list = (state.list || []).map((x) => {
           if (String(x && x.game_account || '').trim() !== account || String((x && x.game_id) || '1').trim() !== gameId) return x;
           return {
             ...x,
             purchase_price: Number(savedPrice.toFixed(2)),
-            purchase_date: savedDate
+            purchase_date: savedDate,
+            total_cost_amount: Number(savedTotalCost.toFixed(2))
           };
         });
         state.purchaseSheet.result_text = '保存成功';
@@ -728,6 +800,71 @@
       } finally {
         state.purchaseSheet.loading = false;
         renderPurchaseSheet();
+      }
+    }
+
+    async function submitCostConfig() {
+      const account = String((state.costSheet || {}).account || '').trim();
+      const gameId = String((state.costSheet || {}).game_id || '1').trim() || '1';
+      const gameName = String((state.costSheet || {}).game_name || 'WZRY').trim() || 'WZRY';
+      if (!account) return;
+      const amountRaw = String(els.costAmountInput.value || '').trim();
+      const dateVal = String(els.costDateInput.value || '').trim();
+      const descVal = String(els.costDescInput.value || '').trim();
+      const amountNum = Number(amountRaw);
+      if (!Number.isFinite(amountNum) || amountNum < 0) {
+        state.costSheet.result_text = '成本价格不合法';
+        state.costSheet.result_type = 'err';
+        renderCostSheet();
+        return;
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
+        state.costSheet.result_text = '请选择成本日期';
+        state.costSheet.result_type = 'err';
+        renderCostSheet();
+        return;
+      }
+
+      state.costSheet.loading = true;
+      state.costSheet.result_text = '保存中...';
+      state.costSheet.result_type = '';
+      renderCostSheet();
+      try {
+        const out = await request('/api/products/account-cost/create', {
+          method: 'POST',
+          body: JSON.stringify({
+            game_account: account,
+            game_id: gameId,
+            game_name: gameName,
+            cost_amount: Number(amountNum.toFixed(2)),
+            cost_date: dateVal,
+            cost_type: 'maintenance',
+            cost_desc: descVal
+          })
+        });
+        const savedTotalCost = Number(out && out.data && out.data.total_cost_amount || 0);
+        state.list = (state.list || []).map((x) => {
+          if (String(x && x.game_account || '').trim() !== account || String((x && x.game_id) || '1').trim() !== gameId) return x;
+          return {
+            ...x,
+            total_cost_amount: Number(savedTotalCost.toFixed(2))
+          };
+        });
+        state.costSheet.result_text = '保存成功';
+        state.costSheet.result_type = 'ok';
+        renderCostSheet();
+        showToast('成本记录已保存');
+        setTimeout(() => {
+          closeCostSheet();
+          renderList();
+        }, 220);
+      } catch (e) {
+        state.costSheet.result_text = String(e && e.message ? e.message : '保存失败');
+        state.costSheet.result_type = 'err';
+        renderCostSheet();
+      } finally {
+        state.costSheet.loading = false;
+        renderCostSheet();
       }
     }
 

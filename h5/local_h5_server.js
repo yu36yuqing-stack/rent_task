@@ -7,9 +7,13 @@ const { initUserDb, verifyUserLogin, getActiveUserById, updateUserNotifyConfigBy
 const {
     initUserGameAccountDb,
     listUserGameAccounts,
-    updateUserGameAccountPurchaseByUserAndAccount,
     updateUserGameAccountSwitchByUserAndAccount
 } = require('../database/user_game_account_db');
+const {
+    initAccountCostRecordDb,
+    migrateAccountCostRecordFromMainToStatsIfNeeded,
+    backfillPurchaseCostRecordsFromUserGameAccount
+} = require('../database/account_cost_record_db');
 const {
     initUserBlacklistDb,
     listUserBlacklistByUserWithMeta
@@ -70,6 +74,10 @@ const { resolveDisplayNameByRow } = require('../product/display_name');
 const { normalizeGameProfile } = require('../common/game_profile');
 const { listOrdersForUser, syncOrdersByUser } = require('../order/order');
 const {
+    savePurchaseCostByUserAndAccount,
+    createAccountCostByUserAndAccount
+} = require('../product/account_cost_service');
+const {
     COOLDOWN_RELEASE_RULE_NAME,
     DEFAULT_COOLDOWN_RELEASE_DELAY_MIN,
     MIN_COOLDOWN_RELEASE_DELAY_MIN,
@@ -83,7 +91,8 @@ const { createOrderBff } = require('./h5_bff/order_bff');
 const {
     getOrderStatsDashboardByUser,
     refreshOrderStatsDailyByUser,
-    getIncomeCalendarByUser
+    getIncomeCalendarByUser,
+    getAccountCostDetailByUser
 } = require('../stats/order_stats');
 
 const HOST = process.env.H5_HOST || '0.0.0.0';
@@ -705,6 +714,7 @@ async function handleProducts(req, res, urlObj) {
             display_name: resolveDisplayNameByRow(x, acc),
             purchase_price: Number(x.purchase_price || 0),
             purchase_date: String(x.purchase_date || '').slice(0, 10),
+            total_cost_amount: Number(x.total_cost_amount || 0),
             channel_status: channelStatus,
             platform_status_norm: platformStatusNorm,
             overall_status_norm: overallStatusNorm,
@@ -920,6 +930,18 @@ async function handleStatsCalendar(req, res, urlObj) {
     const gameName = String(urlObj.searchParams.get('game_name') || 'WZRY').trim() || 'WZRY';
     const data = await getIncomeCalendarByUser(user.id, {
         month,
+        game_name: gameName
+    });
+    return json(res, 200, { ok: true, ...data });
+}
+
+async function handleStatsAccountCostDetail(req, res, urlObj) {
+    const user = await requireAuth(req);
+    const gameAccount = String(urlObj.searchParams.get('game_account') || '').trim();
+    const gameName = String(urlObj.searchParams.get('game_name') || 'WZRY').trim() || 'WZRY';
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    const data = await getAccountCostDetailByUser(user.id, {
+        game_account: gameAccount,
         game_name: gameName
     });
     return json(res, 200, { ok: true, ...data });
@@ -1436,21 +1458,57 @@ async function handleProductPurchaseConfig(req, res) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(purchaseDate)) {
         return json(res, 400, { ok: false, message: 'purchase_date 格式应为 YYYY-MM-DD' });
     }
-    const out = await updateUserGameAccountPurchaseByUserAndAccount(
-        user.id,
-        gameAccount,
-        purchasePrice,
-        purchaseDate,
-        'manual purchase config by h5',
-        normalizedGame.game_id,
-        normalizedGame.game_name
-    );
+    const out = await savePurchaseCostByUserAndAccount(user.id, {
+        game_account: gameAccount,
+        game_id: normalizedGame.game_id,
+        game_name: normalizedGame.game_name,
+        purchase_price: purchasePrice,
+        purchase_date: purchaseDate,
+        purchase_desc: String(body.purchase_desc || '').trim()
+    });
+    const account = out && out.account ? out.account : {};
     return json(res, 200, {
         ok: true,
         data: {
-            game_account: out.game_account,
-            purchase_price: Number(out.purchase_price || 0),
-            purchase_date: String(out.purchase_date || '').slice(0, 10)
+            game_account: account.game_account,
+            purchase_price: Number(account.purchase_price || 0),
+            purchase_date: String(account.purchase_date || '').slice(0, 10),
+            total_cost_amount: Number(out && out.total_cost_amount || 0)
+        }
+    });
+}
+
+async function handleProductAccountCostCreate(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const gameAccount = String(body.game_account || '').trim();
+    const normalizedGame = normalizeGameProfile(body.game_id, body.game_name, { preserveUnknown: true });
+    const costAmount = Number(body.cost_amount);
+    const costDate = String(body.cost_date || '').trim();
+    const costType = String(body.cost_type || 'maintenance').trim() || 'maintenance';
+    const costDesc = String(body.cost_desc || '').trim();
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    if (!Number.isFinite(costAmount) || costAmount < 0) {
+        return json(res, 400, { ok: false, message: 'cost_amount 不合法' });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(costDate)) {
+        return json(res, 400, { ok: false, message: 'cost_date 格式应为 YYYY-MM-DD' });
+    }
+    const out = await createAccountCostByUserAndAccount(user.id, {
+        game_account: gameAccount,
+        game_id: normalizedGame.game_id,
+        game_name: normalizedGame.game_name,
+        cost_amount: costAmount,
+        cost_date: costDate,
+        cost_type: costType,
+        cost_desc: costDesc
+    });
+    return json(res, 200, {
+        ok: true,
+        data: {
+            game_account: String(out && out.account && out.account.game_account || gameAccount),
+            total_cost_amount: Number(out && out.total_cost_amount || 0),
+            record: out && out.record ? out.record : null
         }
     });
 }
@@ -1634,6 +1692,9 @@ function tryServeStatic(req, urlObj, res) {
 async function bootstrap() {
     await initUserDb();
     await initUserGameAccountDb();
+    await initAccountCostRecordDb();
+    await migrateAccountCostRecordFromMainToStatsIfNeeded();
+    await backfillPurchaseCostRecordsFromUserGameAccount();
     await initUserBlacklistDb();
     await initUserPlatformRestrictDb();
     await initOrderDb();
@@ -1658,6 +1719,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/orders/sync') return await handleOrderSyncNow(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/dashboard') return await handleStatsDashboard(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/calendar') return await handleStatsCalendar(req, res, urlObj);
+            if (req.method === 'GET' && urlObj.pathname === '/api/stats/account-cost-detail') return await handleStatsAccountCostDetail(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/stats/refresh') return await handleStatsRefresh(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/profile') return await handleGetProfile(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/profile/notify') return await handleSetProfileNotify(req, res);
@@ -1669,6 +1731,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/play') return await handleProductForbiddenPlay(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/query') return await handleProductForbiddenQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/purchase-config') return await handleProductPurchaseConfig(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/products/account-cost/create') return await handleProductAccountCostCreate(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/account-switch/toggle') return await handleProductAccountSwitchToggle(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/risk-center/events') return await handleRiskCenterList(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/add') return await handleBlacklistAdd(req, res);

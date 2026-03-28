@@ -163,6 +163,17 @@
         missing_purchase_accounts: [],
         configured_account_count: 0
       },
+      statsCostDetail: {
+        open: false,
+        loading: false,
+        game_account: '',
+        game_name: 'WZRY',
+        display_name: '',
+        total_cost_amount: 0,
+        purchase_cost_amount: 0,
+        list: [],
+        error: ''
+      },
       riskCenter: {
         status: 'all',
         risk_type: '',
@@ -238,6 +249,19 @@
         role_name: '',
         purchase_price: '',
         purchase_date: '',
+        result_text: '',
+        result_type: '',
+        loading: false
+      },
+      costSheet: {
+        open: false,
+        account: '',
+        game_id: '1',
+        game_name: 'WZRY',
+        role_name: '',
+        cost_amount: '',
+        cost_date: '',
+        cost_desc: '',
         result_text: '',
         result_type: '',
         loading: false
@@ -358,6 +382,11 @@
       statsMissingOverlay: document.getElementById('statsMissingOverlay'),
       statsMissingList: document.getElementById('statsMissingList'),
       statsMissingClose: document.getElementById('statsMissingClose'),
+      statsCostDetailSheet: document.getElementById('statsCostDetailSheet'),
+      statsCostDetailTitle: document.getElementById('statsCostDetailTitle'),
+      statsCostDetailSummary: document.getElementById('statsCostDetailSummary'),
+      statsCostDetailList: document.getElementById('statsCostDetailList'),
+      statsCostDetailClose: document.getElementById('statsCostDetailClose'),
       prevPage: document.getElementById('prevPage'),
       nextPage: document.getElementById('nextPage'),
       pageInfo: document.getElementById('pageInfo'),
@@ -381,6 +410,7 @@
       moreOpsProdGuardBtn: document.getElementById('moreOpsProdGuardBtn'),
       moreOpsMaintenanceBtn: document.getElementById('moreOpsMaintenanceBtn'),
       moreOpsPurchaseBtn: document.getElementById('moreOpsPurchaseBtn'),
+      moreOpsCostBtn: document.getElementById('moreOpsCostBtn'),
       moreOpsCloseBtn: document.getElementById('moreOpsCloseBtn'),
       purchaseSheet: document.getElementById('purchaseSheet'),
       purchaseSheetTitle: document.getElementById('purchaseSheetTitle'),
@@ -389,6 +419,14 @@
       purchaseDateInput: document.getElementById('purchaseDateInput'),
       purchaseSaveBtn: document.getElementById('purchaseSaveBtn'),
       purchaseCancelBtn: document.getElementById('purchaseCancelBtn'),
+      costSheet: document.getElementById('costSheet'),
+      costSheetTitle: document.getElementById('costSheetTitle'),
+      costSheetResult: document.getElementById('costSheetResult'),
+      costAmountInput: document.getElementById('costAmountInput'),
+      costDateInput: document.getElementById('costDateInput'),
+      costDescInput: document.getElementById('costDescInput'),
+      costSaveBtn: document.getElementById('costSaveBtn'),
+      costCancelBtn: document.getElementById('costCancelBtn'),
       orderOffThresholdSheet: document.getElementById('orderOffThresholdSheet'),
       orderOffThresholdSheetResult: document.getElementById('orderOffThresholdSheetResult'),
       orderOffThresholdInput: document.getElementById('orderOffThresholdInput'),
@@ -1103,6 +1141,30 @@
         result_type: '',
         loading: false
       };
+      state.costSheet = {
+        open: false,
+        account: '',
+        game_id: '1',
+        game_name: 'WZRY',
+        role_name: '',
+        cost_amount: '',
+        cost_date: '',
+        cost_desc: '',
+        result_text: '',
+        result_type: '',
+        loading: false
+      };
+      state.statsCostDetail = {
+        open: false,
+        loading: false,
+        game_account: '',
+        game_name: 'WZRY',
+        display_name: '',
+        total_cost_amount: 0,
+        purchase_cost_amount: 0,
+        list: [],
+        error: ''
+      };
       state.cardNodeMap = {};
       state.pullRefresh = { dragging: false, ready: false, loading: false, startY: 0, distance: 0 };
       state.statsBoard = {
@@ -1122,6 +1184,17 @@
         },
         missing_purchase_accounts: [],
         configured_account_count: 0
+      };
+      state.statsCostDetail = {
+        open: false,
+        loading: false,
+        game_account: '',
+        game_name: 'WZRY',
+        display_name: '',
+        total_cost_amount: 0,
+        purchase_cost_amount: 0,
+        list: [],
+        error: ''
       };
       state.riskCenter = {
         status: 'all',
@@ -1374,6 +1447,14 @@
       closeMoreOpsSheet();
       openPurchaseSheet(item);
     });
+    if (els.moreOpsCostBtn) {
+      els.moreOpsCostBtn.addEventListener('click', () => {
+        const item = findCurrentProductItem();
+        if (!item) return;
+        closeMoreOpsSheet();
+        openCostSheet(item);
+      });
+    }
     els.moreOpsCloseBtn.addEventListener('click', () => closeMoreOpsSheet());
     els.moreOpsSheet.addEventListener('click', (e) => {
       if (e.target === els.moreOpsSheet) closeMoreOpsSheet();
@@ -1383,6 +1464,17 @@
     els.purchaseSheet.addEventListener('click', (e) => {
       if (e.target === els.purchaseSheet) closePurchaseSheet();
     });
+    if (els.costSaveBtn) {
+      els.costSaveBtn.addEventListener('click', () => submitCostConfig());
+    }
+    if (els.costCancelBtn) {
+      els.costCancelBtn.addEventListener('click', () => closeCostSheet());
+    }
+    if (els.costSheet) {
+      els.costSheet.addEventListener('click', (e) => {
+        if (e.target === els.costSheet) closeCostSheet();
+      });
+    }
     if (els.authUuzuhaoSaveBtn) {
       els.authUuzuhaoSaveBtn.addEventListener('click', () => submitAuthUuzuhao());
     }
@@ -1462,6 +1554,17 @@
       n.addEventListener('click', () => {
         const key = String(n.getAttribute('data-menu') || '').trim();
         state.currentMenu = key || 'products';
+        state.statsCostDetail = {
+          open: false,
+          loading: false,
+          game_account: '',
+          game_name: 'WZRY',
+          display_name: '',
+          total_cost_amount: 0,
+          purchase_cost_amount: 0,
+          list: [],
+          error: ''
+        };
         closeActionSheets();
         closeAuthUuzuhaoSheet();
         closeAuthUhaozuSheet();
@@ -1549,6 +1652,8 @@
         (state.moreOpsSheet && state.moreOpsSheet.open) ||
         (state.forbiddenSheet && state.forbiddenSheet.open) ||
         (state.purchaseSheet && state.purchaseSheet.open) ||
+        (state.costSheet && state.costSheet.open) ||
+        (state.statsCostDetail && state.statsCostDetail.open) ||
         (state.authEditor && state.authEditor.open) ||
         (state.authCookieEditor && state.authCookieEditor.open)
       ) return;

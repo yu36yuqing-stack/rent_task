@@ -15,6 +15,102 @@
       els.statsMissingOverlay.classList.remove('hidden');
     }
 
+    function costTypeText(costType) {
+      const text = String(costType || '').trim().toLowerCase();
+      if (text === 'purchase') return '采购';
+      if (text === 'maintenance') return '维护';
+      return '其他';
+    }
+
+    function renderStatsCostDetailSheet() {
+      const d = state.statsCostDetail || {};
+      const opened = Boolean(d.open);
+      if (!els.statsCostDetailSheet) return;
+      els.statsCostDetailSheet.classList.toggle('hidden', !opened);
+      if (!opened) return;
+      els.statsCostDetailTitle.textContent = `成本明细 · ${String(d.display_name || d.game_account || '当前账号').trim() || '当前账号'}`;
+      if (d.loading) {
+        els.statsCostDetailSummary.className = 'sheet-result';
+        els.statsCostDetailSummary.textContent = '加载中...';
+        els.statsCostDetailList.innerHTML = '';
+        return;
+      }
+      const err = String(d.error || '').trim();
+      if (err) {
+        els.statsCostDetailSummary.className = 'sheet-result err';
+        els.statsCostDetailSummary.textContent = err;
+        els.statsCostDetailList.innerHTML = '';
+        return;
+      }
+      els.statsCostDetailSummary.className = 'sheet-result';
+      els.statsCostDetailSummary.textContent = `总成本 ¥${Number(d.total_cost_amount || 0).toFixed(2)} · 采购成本 ¥${Number(d.purchase_cost_amount || 0).toFixed(2)}`;
+      const list = Array.isArray(d.list) ? d.list : [];
+      if (list.length === 0) {
+        els.statsCostDetailList.innerHTML = '<div class="panel"><div style="color:#6d7a8a;font-size:13px;">暂无成本记录</div></div>';
+        return;
+      }
+      els.statsCostDetailList.innerHTML = list.map((x) => `
+        <div class="stats-cost-detail-item">
+          <div class="stats-cost-detail-top">
+            <p class="stats-cost-detail-date">${x.cost_date || '-'}</p>
+            <p class="stats-cost-detail-money">¥${Number(x.cost_amount || 0).toFixed(2)}</p>
+          </div>
+          <p class="stats-cost-detail-meta">类型：${costTypeText(x.cost_type)}${x.cost_desc ? ` · ${x.cost_desc}` : ''}</p>
+        </div>
+      `).join('');
+    }
+
+    function closeStatsCostDetailSheet() {
+      state.statsCostDetail = {
+        open: false,
+        loading: false,
+        game_account: '',
+        game_name: 'WZRY',
+        display_name: '',
+        total_cost_amount: 0,
+        purchase_cost_amount: 0,
+        list: [],
+        error: ''
+      };
+      renderStatsCostDetailSheet();
+    }
+
+    async function openStatsCostDetail(item) {
+      const gameAccount = String(item && item.game_account || '').trim();
+      const gameName = String(item && item.game_name || state.statsBoard.game_name || 'WZRY').trim() || 'WZRY';
+      if (!gameAccount) return;
+      state.statsCostDetail = {
+        open: true,
+        loading: true,
+        game_account: gameAccount,
+        game_name: gameName,
+        display_name: String(item && (item.display_name || item.role_name || item.game_account) || '').trim(),
+        total_cost_amount: Number(item && item.total_cost_amount || 0),
+        purchase_cost_amount: Number(item && item.purchase_cost_amount || item.purchase_base || 0),
+        list: [],
+        error: ''
+      };
+      renderStatsCostDetailSheet();
+      try {
+        const out = await request(`/api/stats/account-cost-detail?game_account=${encodeURIComponent(gameAccount)}&game_name=${encodeURIComponent(gameName)}`);
+        state.statsCostDetail = {
+          open: true,
+          loading: false,
+          game_account: String(out.game_account || gameAccount).trim(),
+          game_name: String(out.game_name || gameName).trim() || gameName,
+          display_name: String(out.display_name || state.statsCostDetail.display_name || gameAccount).trim(),
+          total_cost_amount: Number(out.total_cost_amount || 0),
+          purchase_cost_amount: Number(out.purchase_cost_amount || 0),
+          list: Array.isArray(out.list) ? out.list : [],
+          error: ''
+        };
+      } catch (e) {
+        state.statsCostDetail.loading = false;
+        state.statsCostDetail.error = String(e && e.message ? e.message : '成本明细加载失败');
+      }
+      renderStatsCostDetailSheet();
+    }
+
     function currentMonthText() {
       const d = new Date();
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -221,9 +317,10 @@
               <p class="stats-acc-name">${gameIconByName(x.game_name) ? `<span class="game-avatar"><img src="${gameIconByName(x.game_name)}" alt="${x.game_name || ''}" loading="lazy" decoding="async"></span>` : ''}${x.display_name || x.role_name || x.game_account || '-'}</p>
               <span class="stats-acc-money">¥${Number(x.amount_rec_sum || 0).toFixed(2)}</span>
             </div>
-            <p class="stats-acc-meta">账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)} · 历史总收入：¥${Number(x.total_rec_amount_all_time || 0).toFixed(2)} · 采购：${x.purchase_date || '-'}</p>
+            <p class="stats-acc-meta">账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)} · 采购：${x.purchase_date || '-'}</p>
             <div class="stats-acc-grid">
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">账号成本</p><p class="stats-acc-chip-v">¥${Number(x.purchase_base || 0).toFixed(2)}</p></div>
+              <div class="stats-acc-chip is-clickable" data-stats-cost-detail="${x.game_account || ''}" data-stats-cost-game="${x.game_name || ''}"><p class="stats-acc-chip-k">维护成本<span class="stats-acc-chip-mark">›</span></p><p class="stats-acc-chip-v">¥${Number(x.total_cost_amount || 0).toFixed(2)}</p></div>
+              <div class="stats-acc-chip"><p class="stats-acc-chip-k">采购成本</p><p class="stats-acc-chip-v">¥${Number(x.purchase_cost_amount || x.purchase_base || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">历史总收入</p><p class="stats-acc-chip-v">¥${Number(x.total_rec_amount_all_time || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">年化(单利)</p><p class="stats-acc-chip-v">${(Number(x.annualized_return_rate || 0) * 100).toFixed(2)}%</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">日均单数</p><p class="stats-acc-chip-v">${Number(x.avg_daily_order_cnt || 0).toFixed(2)}</p></div>
@@ -235,6 +332,15 @@
             </div>
           </div>
         `).join('');
+        Array.from(els.statsAccountList.querySelectorAll('[data-stats-cost-detail]')).forEach((n) => {
+          n.addEventListener('click', async () => {
+            const account = String(n.getAttribute('data-stats-cost-detail') || '').trim();
+            if (!account) return;
+            const item = list.find((x) => String(x.game_account || '').trim() === account) || null;
+            if (!item) return;
+            await openStatsCostDetail(item);
+          });
+        });
       }
 
       Array.from(els.statsPeriods.querySelectorAll('[data-stats-period]')).forEach((n) => {
@@ -260,4 +366,13 @@
         });
       }
       renderStatsMissingOverlay();
+      renderStatsCostDetailSheet();
+      if (els.statsCostDetailClose) {
+        els.statsCostDetailClose.onclick = () => closeStatsCostDetailSheet();
+      }
+      if (els.statsCostDetailSheet) {
+        els.statsCostDetailSheet.onclick = (e) => {
+          if (e.target === els.statsCostDetailSheet) closeStatsCostDetailSheet();
+        };
+      }
     }

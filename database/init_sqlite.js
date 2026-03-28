@@ -8,6 +8,11 @@ const {
 } = require('./sqlite_client');
 const { initUserDb } = require('./user_db');
 const { initUserGameAccountDb } = require('./user_game_account_db');
+const {
+    initAccountCostRecordDb,
+    migrateAccountCostRecordFromMainToStatsIfNeeded,
+    backfillPurchaseCostRecordsFromUserGameAccount
+} = require('./account_cost_record_db');
 const { initUserPlatformAuthDb } = require('./user_platform_auth_db');
 const { initUserPlatformRestrictDb } = require('./user_platform_restrict_db');
 const { initUserSessionDb } = require('./user_session_db');
@@ -43,6 +48,9 @@ function get(db, sql, params = []) {
 async function main() {
     await initUserDb();
     await initUserGameAccountDb();
+    await initAccountCostRecordDb();
+    await migrateAccountCostRecordFromMainToStatsIfNeeded();
+    await backfillPurchaseCostRecordsFromUserGameAccount();
     await initUserPlatformAuthDb();
     await initUserPlatformRestrictDb();
     await initUserSessionDb();

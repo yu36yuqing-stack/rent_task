@@ -143,6 +143,7 @@ function rowToAccount(row = {}) {
         forbidden_probe_snapshot: forbiddenProbeSnapshot,
         purchase_price: Number(row.purchase_price || 0),
         purchase_date: String(row.purchase_date || '').slice(0, 10),
+        total_cost_amount: Number(row.total_cost_amount || 0),
         modify_date: String(row.modify_date || ''),
         manual_deleted: Number(row.manual_deleted || 0),
         manual_deleted_at: String(row.manual_deleted_at || ''),
@@ -166,6 +167,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
         'forbidden_probe_snapshot',
         'purchase_price',
         'purchase_date',
+        'total_cost_amount',
         'modify_date',
         'manual_deleted',
         'manual_deleted_at',
@@ -193,6 +195,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
             forbidden_probe_snapshot TEXT NOT NULL DEFAULT '{}',
             purchase_price REAL NOT NULL DEFAULT 0,
             purchase_date TEXT NOT NULL DEFAULT '',
+            total_cost_amount REAL NOT NULL DEFAULT 0,
             modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             manual_deleted INTEGER NOT NULL DEFAULT 0,
             manual_deleted_at TEXT NOT NULL DEFAULT '',
@@ -202,7 +205,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
     `);
     await run(db, `
         INSERT INTO user_game_account
-        (id, user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, switch, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, modify_date, manual_deleted, manual_deleted_at, is_deleted, desc)
+        (id, user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, switch, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, total_cost_amount, modify_date, manual_deleted, manual_deleted_at, is_deleted, desc)
         SELECT
             id,
             user_id,
@@ -222,6 +225,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
             COALESCE(forbidden_probe_snapshot, '{}'),
             COALESCE(purchase_price, 0),
             COALESCE(purchase_date, ''),
+            COALESCE(total_cost_amount, 0),
             COALESCE(modify_date, CURRENT_TIMESTAMP),
             COALESCE(manual_deleted, 0),
             COALESCE(manual_deleted_at, ''),
@@ -250,6 +254,7 @@ async function initUserGameAccountDb() {
                 forbidden_probe_snapshot TEXT NOT NULL DEFAULT '{}',
                 purchase_price REAL NOT NULL DEFAULT 0,
                 purchase_date TEXT NOT NULL DEFAULT '',
+                total_cost_amount REAL NOT NULL DEFAULT 0,
                 modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 manual_deleted INTEGER NOT NULL DEFAULT 0,
                 manual_deleted_at TEXT NOT NULL DEFAULT '',
@@ -284,6 +289,9 @@ async function initUserGameAccountDb() {
         }
         if (!cols.has('purchase_date')) {
             await run(db, `ALTER TABLE user_game_account ADD COLUMN purchase_date TEXT NOT NULL DEFAULT ''`);
+        }
+        if (!cols.has('total_cost_amount')) {
+            await run(db, `ALTER TABLE user_game_account ADD COLUMN total_cost_amount REAL NOT NULL DEFAULT 0`);
         }
         if (!cols.has('manual_deleted')) {
             await run(db, `ALTER TABLE user_game_account ADD COLUMN manual_deleted INTEGER NOT NULL DEFAULT 0`);
@@ -969,6 +977,39 @@ async function updateUserGameAccountPurchaseByUserAndAccount(userId, gameAccount
     }
 }
 
+async function updateUserGameAccountTotalCostByUserAndAccount(userId, gameAccount, totalCostAmount, desc = '', gameId = '', gameName = '') {
+    await initUserGameAccountDb();
+    const uid = Number(userId || 0);
+    const acc = String(gameAccount || '').trim();
+    const amount = Number(totalCostAmount || 0);
+    if (!uid) throw new Error('user_id 不合法');
+    if (!acc) throw new Error('game_account 不能为空');
+    if (!Number.isFinite(amount) || amount < 0) throw new Error('total_cost_amount 不合法');
+
+    const db = openDatabase();
+    try {
+        const row = await get(db, `
+            SELECT id, desc
+            FROM user_game_account
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
+            ORDER BY id DESC
+            LIMIT 1
+        `, [uid, canonicalGameId(gameId, gameName || 'WZRY'), acc]);
+        if (!row) throw new Error(`找不到账号: ${acc}`);
+
+        await run(db, `
+            UPDATE user_game_account
+            SET total_cost_amount = ?, modify_date = ?, desc = ?
+            WHERE id = ?
+        `, [Number(amount.toFixed(2)), nowText(), String(desc || row.desc || '').trim(), Number(row.id)]);
+
+        const updated = await get(db, `SELECT * FROM user_game_account WHERE id = ? LIMIT 1`, [Number(row.id)]);
+        return rowToAccount(updated);
+    } finally {
+        db.close();
+    }
+}
+
 function normalizeProbeSnapshot(kind, input = {}, queryTimeText = nowText()) {
     if (kind === 'online') {
         const online = Boolean(input.online);
@@ -1173,6 +1214,7 @@ module.exports = {
     listAccountRemarksByUserAndAccounts,
     listAccountRemarksByUserAndIdentities,
     updateUserGameAccountPurchaseByUserAndAccount,
+    updateUserGameAccountTotalCostByUserAndAccount,
     updateUserGameAccountSwitchByUserAndAccount,
     getLatestUserGameAccountByUserAndAccount,
     getUserGameAccountProbeSnapshotsByUserAndAccount,

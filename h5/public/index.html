@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Rent Task H5</title>
-  <link rel="stylesheet" href="/css/app.css?v=20260303a">
+  <link rel="stylesheet" href="/css/app.css?v=20260328a">
 </head>
 <body>
   <div class="wrap">
@@ -275,6 +275,7 @@
         <button id="moreOpsProdGuardBtn" class="sheet-btn">关闭在线风控</button>
         <button id="moreOpsMaintenanceBtn" class="sheet-btn">开启维护</button>
         <button id="moreOpsPurchaseBtn" class="sheet-btn">维护采购</button>
+        <button id="moreOpsCostBtn" class="sheet-btn">维护成本</button>
         <button id="moreOpsCloseBtn" class="sheet-btn">关闭弹窗</button>
       </div>
     </div>
@@ -285,21 +286,53 @@
       <div class="sheet-head">
         <div class="sheet-title-wrap">
           <span class="sheet-icon">采</span>
-          <div id="purchaseSheetTitle" class="sheet-title">维护采购信息</div>
+        <div id="purchaseSheetTitle" class="sheet-title">维护采购信息</div>
         </div>
         <div id="purchaseSheetResult" class="sheet-result"></div>
       </div>
-      <div class="field" style="margin-top:0;">
-        <label for="purchasePriceInput">采购价格</label>
-        <input id="purchasePriceInput" type="number" step="0.01" min="0" inputmode="decimal" placeholder="例如 1888.88">
-      </div>
-      <div class="field">
-        <label for="purchaseDateInput">采购日期</label>
-        <input id="purchaseDateInput" type="date">
+      <div class="sheet-inline-fields">
+        <div class="field sheet-inline-field" style="margin-top:0;">
+          <label for="purchasePriceInput">采购价格</label>
+          <input id="purchasePriceInput" type="number" step="0.01" min="0" inputmode="decimal" placeholder="例如 1888.88">
+        </div>
+        <div class="field sheet-inline-field" style="margin-top:0;">
+          <label for="purchaseDateInput">采购日期</label>
+          <input id="purchaseDateInput" type="date">
+        </div>
       </div>
       <div class="sheet-actions">
         <button id="purchaseSaveBtn" class="sheet-btn">保存</button>
         <button id="purchaseCancelBtn" class="sheet-btn">关闭弹窗</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="costSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon">费</span>
+          <div id="costSheetTitle" class="sheet-title">维护成本记录</div>
+        </div>
+        <div id="costSheetResult" class="sheet-result"></div>
+      </div>
+      <div class="sheet-inline-fields">
+        <div class="field sheet-inline-field" style="margin-top:0;">
+          <label for="costAmountInput">成本价格</label>
+          <input id="costAmountInput" type="number" step="0.01" min="0" inputmode="decimal" placeholder="例如 88.88">
+        </div>
+        <div class="field sheet-inline-field" style="margin-top:0;">
+          <label for="costDateInput">成本日期</label>
+          <input id="costDateInput" type="date">
+        </div>
+      </div>
+      <div class="field">
+        <label for="costDescInput">成本描述</label>
+        <textarea id="costDescInput" class="sheet-textarea sheet-textarea-compact" rows="2" placeholder="例如：换绑、补实名、售后维护"></textarea>
+      </div>
+      <div class="sheet-actions">
+        <button id="costSaveBtn" class="sheet-btn">保存</button>
+        <button id="costCancelBtn" class="sheet-btn">关闭弹窗</button>
       </div>
     </div>
   </div>
@@ -404,17 +437,32 @@
       </div>
     </div>
   </div>
+  <div id="statsCostDetailSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon">本</span>
+          <div id="statsCostDetailTitle" class="sheet-title">成本明细</div>
+        </div>
+      </div>
+      <div id="statsCostDetailSummary" class="sheet-result"></div>
+      <div id="statsCostDetailList" class="stats-cost-detail-list"></div>
+      <div class="sheet-actions">
+        <button id="statsCostDetailClose" class="sheet-btn">关闭弹窗</button>
+      </div>
+    </div>
+  </div>
   <div id="globalLoading" class="global-loading hidden" aria-live="polite" aria-busy="true">
     <div class="global-loading-card">
       <span class="global-loading-spinner"></span>
       <span>加载中...</span>
     </div>
   </div>
-  <script defer src="/js/app_core.js?v=20260303a"></script>
+  <script defer src="/js/app_core.js?v=20260328a"></script>
   <script defer src="/js/menu_user.js?v=20260303a"></script>
-  <script defer src="/js/menu_products.js?v=20260303a"></script>
+  <script defer src="/js/menu_products.js?v=20260328a"></script>
   <script defer src="/js/menu_orders.js?v=20260303a"></script>
   <script defer src="/js/menu_risk.js?v=20260303a"></script>
-  <script defer src="/js/menu_stats.js?v=20260303a"></script>
+  <script defer src="/js/menu_stats.js?v=20260328a"></script>
 </body>
 </html>

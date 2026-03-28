@@ -25,6 +25,8 @@ const {
     setLastRunDate
 } = require('../database/order_stats_job_state_db');
 const { resolveDisplayNameByRow } = require('../product/display_name');
+const { listAccountCostRecordsByUserAndAccount } = require('../database/account_cost_record_db');
+const { canonicalGameId } = require('../common/game_profile');
 
 const STATS_JOB_KEY_ALL_USERS = 'order_stats_daily_all_users';
 const DEFAULT_TARGET_HOUR = 2;
@@ -144,6 +146,7 @@ function buildAccountConfigStatus(rows = []) {
         }, gameAccount);
         const purchasePrice = toMoney2(row.purchase_price);
         const purchaseDate = String(row.purchase_date || '').slice(0, 10);
+        const totalCostAmount = toMoney2(row.total_cost_amount || 0);
         const ok = purchasePrice > 0 && /^\d{4}-\d{2}-\d{2}$/.test(purchaseDate);
         if (ok) {
             configured.push({
@@ -152,7 +155,8 @@ function buildAccountConfigStatus(rows = []) {
                 role_name: roleName,
                 display_name: displayName,
                 purchase_price: purchasePrice,
-                purchase_date: purchaseDate
+                purchase_date: purchaseDate,
+                total_cost_amount: totalCostAmount
             });
         } else {
             missing.push({
@@ -161,7 +165,8 @@ function buildAccountConfigStatus(rows = []) {
                 role_name: roleName,
                 display_name: displayName,
                 purchase_price: purchasePrice,
-                purchase_date: purchaseDate
+                purchase_date: purchaseDate,
+                total_cost_amount: totalCostAmount
             });
         }
     }
@@ -176,13 +181,15 @@ function mergeAccountRowsByGameAccount(rows = []) {
         if (!acc) continue;
         const purchasePrice = toMoney2(row.purchase_price || 0);
         const purchaseDate = String(row.purchase_date || '').slice(0, 10);
+        const totalCostAmount = toMoney2(row.total_cost_amount || 0);
         const current = out.get(acc);
         if (!current) {
             out.set(acc, {
                 ...row,
                 game_account: acc,
                 purchase_price: purchasePrice,
-                purchase_date: purchaseDate
+                purchase_date: purchaseDate,
+                total_cost_amount: totalCostAmount
             });
             continue;
         }
@@ -190,6 +197,7 @@ function mergeAccountRowsByGameAccount(rows = []) {
             ...current,
             game_account: acc,
             purchase_price: Math.max(toMoney2(current.purchase_price || 0), purchasePrice),
+            total_cost_amount: Math.max(toMoney2(current.total_cost_amount || 0), totalCostAmount),
             purchase_date: (() => {
                 const oldDate = String(current.purchase_date || '').slice(0, 10);
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(oldDate)) return purchaseDate;
@@ -214,14 +222,14 @@ async function loadAccountConfigByUser(userId, gameName = DEFAULT_GAME_NAME) {
     try {
         const rows = g === ALL_GAME_NAME
             ? await all(db, `
-                SELECT game_account, game_name, account_remark, channel_prd_info, purchase_price, purchase_date
+                SELECT game_account, game_name, account_remark, channel_prd_info, purchase_price, purchase_date, total_cost_amount
                 FROM user_game_account
                 WHERE user_id = ?
                   AND is_deleted = 0
                 ORDER BY id DESC
             `, [uid])
             : await all(db, `
-                SELECT game_account, game_name, account_remark, channel_prd_info, purchase_price, purchase_date
+                SELECT game_account, game_name, account_remark, channel_prd_info, purchase_price, purchase_date, total_cost_amount
                 FROM user_game_account
                 WHERE user_id = ?
                   AND is_deleted = 0
@@ -877,6 +885,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         const orderBase = Math.max(1, Number(s.order_cnt_effective || 0));
         const accountPurchaseBase = toMoney2(cfgOne.purchase_price || 0);
         const accountPurchaseDate = String(cfgOne.purchase_date || '').slice(0, 10);
+        const accountTotalCostAmount = toMoney2(cfgOne.total_cost_amount || 0);
         const accountAnnualizedDays = annualizedDaysByPurchaseDate(periodInfo.startDate, periodInfo.endDate, accountPurchaseDate);
         const accountPeriodReturnRate = accountPurchaseBase > 0 ? (Number(s.amount_rec_sum || 0) / accountPurchaseBase) : 0;
         const accountAnnualizedRate = accountPurchaseBase > 0
@@ -888,6 +897,8 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
             game_name: String(cfgOne.game_name || (arr[0] && arr[0].game_name) || gameName).trim() || gameName,
             role_name: roleName || rawAccount,
             display_name: displayName,
+            total_cost_amount: accountTotalCostAmount,
+            purchase_cost_amount: accountPurchaseBase,
             purchase_base: accountPurchaseBase,
             purchase_date: accountPurchaseDate,
             total_rec_amount_all_time: totalRecAmountAllTime,
@@ -1008,6 +1019,41 @@ async function getIncomeCalendarByUser(userId, options = {}) {
     };
 }
 
+async function getAccountCostDetailByUser(userId, options = {}) {
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+    const gameAccount = String(options.game_account || '').trim();
+    const gameName = String(options.game_name || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
+    if (!gameAccount) throw new Error('game_account 不能为空');
+
+    const config = await loadAccountConfigByUser(uid, gameName);
+    const mergedConfigured = gameName === ALL_GAME_NAME ? mergeAccountRowsByGameAccount(config.configured || []) : (config.configured || []);
+    const cfgOne = (mergedConfigured || []).find((x) => String(x.game_account || '').trim() === gameAccount);
+    if (!cfgOne) throw new Error(`找不到账号: ${gameAccount}`);
+
+    const scopedGameId = gameName === ALL_GAME_NAME ? '' : canonicalGameId('', String(cfgOne.game_name || gameName).trim() || gameName);
+    const records = await listAccountCostRecordsByUserAndAccount(
+        uid,
+        scopedGameId,
+        gameAccount,
+        { limit: 100, all_games: gameName === ALL_GAME_NAME }
+    );
+    return {
+        game_account: String(cfgOne.game_account || gameAccount).trim(),
+        game_name: String(cfgOne.game_name || gameName).trim() || gameName,
+        display_name: String(cfgOne.display_name || cfgOne.role_name || cfgOne.game_account || gameAccount).trim(),
+        total_cost_amount: toMoney2(cfgOne.total_cost_amount || 0),
+        purchase_cost_amount: toMoney2(cfgOne.purchase_price || 0),
+        list: (records || []).map((x) => ({
+            id: Number(x.id || 0),
+            cost_amount: toMoney2(x.cost_amount || 0),
+            cost_date: String(x.cost_date || '').slice(0, 10),
+            cost_type: String(x.cost_type || 'other').trim() || 'other',
+            cost_desc: String(x.cost_desc || '').trim()
+        }))
+    };
+}
+
 module.exports = {
     STATS_JOB_KEY_ALL_USERS,
     DEFAULT_RECALC_DAYS,
@@ -1019,6 +1065,7 @@ module.exports = {
     refreshOrderStatsDailyByUser,
     refreshOrderStatsDailyForAllUsers,
     getOrderStatsDashboardByUser,
+    getAccountCostDetailByUser,
     buildPeriodRange,
     getIncomeCalendarByUser
 };
