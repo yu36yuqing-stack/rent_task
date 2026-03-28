@@ -7,6 +7,7 @@ const {
     upsertUhaozuGoodsResolved,
     upsertUhaozuGoodsDetailFail
 } = require('../database/uhaozu_goods_account_cache_db');
+const { normalizeGameProfile } = require('../common/game_profile');
 
 const DEFAULT_UHAOZU_API_BASE = 'https://mapi.uhaozu.com';
 const DEFAULT_UHAOZU_TIMEOUT_MS = 15000;
@@ -494,14 +495,75 @@ async function queryGoodsDetailByGoodsId(goodsId, auth = {}) {
     };
 }
 
-async function findGoodsByAccount(account, auth = {}) {
-    const target = String(account);
+function normalizeGameIdentity(gameId, gameName) {
+    const gid = String(gameId || '').trim();
+    const gname = String(gameName || '').trim();
+    if (gid) {
+        const profile = normalizeGameProfile(gid, gname, {
+            preserveUnknown: true,
+            fallbackId: gid,
+            fallbackName: gname || ''
+        });
+        return {
+            game_id: String(profile.game_id || gid).trim(),
+            game_name: String(profile.game_name || gname).trim()
+        };
+    }
+    if (gname) {
+        const profile = normalizeGameProfile('', gname, {
+            preserveUnknown: true,
+            fallbackId: '',
+            fallbackName: gname
+        });
+        return {
+            game_id: String(profile.game_id || '').trim(),
+            game_name: String(profile.game_name || gname).trim()
+        };
+    }
+    return { game_id: '', game_name: '' };
+}
+
+function buildGoodsGameIdentity(goods = {}) {
+    const raw = goods && typeof goods === 'object' ? goods : {};
+    return normalizeGameIdentity(
+        raw.gameId || raw.game_id || (raw.raw && (raw.raw.gameId || raw.raw.game_id)),
+        raw.gameName || raw.game_name || (raw.raw && (raw.raw.gameName || raw.raw.game_name))
+    );
+}
+
+async function findGoodsByAccount(account, auth = {}, options = {}) {
+    const target = String(account || '').trim();
+    const goodsId = String(options.goods_id || options.prd_id || options.product_id || '').trim();
+    const targetGame = normalizeGameIdentity(options.game_id || options.platform_game_id, options.game_name);
     // gameAccount 字段在全量列表常被脱敏为空；优先走 keyWords 精确搜索。
     const searchRes = await listGoodsPage(1, 30, { keyWords: target }, auth);
-    const search = extractListAndTotal(searchRes).list;
-    if (search.length > 0) return search[0];
-    const list = await listAllGoods(30, auth);
-    return list.find(item => String(item.gameAccount || item.accountNo || item.account || '') === target) || null;
+    const search = await normalizeList(extractListAndTotal(searchRes).list, auth);
+    const list = search.length > 0 ? search : await normalizeList(await listAllGoods(30, auth), auth);
+    const candidates = list.filter((item) => String(item.account || item.gameAccount || item.accountNo || '').trim() === target);
+    if (candidates.length === 0) return null;
+
+    if (goodsId) {
+        const matchedByGoodsId = candidates.find((item) => String(item.id || item.goodsId || '').trim() === goodsId);
+        if (matchedByGoodsId) return matchedByGoodsId;
+    }
+
+    if (targetGame.game_id || targetGame.game_name) {
+        const matchedByGame = candidates.filter((item) => {
+            const cur = buildGoodsGameIdentity(item);
+            if (targetGame.game_id && cur.game_id) return cur.game_id === targetGame.game_id;
+            if (targetGame.game_name && cur.game_name) return cur.game_name === targetGame.game_name;
+            return false;
+        });
+        if (matchedByGame.length === 1) return matchedByGame[0];
+        if (matchedByGame.length > 1) {
+            console.warn(`[UhaozuAPI] 多个商品命中 account=${target} game_id=${targetGame.game_id} game_name=${targetGame.game_name}，拒绝模糊操作`);
+            return null;
+        }
+    }
+
+    if (candidates.length === 1) return candidates[0];
+    console.warn(`[UhaozuAPI] 多个商品共用账号 account=${target}，缺少 goods_id/game_id，拒绝模糊操作`);
+    return null;
 }
 
 async function callUnshelf(goodsId, auth = {}) {
@@ -729,9 +791,9 @@ async function collectUhaozuData(_browser, _uhaozuUrl, options = {}) {
 async function uhaozuOffShelf(_page, account, options = {}) {
     const auth = options.auth || {};
     try {
-        const goods = await findGoodsByAccount(account, auth);
+        const goods = await findGoodsByAccount(account, auth, options);
         if (!goods) {
-            console.log(`[UhaozuAPI] 下架失败，未找到账号: ${account}`);
+            console.log(`[UhaozuAPI] 下架失败，未找到唯一商品: account=${account}, game_id=${options.game_id || ''}, goods_id=${options.goods_id || options.prd_id || ''}`);
             return false;
         }
         const ok = await callUnshelf(goods.id, auth);
@@ -747,9 +809,9 @@ async function uhaozuOffShelf(_page, account, options = {}) {
 async function uhaozuOnShelf(_page, account, options = {}) {
     const auth = options.auth || {};
     try {
-        const goods = await findGoodsByAccount(account, auth);
+        const goods = await findGoodsByAccount(account, auth, options);
         if (!goods) {
-            console.log(`[UhaozuAPI] 上架失败，未找到账号: ${account}`);
+            console.log(`[UhaozuAPI] 上架失败，未找到唯一商品: account=${account}, game_id=${options.game_id || ''}, goods_id=${options.goods_id || options.prd_id || ''}`);
             return false;
         }
         const ok = await callShelf(goods.id, auth);
@@ -792,6 +854,8 @@ module.exports = {
         guessAccountByFuzzy,
         listGoodsPage,
         listAllGoods,
+        normalizeGameIdentity,
+        buildGoodsGameIdentity,
         findGoodsByAccount,
         callUnshelf,
         callShelf,

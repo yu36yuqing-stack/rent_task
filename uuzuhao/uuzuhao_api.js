@@ -173,10 +173,72 @@ async function listAllProducts(auth = {}) {
     return Array.from(byId.values());
 }
 
-async function findProductByAccount(account, auth = {}) {
-    const target = String(account);
+function normalizeGameIdentity(gameId, gameName) {
+    const gid = String(gameId || '').trim();
+    const gname = String(gameName || '').trim();
+    if (gid) {
+        const profile = normalizeGameProfile(gid, gname, {
+            preserveUnknown: true,
+            fallbackId: gid,
+            fallbackName: gname || ''
+        });
+        return {
+            game_id: String(profile.game_id || gid).trim(),
+            game_name: String(profile.game_name || gname).trim()
+        };
+    }
+    if (gname) {
+        const profile = normalizeGameProfile('', gname, {
+            preserveUnknown: true,
+            fallbackId: '',
+            fallbackName: gname
+        });
+        return {
+            game_id: String(profile.game_id || '').trim(),
+            game_name: String(profile.game_name || gname).trim()
+        };
+    }
+    return { game_id: '', game_name: '' };
+}
+
+function buildProductGameIdentity(product = {}) {
+    const raw = product && typeof product === 'object' ? product : {};
+    return normalizeGameIdentity(
+        raw.gameId || raw.game_id || raw.bizGameId || raw.biz_game_id,
+        raw.gameName || raw.game_name || raw.bizGameName || raw.biz_game_name
+    );
+}
+
+async function findProductByAccount(account, auth = {}, options = {}) {
+    const target = String(account || '').trim();
+    const productId = String(options.product_id || options.prd_id || '').trim();
+    const targetGame = normalizeGameIdentity(options.game_id, options.game_name);
     const all = await listAllProducts(auth);
-    return all.find(p => String(p.accountNo || '') === target) || null;
+    const candidates = all.filter((p) => String(p.accountNo || '').trim() === target);
+    if (candidates.length === 0) return null;
+
+    if (productId) {
+        const matchedByProductId = candidates.find((p) => String(p.productId || '').trim() === productId);
+        if (matchedByProductId) return matchedByProductId;
+    }
+
+    if (targetGame.game_id || targetGame.game_name) {
+        const matchedByGame = candidates.filter((p) => {
+            const cur = buildProductGameIdentity(p);
+            if (targetGame.game_id && cur.game_id) return cur.game_id === targetGame.game_id;
+            if (targetGame.game_name && cur.game_name) return cur.game_name === targetGame.game_name;
+            return false;
+        });
+        if (matchedByGame.length === 1) return matchedByGame[0];
+        if (matchedByGame.length > 1) {
+            console.warn(`[YouyouAPI] 多个商品命中 account=${target} game_id=${targetGame.game_id} game_name=${targetGame.game_name}，拒绝模糊操作`);
+            return null;
+        }
+    }
+
+    if (candidates.length === 1) return candidates[0];
+    console.warn(`[YouyouAPI] 多个商品共用账号 account=${target}，缺少 product_id/game_id，拒绝模糊操作`);
+    return null;
 }
 
 // 与 youpin_logic.js 保持同样接口（先不替换主集成）
@@ -190,9 +252,9 @@ async function collectYoupinData(_browser, _youpinUrl, options = {}) {
 async function youpinOffShelf(_page, account, options = {}) {
     const auth = options.auth || {};
     try {
-        const product = await findProductByAccount(account, auth);
+        const product = await findProductByAccount(account, auth, options);
         if (!product) {
-            console.log(`[YouyouAPI] 下架失败，未找到账号: ${account}`);
+            console.log(`[YouyouAPI] 下架失败，未找到唯一商品: account=${account}, game_id=${options.game_id || ''}, product_id=${options.product_id || options.prd_id || ''}`);
             return false;
         }
         await postSigned(PATH_OFF, { productId: String(product.productId) }, auth);
@@ -217,10 +279,10 @@ function parseApiErrorMessage(msg = '') {
 async function youpinOnShelf(_page, account, options = {}) {
     const auth = options.auth || {};
     try {
-        const product = await findProductByAccount(account, auth);
+        const product = await findProductByAccount(account, auth, options);
         if (!product) {
-            console.log(`[YouyouAPI] 上架失败，未找到账号: ${account}`);
-            return options.with_detail ? { ok: false, code: 0, msg: '未找到账号' } : false;
+            console.log(`[YouyouAPI] 上架失败，未找到唯一商品: account=${account}, game_id=${options.game_id || ''}, product_id=${options.product_id || options.prd_id || ''}`);
+            return options.with_detail ? { ok: false, code: 0, msg: '未找到唯一商品' } : false;
         }
         await postSigned(PATH_ON, { productId: String(product.productId) }, auth);
         console.log(`[YouyouAPI] 上架成功: account=${account}, productId=${product.productId}`);
@@ -431,6 +493,8 @@ module.exports = {
         listProductsByTab,
         listAllProducts,
         findProductByAccount,
+        normalizeGameIdentity,
+        buildProductGameIdentity,
         mapProductToRobotItem,
         resolveGameIdByName,
         sanitizeOrderListParams,

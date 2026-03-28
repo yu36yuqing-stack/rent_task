@@ -281,13 +281,16 @@ async function executeActions({
                 : '';
 
             // U号租
-            if (action.type === 'off_u') success = await uhaozuOffShelf(uhaozuPage, action.item.account);
-            else if (action.type === 'on_u') success = await uhaozuOnShelf(uhaozuPage, action.item.account);
+            if (action.type === 'off_u') success = await uhaozuOffShelf(uhaozuPage, action.item.account, action.item);
+            else if (action.type === 'on_u') success = await uhaozuOnShelf(uhaozuPage, action.item.account, action.item);
 
             // 悠悠租号
-            else if (action.type === 'off_y') success = await youpinOffShelf(youpinPage, action.item.account);
+            else if (action.type === 'off_y') success = await youpinOffShelf(youpinPage, action.item.account, action.item);
             else if (action.type === 'on_y') {
-                const out = await youpinOnShelf(youpinPage, action.item.account, { with_detail: true });
+                const out = await youpinOnShelf(youpinPage, action.item.account, {
+                    ...action.item,
+                    with_detail: true
+                });
                 success = Boolean(out && out.ok);
                 detail = out && typeof out === 'object' ? { code: Number(out.code || 0), msg: String(out.msg || '') } : { code: 0, msg: '' };
             }
@@ -389,23 +392,29 @@ function buildPlatformRowsFromUserAccounts(rows = []) {
 
         const y = String(status.uuzuhao || '').trim();
         if (y) {
+            const youpinPrd = prd && typeof prd.uuzuhao === 'object' ? prd.uuzuhao : {};
             youpinData.push({
                 account,
                 game_id: String((row && row.game_id) || '1').trim() || '1',
                 game_name: String((row && row.game_name) || 'WZRY').trim() || 'WZRY',
                 status: y,
-                remark: String(row.account_remark || account)
+                remark: String(row.account_remark || account),
+                prd_id: String(youpinPrd.prd_id || youpinPrd.id || '').trim(),
+                platform_game_id: String(youpinPrd.game_id || youpinPrd.gameId || '').trim()
             });
         }
 
         const u = String(status.uhaozu || '').trim();
         if (u) {
+            const uhaozuPrd = prd && typeof prd.uhaozu === 'object' ? prd.uhaozu : {};
             uhaozuData.push({
                 account,
                 game_id: String((row && row.game_id) || '1').trim() || '1',
                 game_name: String((row && row.game_name) || 'WZRY').trim() || 'WZRY',
                 status: u,
-                reason: ''
+                reason: '',
+                prd_id: String(uhaozuPrd.prd_id || uhaozuPrd.id || '').trim(),
+                platform_game_id: String(uhaozuPrd.game_id || uhaozuPrd.gameId || '').trim()
             });
         }
 
@@ -570,25 +579,25 @@ async function executeUserActionsIfNeeded({
         runRecord,
         youpinPage: null,
         uhaozuPage: null,
-        youpinOffShelf: (_page, account) => {
+        youpinOffShelf: (_page, account, item = {}) => {
             const auth = authMap.uuzuhao;
             if (!auth) return false;
-            return youpinOffShelf(null, account, { auth });
+            return youpinOffShelf(null, account, { auth, ...item });
         },
-        youpinOnShelf: (_page, account) => {
+        youpinOnShelf: (_page, account, item = {}) => {
             const auth = authMap.uuzuhao;
             if (!auth) return false;
-            return youpinOnShelf(null, account, { auth, with_detail: true });
+            return youpinOnShelf(null, account, { auth, ...item, with_detail: true });
         },
-        uhaozuOffShelf: (_page, account) => {
+        uhaozuOffShelf: (_page, account, item = {}) => {
             const auth = authMap.uhaozu;
             if (!auth) return false;
-            return uhaozuOffShelf(null, account, { auth });
+            return uhaozuOffShelf(null, account, { auth, ...item });
         },
-        uhaozuOnShelf: (_page, account) => {
+        uhaozuOnShelf: (_page, account, item = {}) => {
             const auth = authMap.uhaozu;
             if (!auth) return false;
-            return uhaozuOnShelf(null, account, { auth });
+            return uhaozuOnShelf(null, account, { auth, ...item });
         },
         changeZhwStatus: (account, gameId, type, dataId) => {
             const auth = authMap.zuhaowang;

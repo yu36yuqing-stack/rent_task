@@ -183,6 +183,8 @@
 
     async function toggleMaintenance(item) {
       const account = String(item && item.game_account || '').trim();
+      const gameId = String(item && item.game_id || '1').trim() || '1';
+      const gameName = String(item && item.game_name || 'WZRY').trim() || 'WZRY';
       if (!account) return;
       const reason = String(item && item.blacklist_reason || '').trim();
       const enabled = !Boolean(item && item.blacklisted && isMaintenanceReason(reason));
@@ -191,7 +193,7 @@
         renderMoreOpsSheet();
         await request('/api/products/maintenance/toggle', {
           method: 'POST',
-          body: JSON.stringify({ game_account: account, enabled })
+          body: JSON.stringify({ game_account: account, game_id: gameId, game_name: gameName, enabled })
         });
         closeMoreOpsSheet();
         await loadList();
@@ -207,6 +209,8 @@
 
     async function toggleProdGuard(item) {
       const account = String(item && item.game_account || '').trim();
+      const gameId = String(item && item.game_id || '1').trim() || '1';
+      const gameName = String(item && item.game_name || 'WZRY').trim() || 'WZRY';
       if (!account) return;
       const enabled = Boolean(item && item.prod_guard_enabled);
       const nextEnabled = !enabled;
@@ -222,6 +226,8 @@
           method: 'POST',
           body: JSON.stringify({
             game_account: account,
+            game_id: gameId,
+            game_name: gameName,
             switch_key: 'prod_guard',
             enabled: nextEnabled
           })
@@ -232,7 +238,7 @@
           : {};
         if (!savedEnabled) delete state.onlineStatusMap[account];
         state.list = (state.list || []).map((x) => {
-          if (String(x && x.game_account || '').trim() !== account) return x;
+          if (String(x && x.game_account || '').trim() !== account || String((x && x.game_id) || '1').trim() !== gameId) return x;
           return {
             ...x,
             switch: savedSwitch,

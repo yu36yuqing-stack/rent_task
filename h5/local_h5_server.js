@@ -377,21 +377,32 @@ function resolveProdGuardSwitch(raw) {
     };
 }
 
-async function cleanupProdGuardStateByAccount(userId, gameAccount) {
+async function cleanupProdGuardStateByAccount(userId, gameAccount, options = {}) {
     const uid = Number(userId || 0);
-    const acc = String(gameAccount || '').trim();
+    const acc = String((gameAccount && gameAccount.game_account) || gameAccount || '').trim();
+    const normalizedGame = normalizeGameProfile(
+        (gameAccount && gameAccount.game_id) || options.game_id,
+        (gameAccount && gameAccount.game_name) || options.game_name,
+        { preserveUnknown: true }
+    );
+    const key = {
+        game_account: acc,
+        game_id: String(normalizedGame.game_id || '1').trim() || '1',
+        game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY'
+    };
     if (!uid || !acc) return;
-    await clearSourceAndReconcile(uid, acc, 'guard_online', {
+    await clearSourceAndReconcile(uid, key, 'guard_online', {
         operator: 'h5',
         desc: 'disable prod_guard by h5'
     });
-    await clearSourceAndReconcile(uid, acc, 'guard_forbidden', {
+    await clearSourceAndReconcile(uid, key, 'guard_forbidden', {
         operator: 'h5',
         desc: 'disable prod_guard by h5'
     });
     const taskRows = await listGuardTasksByUser(uid, { page: 1, page_size: 500 });
     for (const task of (taskRows && Array.isArray(taskRows.list) ? taskRows.list : [])) {
         if (String((task && task.game_account) || '').trim() !== acc) continue;
+        if (String((task && task.game_id) || '1').trim() !== key.game_id) continue;
         if (String((task && task.status) || '').trim() !== 'pending' && String((task && task.status) || '').trim() !== 'watching') continue;
         await updateGuardTaskStatus(task.id, {
             status: 'done',
@@ -401,7 +412,7 @@ async function cleanupProdGuardStateByAccount(userId, gameAccount) {
             desc: 'skip_by_account_switch_prod_guard_disabled'
         });
     }
-    await resolveOpenRiskEvent(uid, acc, 'online_non_renting', {
+    await resolveOpenRiskEvent(uid, key, 'online_non_renting', {
         status: 'ignored',
         desc: 'skip_by_account_switch_prod_guard_disabled'
     });
@@ -1204,10 +1215,16 @@ async function handleBlacklistRemove(req, res) {
             cleared_sources: Array.isArray(out && out.cleared_sources) ? out.cleared_sources : []
         });
     }
-    const out = await deleteBlacklistWithGuard(user.id, gameAccount, {
+    const out = await deleteBlacklistWithGuard(user.id, {
+        game_account: gameAccount,
+        game_id: String(normalizedGame.game_id || '1').trim() || '1',
+        game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY'
+    }, {
         source: 'h5',
         operator: user.account || 'h5_user',
-        desc: 'manual remove by h5'
+        desc: 'manual remove by h5',
+        game_id: String(normalizedGame.game_id || '1').trim() || '1',
+        game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY'
     });
     return json(res, 200, {
         ok: true,
@@ -1221,6 +1238,7 @@ async function handleProductMaintenanceToggle(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
     const gameAccount = String(body.game_account || '').trim();
+    const normalizedGame = normalizeGameProfile(body.game_id, body.game_name, { preserveUnknown: true });
     const enabled = body.enabled === true || String(body.enabled || '').trim().toLowerCase() === 'true';
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
 
@@ -1228,9 +1246,15 @@ async function handleProductMaintenanceToggle(req, res) {
         const now = new Date();
         const p = (n) => String(n).padStart(2, '0');
         const maintainSince = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`;
-        const out = await upsertSourceAndReconcile(user.id, gameAccount, 'manual_maintenance', {
+        const out = await upsertSourceAndReconcile(user.id, {
+            game_account: gameAccount,
+            game_id: String(normalizedGame.game_id || '1').trim() || '1',
+            game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY'
+        }, 'manual_maintenance', {
             active: true,
             reason: MAINTENANCE_BLACKLIST_REASON,
+            game_id: String(normalizedGame.game_id || '1').trim() || '1',
+            game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY',
             detail: {
                 type: 'manual_maintenance',
                 maintain_since: maintainSince,
@@ -1246,12 +1270,18 @@ async function handleProductMaintenanceToggle(req, res) {
 
     const out = await deleteBlacklistWithGuard(
         user.id,
-        gameAccount,
+        {
+            game_account: gameAccount,
+            game_id: String(normalizedGame.game_id || '1').trim() || '1',
+            game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY'
+        },
         {
             source: 'h5_maintenance',
             operator: user.account || 'h5_user',
             desc: 'manual maintenance end by h5',
-            reason_expected: MAINTENANCE_BLACKLIST_REASON
+            reason_expected: MAINTENANCE_BLACKLIST_REASON,
+            game_id: String(normalizedGame.game_id || '1').trim() || '1',
+            game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY'
         }
     );
     if (!out || !out.removed) {
@@ -1429,6 +1459,7 @@ async function handleProductAccountSwitchToggle(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
     const gameAccount = String(body.game_account || '').trim();
+    const normalizedGame = normalizeGameProfile(body.game_id, body.game_name, { preserveUnknown: true });
     const switchKey = String(body.switch_key || '').trim();
     const enabledRaw = body.enabled;
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
@@ -1442,9 +1473,13 @@ async function handleProductAccountSwitchToggle(req, res) {
             label: '在线风控',
             enabled
         }
-    }, 'toggle account switch by h5');
+    }, 'toggle account switch by h5', normalizedGame.game_id, normalizedGame.game_name);
     if (!enabled) {
-        await cleanupProdGuardStateByAccount(user.id, gameAccount);
+        await cleanupProdGuardStateByAccount(user.id, {
+            game_account: gameAccount,
+            game_id: String(normalizedGame.game_id || '1').trim() || '1',
+            game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY'
+        });
     }
     const prodGuard = resolveProdGuardSwitch(nextSwitch);
     return json(res, 200, {
