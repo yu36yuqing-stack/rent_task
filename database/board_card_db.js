@@ -36,6 +36,14 @@ function all(db, sql, params = []) {
     });
 }
 
+async function ensureColumn(db, tableName, columnName, columnDefSql) {
+    const rows = await all(db, `PRAGMA table_info(${tableName})`);
+    const hasColumn = rows.some((row) => String(row.name || '').trim() === String(columnName || '').trim());
+    if (!hasColumn) {
+        await run(db, `ALTER TABLE ${tableName} ADD COLUMN ${columnDefSql}`);
+    }
+}
+
 function normalizeUserId(userId) {
     return Number(userId || 0);
 }
@@ -74,10 +82,13 @@ function normalizeRemark(remark) {
     return String(remark || '').trim();
 }
 
-function maskMobile(mobile) {
-    const text = String(mobile || '').trim();
-    if (!/^\d{11}$/.test(text)) return text;
-    return `${text.slice(0, 3)}****${text.slice(-4)}`;
+function normalizeGameName(gameName) {
+    const text = String(gameName || '').trim();
+    if (!text) return 'WZRY';
+    if (text.includes('CFM') || text.includes('枪战王者') || text.includes('穿越火线')) return 'CFM';
+    if (text === '和平精英' || text.toUpperCase() === 'HPJY') return '和平精英';
+    if (text === '王者荣耀' || text.toUpperCase() === 'WZRY') return 'WZRY';
+    return text;
 }
 
 async function initBoardCardDb() {
@@ -115,6 +126,7 @@ async function initBoardCardDb() {
                 user_id INTEGER NOT NULL,
                 mobile_slot_id INTEGER NOT NULL,
                 account TEXT NOT NULL,
+                game_name TEXT NOT NULL DEFAULT 'WZRY',
                 remark TEXT NOT NULL DEFAULT '',
                 create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -154,6 +166,12 @@ async function initBoardCardDb() {
         await run(db, `
             CREATE INDEX IF NOT EXISTS idx_board_mobile_account_slot_alive
             ON board_mobile_account(mobile_slot_id, is_deleted)
+        `);
+        await ensureColumn(db, 'board_mobile_account', 'game_name', `game_name TEXT NOT NULL DEFAULT 'WZRY'`);
+        await run(db, `
+            UPDATE board_mobile_account
+            SET game_name = 'WZRY'
+            WHERE TRIM(COALESCE(game_name, '')) = ''
         `);
         await run(db, `
             CREATE INDEX IF NOT EXISTS idx_board_sms_record_slot_alive
@@ -329,6 +347,7 @@ async function createBoardMobileAccountByUser(userId, input = {}) {
     const accountRow = await getAliveUserGameAccountByUserAndAccount(uid, account);
     if (!accountRow) throw new Error('账号不存在');
     const remark = normalizeRemark(accountRow.account_remark);
+    const gameName = normalizeGameName(accountRow.game_name || 'WZRY');
     const db = openDatabase();
     try {
         const slot = await get(db, `
@@ -349,9 +368,9 @@ async function createBoardMobileAccountByUser(userId, input = {}) {
         const now = nowText();
         const ret = await run(db, `
             INSERT INTO board_mobile_account
-            (user_id, mobile_slot_id, account, remark, create_date, modify_date, is_deleted, desc)
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?)
-        `, [uid, mobileSlotId, account, remark, now, now, desc]);
+            (user_id, mobile_slot_id, account, game_name, remark, create_date, modify_date, is_deleted, desc)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+        `, [uid, mobileSlotId, account, gameName, remark, now, now, desc]);
         return await get(db, `SELECT * FROM board_mobile_account WHERE id = ?`, [Number(ret.lastID || 0)]);
     } finally {
         db.close();

@@ -25,9 +25,11 @@ function maskMobile(mobile) {
 function toDisplayAccount(row = {}) {
     const account = String(row.account || '').trim();
     const remark = String(row.remark || '').trim();
+    const gameName = String(row.game_name || 'WZRY').trim() || 'WZRY';
     return {
         id: Number(row.id || 0),
         account,
+        game_name: gameName,
         remark,
         display_name: remark ? `${remark}（${account}）` : account,
         create_date: String(row.create_date || '').trim(),

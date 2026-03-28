@@ -63,6 +63,7 @@
   - `#boardView .board-mobile-card`：手机号子卡片
   - `#boardView .board-account-list`：account 标签列表
   - `#boardView .board-account-tag`：account 标签
+  - `#boardView .board-account-tag-text`：account 标签文案区（配合 `.game-avatar`）
 - Products（页面锚点变体）
   - `#listView .product-filters`：商品页筛选容器（复用 `.orders-tabs`）
   - `#listView .product-filter-tab`：商品页筛选项（复用 `.orders-tab`）

@@ -7,6 +7,31 @@ function escapeBoardHtml(text) {
     .replace(/'/g, '&#39;');
 }
 
+function normalizeBoardGameName(gameName) {
+  const text = String(gameName || '').trim();
+  const upper = text.toUpperCase();
+  if (text.includes('CFM') || text.includes('枪战王者') || text.includes('穿越火线') || upper === 'CFM') return 'CFM';
+  if (text === '和平精英' || upper === 'HPJY') return '和平精英';
+  return 'WZRY';
+}
+
+function buildBoardGameAvatarHtml(gameName) {
+  const normalized = normalizeBoardGameName(gameName);
+  if (normalized === 'CFM') {
+    return `<span class="game-avatar game-avatar-cfm" title="CFM枪战王者" aria-label="CFM枪战王者">
+      <img src="/assets/game_icons/cfm.png" alt="CFM枪战王者" loading="lazy" decoding="async">
+    </span>`;
+  }
+  if (normalized === '和平精英') {
+    return `<span class="game-avatar game-avatar-hpjy" title="和平精英" aria-label="和平精英">
+      <img src="/assets/game_icons/hpjy.png" alt="和平精英" loading="lazy" decoding="async">
+    </span>`;
+  }
+  return `<span class="game-avatar game-avatar-wzry" title="王者荣耀" aria-label="王者荣耀">
+    <img src="/assets/game_icons/wzry.webp" alt="王者荣耀" loading="lazy" decoding="async">
+  </span>`;
+}
+
 function boardMatchesFilter(board, filter, query) {
   const normalizedFilter = String(filter || 'all').trim();
   const normalizedQuery = String(query || '').trim().toLowerCase();
@@ -201,7 +226,12 @@ function renderBoardView() {
       const mobileHtml = mobiles.map((mobile) => {
         const accounts = Array.isArray(mobile.accounts) ? mobile.accounts : [];
         const accountHtml = accounts.length > 0
-          ? accounts.map((account) => `<span class="board-account-tag">${escapeBoardHtml(account && (account.display_name || account.account) || '')}</span>`).join('')
+          ? accounts.map((account) => `
+            <span class="board-account-tag">
+              ${buildBoardGameAvatarHtml(account && account.game_name)}
+              <span class="board-account-tag-text">${escapeBoardHtml(account && (account.display_name || account.account) || '')}</span>
+            </span>
+          `).join('')
           : '<span class="board-account-empty">暂无绑定 account</span>';
         return `
           <div class="board-mobile-card">

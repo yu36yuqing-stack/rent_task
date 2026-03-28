@@ -1633,12 +1633,24 @@
     #boardView .board-account-tag {
       display: inline-flex;
       align-items: center;
+      gap: 6px;
       padding: 4px 8px;
       border-radius: 999px;
       background: #edf4fb;
       color: #35506d;
       font-size: 12px;
       line-height: 1;
+    }
+
+    #boardView .board-account-tag .game-avatar {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+    }
+
+    #boardView .board-account-tag-text {
+      display: inline-block;
+      line-height: 1.2;
     }
 
     #boardView .board-account-empty,
