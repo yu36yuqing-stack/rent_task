@@ -76,7 +76,8 @@ const { normalizeGameProfile } = require('../common/game_profile');
 const { listOrdersForUser, syncOrdersByUser } = require('../order/order');
 const {
     savePurchaseCostByUserAndAccount,
-    createAccountCostByUserAndAccount
+    createAccountCostByUserAndAccount,
+    deleteAccountCostByUserAndAccount
 } = require('../product/account_cost_service');
 const {
     COOLDOWN_RELEASE_RULE_NAME,
@@ -1551,6 +1552,31 @@ async function handleProductAccountCostCreate(req, res) {
     });
 }
 
+async function handleProductAccountCostDelete(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const recordId = Number(body.record_id || 0);
+    const gameAccount = String(body.game_account || '').trim();
+    const normalizedGame = normalizeGameProfile(body.game_id, body.game_name, { preserveUnknown: true });
+    if (!recordId) return json(res, 400, { ok: false, message: 'record_id 不合法' });
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    const out = await deleteAccountCostByUserAndAccount(user.id, {
+        record_id: recordId,
+        game_account: gameAccount,
+        game_id: normalizedGame.game_id,
+        game_name: normalizedGame.game_name
+    });
+    return json(res, 200, {
+        ok: true,
+        data: {
+            record_id: Number(out && out.record && out.record.id || recordId),
+            game_account: String(out && out.record && out.record.game_account || gameAccount),
+            total_cost_amount: Number(out && out.total_cost_amount || 0),
+            deleted: true
+        }
+    });
+}
+
 async function handleProductAccountSwitchToggle(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
@@ -1984,6 +2010,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/query') return await handleProductForbiddenQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/purchase-config') return await handleProductPurchaseConfig(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/account-cost/create') return await handleProductAccountCostCreate(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/products/account-cost/delete') return await handleProductAccountCostDelete(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/account-switch/toggle') return await handleProductAccountSwitchToggle(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/risk-center/events') return await handleRiskCenterList(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/add') return await handleBlacklistAdd(req, res);

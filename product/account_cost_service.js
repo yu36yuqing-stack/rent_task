@@ -1,13 +1,16 @@
 const {
     initAccountCostRecordDb,
     createAccountCostRecord,
+    getActivePurchaseCostRecord,
     upsertPurchaseCostRecord,
-    sumAccountCostAmountByUserAndAccount
+    sumAccountCostAmountByUserAndAccount,
+    softDeleteAccountCostRecordById
 } = require('../database/account_cost_record_db');
 const {
     initUserGameAccountDb,
     getLatestUserGameAccountByUserAndAccount,
     updateUserGameAccountPurchaseByUserAndAccount,
+    clearUserGameAccountPurchaseByUserAndAccount,
     updateUserGameAccountTotalCostByUserAndAccount
 } = require('../database/user_game_account_db');
 const { canonicalGameId, canonicalGameNameById } = require('../common/game_profile');
@@ -120,9 +123,58 @@ async function createAccountCostByUserAndAccount(userId, payload = {}) {
     };
 }
 
+async function deleteAccountCostByUserAndAccount(userId, payload = {}) {
+    await initAccountCostRecordDb();
+    const recordId = Number(payload.record_id || 0);
+    const gameAccount = String(payload.game_account || '').trim();
+    const gameId = canonicalGameId(payload.game_id, payload.game_name || 'WZRY');
+    const gameName = canonicalGameNameById(gameId, payload.game_name || 'WZRY');
+    if (!recordId) throw new Error('record_id 不合法');
+    if (!gameAccount) throw new Error('game_account 不能为空');
+
+    await ensureAccountExists(userId, gameAccount, gameId, gameName);
+    const record = await softDeleteAccountCostRecordById(userId, recordId, {
+        game_id: gameId,
+        game_account: gameAccount,
+        desc: 'account cost delete by h5'
+    });
+    if (String(record.cost_type || '').trim() === 'purchase') {
+        const activePurchase = await getActivePurchaseCostRecord(userId, gameId, gameAccount);
+        if (activePurchase) {
+            await updateUserGameAccountPurchaseByUserAndAccount(
+                userId,
+                gameAccount,
+                Number(activePurchase.cost_amount || 0),
+                String(activePurchase.cost_date || '').slice(0, 10),
+                'sync purchase by account_cost_record delete',
+                gameId,
+                gameName
+            );
+        } else {
+            await clearUserGameAccountPurchaseByUserAndAccount(
+                userId,
+                gameAccount,
+                'clear purchase by account_cost_record delete',
+                gameId,
+                gameName
+            );
+        }
+    }
+    const summary = await syncAccountTotalCost(userId, gameAccount, gameId, gameName);
+    return {
+        record,
+        total_cost_amount: summary.total_cost_amount,
+        account: {
+            ...summary.account,
+            total_cost_amount: summary.total_cost_amount
+        }
+    };
+}
+
 module.exports = {
     initAccountCostRecordDb,
     normalizeCostType,
     savePurchaseCostByUserAndAccount,
-    createAccountCostByUserAndAccount
+    createAccountCostByUserAndAccount,
+    deleteAccountCostByUserAndAccount
 };

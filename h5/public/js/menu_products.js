@@ -647,6 +647,7 @@
       if (!account) return;
       const priceRaw = Number(item && item.purchase_price);
       const price = Number.isFinite(priceRaw) && priceRaw > 0 ? priceRaw.toFixed(2) : '';
+      const purchaseDate = String(item && item.purchase_date || '').slice(0, 10);
       state.purchaseSheet = {
         open: true,
         account,
@@ -654,7 +655,7 @@
         game_name: String(item && item.game_name || 'WZRY').trim() || 'WZRY',
         role_name: String(item && (item.role_name || item.game_account) || '').trim(),
         purchase_price: price,
-        purchase_date: String(item && item.purchase_date || '').slice(0, 10),
+        purchase_date: /^\d{4}-\d{2}-\d{2}$/.test(purchaseDate) ? purchaseDate : todayDateText(),
         result_text: '',
         result_type: '',
         loading: false
@@ -688,7 +689,7 @@
       const resultType = String(state.costSheet.result_type || '').trim();
       const loading = Boolean(state.costSheet.loading);
 
-      els.costSheetTitle.textContent = `维护成本记录 · ${titleName}`;
+      els.costSheetTitle.textContent = `新增成本 · ${titleName}`;
       els.costSheetResult.className = `sheet-result ${resultType}`;
       els.costSheetResult.textContent = resultText;
       els.costAmountInput.value = String(state.costSheet.cost_amount || '');
@@ -697,6 +698,7 @@
       els.costAmountInput.disabled = loading;
       els.costDateInput.disabled = loading;
       els.costDescInput.disabled = loading;
+      if (els.costDetailBtn) els.costDetailBtn.disabled = loading;
       els.costSaveBtn.disabled = loading;
       els.costCancelBtn.disabled = loading;
     }
@@ -711,7 +713,7 @@
         game_name: String(item && item.game_name || 'WZRY').trim() || 'WZRY',
         role_name: String(item && (item.role_name || item.game_account) || '').trim(),
         cost_amount: '',
-        cost_date: '',
+        cost_date: todayDateText(),
         cost_desc: '',
         result_text: '',
         result_type: '',
@@ -866,6 +868,25 @@
         state.costSheet.loading = false;
         renderCostSheet();
       }
+    }
+
+    function openCostDetailFromSheet() {
+      const sheet = state.costSheet || {};
+      const account = String(sheet.account || '').trim();
+      const gameId = String(sheet.game_id || '1').trim() || '1';
+      const gameName = String(sheet.game_name || 'WZRY').trim() || 'WZRY';
+      if (!account || typeof window.openStatsCostDetailExternal !== 'function') return;
+      const item = findProductItemByIdentity(gameId, account) || {};
+      closeCostSheet();
+      void window.openStatsCostDetailExternal({
+        game_account: account,
+        game_id: gameId,
+        game_name: gameName,
+        role_name: String(sheet.role_name || '').trim(),
+        display_name: String(sheet.role_name || account).trim(),
+        total_cost_amount: Number(item.total_cost_amount || 0),
+        purchase_cost_amount: Number(item.purchase_price || 0)
+      });
     }
 
     async function submitForbidden(enabled) {

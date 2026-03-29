@@ -396,6 +396,40 @@ async function sumAccountCostAmountByUserAndAccount(userId, gameId = '', gameAcc
     }
 }
 
+async function softDeleteAccountCostRecordById(userId, recordId, opts = {}) {
+    await initAccountCostRecordDb();
+    const uid = Number(userId || 0);
+    const rid = Number(recordId || 0);
+    const gameId = String(opts.game_id || '').trim();
+    const gameAccount = String(opts.game_account || '').trim();
+    const desc = String(opts.desc || '').trim();
+    if (!uid) throw new Error('user_id 不合法');
+    if (!rid) throw new Error('record_id 不合法');
+
+    const db = openStatsDatabase();
+    try {
+        const row = await get(db, `
+            SELECT *
+            FROM account_cost_record
+            WHERE id = ? AND user_id = ? AND is_deleted = 0
+            LIMIT 1
+        `, [rid, uid]);
+        if (!row) throw new Error('成本记录不存在');
+        const mapped = rowToCostRecord(row);
+        if (gameAccount && mapped.game_account !== gameAccount) throw new Error('成本记录与账号不匹配');
+        if (gameId && canonicalGameId(gameId, mapped.game_name) !== mapped.game_id) throw new Error('成本记录与游戏不匹配');
+        await run(db, `
+            UPDATE account_cost_record
+            SET is_deleted = 1, modify_date = ?, desc = ?
+            WHERE id = ?
+        `, [nowText(), desc || mapped.desc || 'soft delete by h5', rid]);
+        const deletedRow = await get(db, `SELECT * FROM account_cost_record WHERE id = ? LIMIT 1`, [rid]);
+        return rowToCostRecord(deletedRow);
+    } finally {
+        db.close();
+    }
+}
+
 module.exports = {
     initAccountCostRecordDb,
     migrateAccountCostRecordFromMainToStatsIfNeeded,
@@ -404,5 +438,6 @@ module.exports = {
     getActivePurchaseCostRecord,
     upsertPurchaseCostRecord,
     listAccountCostRecordsByUserAndAccount,
-    sumAccountCostAmountByUserAndAccount
+    sumAccountCostAmountByUserAndAccount,
+    softDeleteAccountCostRecordById
 };

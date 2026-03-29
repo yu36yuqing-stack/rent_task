@@ -166,6 +166,7 @@
       statsCostDetail: {
         open: false,
         loading: false,
+        deleting: false,
         game_account: '',
         game_name: 'WZRY',
         display_name: '',
@@ -524,6 +525,7 @@
       costAmountInput: document.getElementById('costAmountInput'),
       costDateInput: document.getElementById('costDateInput'),
       costDescInput: document.getElementById('costDescInput'),
+      costDetailBtn: document.getElementById('costDetailBtn'),
       costSaveBtn: document.getElementById('costSaveBtn'),
       costCancelBtn: document.getElementById('costCancelBtn'),
       orderOffThresholdSheet: document.getElementById('orderOffThresholdSheet'),
@@ -1346,6 +1348,7 @@
       state.statsCostDetail = {
         open: false,
         loading: false,
+        deleting: false,
         game_account: '',
         game_name: 'WZRY',
         display_name: '',
@@ -1377,6 +1380,7 @@
       state.statsCostDetail = {
         open: false,
         loading: false,
+        deleting: false,
         game_account: '',
         game_name: 'WZRY',
         display_name: '',
@@ -1655,6 +1659,9 @@
     });
     if (els.costSaveBtn) {
       els.costSaveBtn.addEventListener('click', () => submitCostConfig());
+    }
+    if (els.costDetailBtn) {
+      els.costDetailBtn.addEventListener('click', () => openCostDetailFromSheet());
     }
     if (els.costCancelBtn) {
       els.costCancelBtn.addEventListener('click', () => closeCostSheet());

@@ -2811,6 +2811,12 @@
       margin-bottom: 4px;
     }
 
+    .stats-cost-detail-top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
     .stats-cost-detail-date {
       margin: 0;
       font-size: 12px;
@@ -2831,6 +2837,15 @@
       color: #667b92;
       line-height: 1.45;
       word-break: break-word;
+    }
+
+    .stats-cost-detail-delete {
+      min-height: 28px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: #b5423b;
+      border-color: #efc9c5;
+      background: #fff4f3;
     }
 
     .toast {

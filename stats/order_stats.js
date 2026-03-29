@@ -1027,8 +1027,12 @@ async function getAccountCostDetailByUser(userId, options = {}) {
     if (!gameAccount) throw new Error('game_account 不能为空');
 
     const config = await loadAccountConfigByUser(uid, gameName);
-    const mergedConfigured = gameName === ALL_GAME_NAME ? mergeAccountRowsByGameAccount(config.configured || []) : (config.configured || []);
-    const cfgOne = (mergedConfigured || []).find((x) => String(x.game_account || '').trim() === gameAccount);
+    const accountRows = [
+        ...(Array.isArray(config.configured) ? config.configured : []),
+        ...(Array.isArray(config.missing) ? config.missing : [])
+    ];
+    const mergedAccounts = gameName === ALL_GAME_NAME ? mergeAccountRowsByGameAccount(accountRows) : accountRows;
+    const cfgOne = (mergedAccounts || []).find((x) => String(x.game_account || '').trim() === gameAccount);
     if (!cfgOne) throw new Error(`找不到账号: ${gameAccount}`);
 
     const scopedGameId = gameName === ALL_GAME_NAME ? '' : canonicalGameId('', String(cfgOne.game_name || gameName).trim() || gameName);
@@ -1038,12 +1042,16 @@ async function getAccountCostDetailByUser(userId, options = {}) {
         gameAccount,
         { limit: 100, all_games: gameName === ALL_GAME_NAME }
     );
+    const purchaseCostAmount = toMoney2((records || []).reduce((sum, x) => {
+        if (String(x && x.cost_type || '').trim() !== 'purchase') return sum;
+        return sum + Number(x && x.cost_amount || 0);
+    }, 0));
     return {
         game_account: String(cfgOne.game_account || gameAccount).trim(),
         game_name: String(cfgOne.game_name || gameName).trim() || gameName,
         display_name: String(cfgOne.display_name || cfgOne.role_name || cfgOne.game_account || gameAccount).trim(),
         total_cost_amount: toMoney2(cfgOne.total_cost_amount || 0),
-        purchase_cost_amount: toMoney2(cfgOne.purchase_price || 0),
+        purchase_cost_amount: purchaseCostAmount,
         list: (records || []).map((x) => ({
             id: Number(x.id || 0),
             cost_amount: toMoney2(x.cost_amount || 0),

@@ -997,6 +997,37 @@ async function updateUserGameAccountPurchaseByUserAndAccount(userId, gameAccount
     }
 }
 
+async function clearUserGameAccountPurchaseByUserAndAccount(userId, gameAccount, desc = '', gameId = '', gameName = '') {
+    await initUserGameAccountDb();
+    const uid = Number(userId || 0);
+    const acc = String(gameAccount || '').trim();
+    if (!uid) throw new Error('user_id 不合法');
+    if (!acc) throw new Error('game_account 不能为空');
+
+    const db = openDatabase();
+    try {
+        const row = await get(db, `
+            SELECT id
+            FROM user_game_account
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
+            ORDER BY id DESC
+            LIMIT 1
+        `, [uid, canonicalGameId(gameId, gameName || 'WZRY'), acc]);
+        if (!row) throw new Error(`找不到账号: ${acc}`);
+
+        await run(db, `
+            UPDATE user_game_account
+            SET purchase_price = 0, purchase_date = '', modify_date = ?, desc = ?
+            WHERE id = ?
+        `, [nowText(), String(desc || '').trim(), Number(row.id)]);
+
+        const updated = await get(db, `SELECT * FROM user_game_account WHERE id = ? LIMIT 1`, [Number(row.id)]);
+        return rowToAccount(updated);
+    } finally {
+        db.close();
+    }
+}
+
 async function updateUserGameAccountTotalCostByUserAndAccount(userId, gameAccount, totalCostAmount, desc = '', gameId = '', gameName = '') {
     await initUserGameAccountDb();
     const uid = Number(userId || 0);
@@ -1235,6 +1266,7 @@ module.exports = {
     listAccountRemarksByUserAndAccounts,
     listAccountRemarksByUserAndIdentities,
     updateUserGameAccountPurchaseByUserAndAccount,
+    clearUserGameAccountPurchaseByUserAndAccount,
     updateUserGameAccountTotalCostByUserAndAccount,
     updateUserGameAccountSwitchByUserAndAccount,
     getLatestUserGameAccountByUserAndAccount,

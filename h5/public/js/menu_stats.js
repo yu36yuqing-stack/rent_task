@@ -25,6 +25,7 @@
     function renderStatsCostDetailSheet() {
       const d = state.statsCostDetail || {};
       const opened = Boolean(d.open);
+      const deleting = Boolean(d.deleting);
       if (!els.statsCostDetailSheet) return;
       els.statsCostDetailSheet.classList.toggle('hidden', !opened);
       if (!opened) return;
@@ -53,17 +54,29 @@
         <div class="stats-cost-detail-item">
           <div class="stats-cost-detail-top">
             <p class="stats-cost-detail-date">${x.cost_date || '-'}</p>
-            <p class="stats-cost-detail-money">¥${Number(x.cost_amount || 0).toFixed(2)}</p>
+            <div class="stats-cost-detail-top-actions">
+              <p class="stats-cost-detail-money">¥${Number(x.cost_amount || 0).toFixed(2)}</p>
+              <button class="btn btn-ghost btn-card-action stats-cost-detail-delete" data-cost-delete-id="${Number(x.id || 0)}" ${deleting ? 'disabled' : ''}>删除</button>
+            </div>
           </div>
           <p class="stats-cost-detail-meta">类型：${costTypeText(x.cost_type)}${x.cost_desc ? ` · ${x.cost_desc}` : ''}</p>
         </div>
       `).join('');
+      Array.from(els.statsCostDetailList.querySelectorAll('[data-cost-delete-id]')).forEach((n) => {
+        n.addEventListener('click', async () => {
+          const recordId = Number(n.getAttribute('data-cost-delete-id') || 0);
+          if (!recordId) return;
+          if (!window.confirm('删除后会重算总成本，确认删除？')) return;
+          await deleteStatsCostDetail(recordId);
+        });
+      });
     }
 
     function closeStatsCostDetailSheet() {
       state.statsCostDetail = {
         open: false,
         loading: false,
+        deleting: false,
         game_account: '',
         game_name: 'WZRY',
         display_name: '',
@@ -75,6 +88,17 @@
       renderStatsCostDetailSheet();
     }
 
+    function bindStatsCostDetailSheetEvents() {
+      if (els.statsCostDetailClose) {
+        els.statsCostDetailClose.onclick = () => closeStatsCostDetailSheet();
+      }
+      if (els.statsCostDetailSheet) {
+        els.statsCostDetailSheet.onclick = (e) => {
+          if (e.target === els.statsCostDetailSheet) closeStatsCostDetailSheet();
+        };
+      }
+    }
+
     async function openStatsCostDetail(item) {
       const gameAccount = String(item && item.game_account || '').trim();
       const gameName = String(item && item.game_name || state.statsBoard.game_name || 'WZRY').trim() || 'WZRY';
@@ -82,6 +106,7 @@
       state.statsCostDetail = {
         open: true,
         loading: true,
+        deleting: false,
         game_account: gameAccount,
         game_name: gameName,
         display_name: String(item && (item.display_name || item.role_name || item.game_account) || '').trim(),
@@ -96,6 +121,7 @@
         state.statsCostDetail = {
           open: true,
           loading: false,
+          deleting: false,
           game_account: String(out.game_account || gameAccount).trim(),
           game_name: String(out.game_name || gameName).trim() || gameName,
           display_name: String(out.display_name || state.statsCostDetail.display_name || gameAccount).trim(),
@@ -110,6 +136,67 @@
       }
       renderStatsCostDetailSheet();
     }
+
+    async function deleteStatsCostDetail(recordId) {
+      const d = state.statsCostDetail || {};
+      if (!recordId || !d.game_account) return;
+      const deletingRecord = (state.statsCostDetail.list || []).find((x) => Number(x && x.id || 0) === Number(recordId)) || null;
+      state.statsCostDetail.deleting = true;
+      renderStatsCostDetailSheet();
+      try {
+        const out = await request('/api/products/account-cost/delete', {
+          method: 'POST',
+          body: JSON.stringify({
+            record_id: Number(recordId),
+            game_account: String(d.game_account || '').trim(),
+            game_name: String(d.game_name || 'WZRY').trim() || 'WZRY'
+          })
+        });
+        const nextTotal = Number(out && out.data && out.data.total_cost_amount || 0);
+        state.statsCostDetail.list = (state.statsCostDetail.list || []).filter((x) => Number(x && x.id || 0) !== Number(recordId));
+        state.statsCostDetail.total_cost_amount = Number(nextTotal.toFixed(2));
+        state.statsCostDetail.purchase_cost_amount = (state.statsCostDetail.list || []).reduce((sum, x) => {
+          if (String(x && x.cost_type || '').trim() !== 'purchase') return sum;
+          return sum + Number(x && x.cost_amount || 0);
+        }, 0);
+        const nextPurchase = (state.statsCostDetail.list || []).find((one) => String(one && one.cost_type || '').trim() === 'purchase') || null;
+        state.list = (state.list || []).map((x) => {
+          if (String(x && x.game_account || '').trim() !== String(d.game_account || '').trim()) return x;
+          if (String(x && x.game_name || 'WZRY').trim() !== String(d.game_name || 'WZRY').trim()) return x;
+          return {
+            ...x,
+            total_cost_amount: Number(nextTotal.toFixed(2)),
+            purchase_price: nextPurchase
+              ? Number(nextPurchase.cost_amount || 0)
+              : (deletingRecord && String(deletingRecord.cost_type || '').trim() === 'purchase' ? 0 : Number(x.purchase_price || 0)),
+            purchase_date: nextPurchase
+              ? String(nextPurchase.cost_date || '').slice(0, 10)
+              : (deletingRecord && String(deletingRecord.cost_type || '').trim() === 'purchase' ? '' : String(x.purchase_date || '').slice(0, 10))
+          };
+        });
+        state.statsBoard.by_account = (state.statsBoard.by_account || []).map((x) => {
+          if (String(x && x.game_account || '').trim() !== String(d.game_account || '').trim()) return x;
+          if (String(x && x.game_name || 'WZRY').trim() !== String(d.game_name || 'WZRY').trim()) return x;
+          return {
+            ...x,
+            total_cost_amount: Number(nextTotal.toFixed(2)),
+            purchase_cost_amount: Number(state.statsCostDetail.purchase_cost_amount || 0),
+            purchase_base: Number(state.statsCostDetail.purchase_cost_amount || 0)
+          };
+        });
+        showToast('删除成功');
+      } catch (e) {
+        alert(e.message || '删除失败');
+      } finally {
+        state.statsCostDetail.deleting = false;
+        renderStatsCostDetailSheet();
+        if (typeof renderList === 'function') renderList();
+      }
+    }
+
+    window.openStatsCostDetailExternal = async (item) => {
+      await openStatsCostDetail(item || {});
+    };
 
     function currentMonthText() {
       const d = new Date();
@@ -367,12 +454,7 @@
       }
       renderStatsMissingOverlay();
       renderStatsCostDetailSheet();
-      if (els.statsCostDetailClose) {
-        els.statsCostDetailClose.onclick = () => closeStatsCostDetailSheet();
-      }
-      if (els.statsCostDetailSheet) {
-        els.statsCostDetailSheet.onclick = (e) => {
-          if (e.target === els.statsCostDetailSheet) closeStatsCostDetailSheet();
-        };
-      }
+      bindStatsCostDetailSheetEvents();
     }
+
+    bindStatsCostDetailSheetEvents();
