@@ -907,8 +907,11 @@ async function handleOrders(req, res, urlObj) {
             const acc = String((item && item.game_account) || '').trim();
             const gid = String((item && item.game_id) || '').trim();
             const hit = accountMap.get(`${gid}::${acc}`) || null;
-            const fallback = String((item && item.role_name) || '').trim() || acc;
-            const displayName = fallback || (hit ? resolveDisplayNameByRow(hit, acc) : '');
+            const displayName = resolveDisplayNameByRow({
+                ...(hit || {}),
+                game_account: acc,
+                role_name: String((item && item.role_name) || '').trim()
+            }, acc);
             return {
                 ...item,
                 display_name: displayName || acc

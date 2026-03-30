@@ -477,7 +477,7 @@
             <div class="order-complaint-row"><span class="order-complaint-label">订单号</span><span class="order-complaint-value">${textOrDash(order.order_no)}</span></div>
             <div class="order-complaint-row"><span class="order-complaint-label">渠道</span><span class="order-complaint-value">${textOrDash(order.channel)}</span></div>
             <div class="order-complaint-row"><span class="order-complaint-label">订单状态</span><span class="order-complaint-value">${textOrDash(detail.detail_status || order.order_status)}</span></div>
-            <div class="order-complaint-row"><span class="order-complaint-label">角色</span><span class="order-complaint-value">${textOrDash(order.role_name || order.game_account)}</span></div>
+            <div class="order-complaint-row"><span class="order-complaint-label">角色</span><span class="order-complaint-value">${textOrDash(order.display_name || order.role_name || order.game_account)}</span></div>
             <div class="order-complaint-row"><span class="order-complaint-label">订单金额</span><span class="order-complaint-value">¥${Number(order.order_amount || 0).toFixed(2)}</span></div>
             <div class="order-complaint-row"><span class="order-complaint-label">实收租金</span><span class="order-complaint-value">¥${actualAmount.toFixed(2)}</span></div>
             <div class="order-complaint-row"><span class="order-complaint-label">订单手续费</span><span class="order-complaint-value">¥${feeAmount.toFixed(2)}</span></div>
@@ -542,7 +542,7 @@
         els.orderListContainer.innerHTML = o.list.map((item) => `
           <div class="order-card">
             <div class="order-card-top">
-              <p class="order-card-role">${buildOrderGameAvatarHtml(item)}<span class="order-role-text">${item.display_name || item.role_name || item.game_account || '-'}</span></p>
+              <p class="order-card-role">${buildOrderGameAvatarHtml(item)}<span class="order-role-text">${item.display_name || item.game_account || '-'}</span></p>
               <span class="order-chip ${(String(item.order_status || '') === '租赁中' || String(item.order_status || '') === '出租中') ? 'progress' : 'done'}">${item.order_status || '-'}</span>
             </div>
             <div class="order-id-row">
