@@ -224,13 +224,14 @@ async function listActiveOrderSnapshotByUser(userId, accounts = []) {
               AND is_deleted = 0
               AND (${tupleSql})
               AND (
-                (
+                COALESCE(order_status, '') IN ('租赁中', '出租中')
+                OR (
                   TRIM(COALESCE(start_time, '')) <> ''
                   AND TRIM(COALESCE(end_time, '')) <> ''
                   AND start_time <= ?
                   AND end_time > ?
+                  AND COALESCE(order_status, '') NOT IN ('已退款', '已撤单', '已完成', '部分完成', '已结束', '已取消')
                 )
-                OR COALESCE(order_status, '') IN ('租赁中', '出租中')
               )
             ORDER BY datetime(end_time) DESC, id DESC
         `, [uid, ...uniq.flatMap((x) => [x.game_id, x.game_account]), nowText, nowText]);
