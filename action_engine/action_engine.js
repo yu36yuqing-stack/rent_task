@@ -5,7 +5,8 @@ const { uhaozuOffShelf, uhaozuOnShelf } = require('../uhaozu/uhaozu_api');
 const { changeStatus: changeZhwStatus } = require('../zuhaowang/zuhaowang_api');
 const {
     buildPlatformStatusNorm,
-    isOnAllowedByCode
+    isOnAllowedByCode,
+    isUhaozuOnlineDetectReason
 } = require('../product/prod_channel_status');
 const { appendProductOnoffHistory } = require('../database/product_onoff_history_db');
 const {
@@ -26,6 +27,13 @@ function sleep(ms) {
 function isActiveShelfStatus(status) {
     const s = String(status || '').trim();
     return s === '上架' || s === '租赁中' || s === '出租中';
+}
+
+function isUhaozuOnlineDetectSoftBlock(norm = {}) {
+    const code = String((norm && norm.code) || '').trim();
+    const reason = String((norm && norm.reason) || '').trim();
+    if (code !== 'auth_abnormal') return false;
+    return isUhaozuOnlineDetectReason(reason);
 }
 
 async function clearPlatformRestrictReliable({
@@ -169,8 +177,10 @@ function detectConflictsAndBuildSnapshot({
         const normByAcc = platformStatusNormMap && typeof platformStatusNormMap === 'object'
             ? (platformStatusNormMap[identityKey] || {})
             : {};
+        const uNorm = normByAcc.uhaozu && typeof normByAcc.uhaozu === 'object' ? normByAcc.uhaozu : {};
+        const ignoreUhaozuOnlineDetect = isUhaozuOnlineDetectSoftBlock(uNorm);
         const canAutoOnY = isOnAllowedByCode(String((normByAcc.uuzuhao && normByAcc.uuzuhao.code) || ''));
-        const canAutoOnU = isOnAllowedByCode(String((normByAcc.uhaozu && normByAcc.uhaozu.code) || ''));
+        const canAutoOnU = isOnAllowedByCode(String((uNorm && uNorm.code) || '')) || ignoreUhaozuOnlineDetect;
         const canAutoOnZ = isOnAllowedByCode(String((normByAcc.zuhaowang && normByAcc.zuhaowang.code) || ''));
 
         if (anyRenting) {
@@ -198,11 +208,13 @@ function detectConflictsAndBuildSnapshot({
                         reason: '无租赁，自动补上架悠悠'
                     });
                 }
-                if (statU === '下架' && !platformRestrictSet.has(`${identityKey}::uhaozu`) && canAutoOnU) {
+                if (!isActiveShelfStatus(statU) && !platformRestrictSet.has(`${identityKey}::uhaozu`) && canAutoOnU) {
                     actions.push({
                         type: 'on_u',
                         item: { account: acc, game_id: one.game_id, game_name: one.game_name },
-                        reason: '无租赁，自动补上架U号租'
+                        reason: ignoreUhaozuOnlineDetect
+                            ? '无租赁，忽略U号租检测在线并自动补上架'
+                            : '无租赁，自动补上架U号租'
                     });
                 }
                 if (statZ === '下架' && !platformRestrictSet.has(`${identityKey}::zuhaowang`) && canAutoOnZ) {
