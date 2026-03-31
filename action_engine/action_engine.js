@@ -208,7 +208,7 @@ function detectConflictsAndBuildSnapshot({
                         reason: '无租赁，自动补上架悠悠'
                     });
                 }
-                if (!isActiveShelfStatus(statU) && !platformRestrictSet.has(`${identityKey}::uhaozu`) && canAutoOnU) {
+                if (u && !isActiveShelfStatus(statU) && !platformRestrictSet.has(`${identityKey}::uhaozu`) && canAutoOnU) {
                     actions.push({
                         type: 'on_u',
                         item: { account: acc, game_id: one.game_id, game_name: one.game_name },
