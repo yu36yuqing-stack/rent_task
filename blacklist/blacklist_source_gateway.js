@@ -10,6 +10,7 @@ const {
 
 const GUARD_ONLINE_SOURCE = 'guard_online';
 const GUARD_FORBIDDEN_SOURCE = 'guard_forbidden';
+const PLATFORM_FACE_VERIFY_SOURCE = 'platform_face_verify';
 const GUARD_ONLINE_RECENT_END_SEC = 25 * 60;
 
 function nowText(input = null) {
@@ -140,6 +141,7 @@ async function setReasonSourceAndReconcile(userId, gameAccount, reasonText, opts
     else if (reason === '人工下架') source = 'manual_block';
     else if (reason === '禁玩中') source = GUARD_FORBIDDEN_SOURCE;
     else if (reason === '检测在线') source = GUARD_ONLINE_SOURCE;
+    else if (reason === '人脸识别') source = PLATFORM_FACE_VERIFY_SOURCE;
     else if (reason === '冷却期下架') source = 'order_cooldown';
     else if (/^\d+单下架$/.test(reason)) source = 'order_n_off';
     const key = normalizeAccountKey(gameAccount, opts);
@@ -230,6 +232,7 @@ async function setGuardSourcesByProbeAndReconcile(userId, gameAccount, probe = {
 module.exports = {
     GUARD_ONLINE_SOURCE,
     GUARD_FORBIDDEN_SOURCE,
+    PLATFORM_FACE_VERIFY_SOURCE,
     GUARD_ONLINE_RECENT_END_SEC,
     upsertSourceAndReconcile,
     clearSourceAndReconcile,

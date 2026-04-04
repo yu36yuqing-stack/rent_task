@@ -12,9 +12,113 @@ const { triggerProdStatusGuard, probeProdOnlineStatus } = require('../product/pr
 const { reconcileOrder3OffBlacklistByUser } = require('../order/order');
 const { loadUserBlacklistSet, loadUserBlacklistReasonMap } = require('../user/user');
 const { executeUserActionsIfNeeded } = require('../action_engine/action_engine');
+const { isFaceVerifyReason } = require('../product/prod_channel_status');
+const { upsertSourceAndReconcile, PLATFORM_FACE_VERIFY_SOURCE } = require('../blacklist/blacklist_source_gateway');
+const { listBlacklistSourcesByUserAndAccounts } = require('../database/user_blacklist_source_db');
 
 function accountKeyOf(gameId, account) {
     return `${String(gameId || '1').trim() || '1'}::${String(account || '').trim()}`;
+}
+
+const FACE_VERIFY_HOLD_MS = 12 * 3600 * 1000;
+
+function toDateTimeText(input = new Date()) {
+    const d = input instanceof Date ? input : new Date(input);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function detectFaceVerifyPlatforms(row = {}) {
+    const prd = row && typeof row.channel_prd_info === 'object' ? row.channel_prd_info : {};
+    const checks = [
+        { platform: 'uhaozu', reason: String((((prd || {}).uhaozu || {}).audit_reason) || (((prd || {}).uhaozu || {}).reason) || '').trim() },
+        { platform: 'zuhaowang', reason: String((((prd || {}).zuhaowang || {}).exception_msg) || '').trim() },
+        { platform: 'uuzuhao', reason: String((((prd || {}).uuzuhao || {}).reason) || '').trim() }
+    ];
+    return checks.filter((item) => isFaceVerifyReason(item.reason));
+}
+
+async function reconcilePlatformFaceVerifyBlacklist(userId, rows = [], logger = console) {
+    const uid = Number(userId || 0);
+    const list = Array.isArray(rows) ? rows : [];
+    if (!uid || list.length === 0) return { touched: 0, activated: 0, released: 0 };
+
+    const accounts = list
+        .map((row) => ({
+            game_account: String((row && row.game_account) || '').trim(),
+            game_id: String((row && row.game_id) || '1').trim() || '1',
+            game_name: String((row && row.game_name) || 'WZRY').trim() || 'WZRY'
+        }))
+        .filter((item) => item.game_account);
+    const existingRows = await listBlacklistSourcesByUserAndAccounts(uid, accounts, { active_only: false });
+    const existingMap = new Map(existingRows
+        .filter((row) => String((row && row.source) || '').trim() === PLATFORM_FACE_VERIFY_SOURCE)
+        .map((row) => [accountKeyOf(row.game_id, row.game_account), row]));
+
+    let activated = 0;
+    let released = 0;
+    for (const row of list) {
+        const acc = String((row && row.game_account) || '').trim();
+        const gid = String((row && row.game_id) || '1').trim() || '1';
+        const gname = String((row && row.game_name) || 'WZRY').trim() || 'WZRY';
+        if (!acc) continue;
+        const key = accountKeyOf(gid, acc);
+        const hits = detectFaceVerifyPlatforms(row);
+        const existing = existingMap.get(key) || null;
+        if (hits.length > 0) {
+            const expireAt = toDateTimeText(Date.now() + FACE_VERIFY_HOLD_MS);
+            await upsertSourceAndReconcile(uid, {
+                game_account: acc,
+                game_id: gid,
+                game_name: gname
+            }, PLATFORM_FACE_VERIFY_SOURCE, {
+                active: true,
+                reason: '人脸识别',
+                priority: 800,
+                expire_at: expireAt,
+                detail: {
+                    platforms: hits.map((item) => item.platform),
+                    reasons: hits.map((item) => ({ platform: item.platform, reason: item.reason })),
+                    hold_hours: 12,
+                    refreshed_at: toDateTimeText()
+                }
+            }, {
+                operator: 'system',
+                desc: 'reconcile face verify blacklist by product sync'
+            });
+            activated += 1;
+            continue;
+        }
+        if (!existing || !existing.active) continue;
+        const expireAtText = String(existing.expire_at || '').trim();
+        if (!expireAtText) continue;
+        const expireTs = Date.parse(expireAtText.replace(' ', 'T'));
+        if (!Number.isFinite(expireTs) || expireTs > Date.now()) continue;
+        await upsertSourceAndReconcile(uid, {
+            game_account: acc,
+            game_id: gid,
+            game_name: gname
+        }, PLATFORM_FACE_VERIFY_SOURCE, {
+            active: false,
+            reason: '人脸识别',
+            priority: 800,
+            expire_at: expireAtText,
+            detail: {
+                ...((existing && existing.detail && typeof existing.detail === 'object') ? existing.detail : {}),
+                released_at: toDateTimeText(),
+                release_by: 'ttl_12h'
+            }
+        }, {
+            operator: 'system',
+            desc: 'release face verify blacklist by ttl'
+        });
+        released += 1;
+    }
+    const touched = activated + released;
+    if (touched > 0) {
+        logger.log(`[FaceVerifyBL] user_id=${uid} activated=${activated} released=${released}`);
+    }
+    return { touched, activated, released };
 }
 
 function applyActionResultToRows(rows = [], actions = []) {
@@ -75,6 +179,17 @@ async function runFullUserPipeline(user, options = {}) {
             const msg = String(e && e.message ? e.message : e || 'reconcile_failed');
             nonFatalErrors.push(`order3off_reconcile_failed:${msg}`);
             logger.warn(`[Order3Off] 收敛失败 user_id=${uid}: ${msg}`);
+        }
+
+        try {
+            const faceRet = await reconcilePlatformFaceVerifyBlacklist(uid, rows, logger);
+            if (faceRet && Number(faceRet.touched || 0) > 0) {
+                logger.log(`[FaceVerifyBL] user_id=${uid} result=${JSON.stringify(faceRet)}`);
+            }
+        } catch (e) {
+            const msg = String(e && e.message ? e.message : e || 'face_verify_reconcile_failed');
+            nonFatalErrors.push(`face_verify_reconcile_failed:${msg}`);
+            logger.warn(`[FaceVerifyBL] 收敛失败 user_id=${uid}: ${msg}`);
         }
 
         blacklistSet = await loadUserBlacklistSet(uid);
@@ -156,5 +271,7 @@ async function runFullUserPipeline(user, options = {}) {
 }
 
 module.exports = {
-    runFullUserPipeline
+    runFullUserPipeline,
+    reconcilePlatformFaceVerifyBlacklist,
+    detectFaceVerifyPlatforms
 };

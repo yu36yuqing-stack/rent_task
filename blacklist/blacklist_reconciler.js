@@ -19,6 +19,7 @@ const SOURCE_RULES = Object.freeze({
     manual_recover: { priority: 1000, reason: '账号找回' },
     manual_maintenance: { priority: 900, reason: '维护中' },
     manual_block: { priority: 850, reason: '人工下架' },
+    platform_face_verify: { priority: 800, reason: '人脸识别' },
     guard_forbidden: { priority: 700, reason: '禁玩中' },
     guard_online: { priority: 650, reason: '检测在线' },
     order_cooldown: { priority: 500, reason: '冷却期下架' },
@@ -64,6 +65,7 @@ function reasonFromLegacy(reasonText = '') {
     if (reason === '禁玩中') return { source: 'guard_forbidden', priority: 700, reason };
     if (reason === '维护中') return { source: 'manual_maintenance', priority: 900, reason };
     if (reason === '人工下架') return { source: 'manual_block', priority: 850, reason };
+    if (reason === '人脸识别') return { source: 'platform_face_verify', priority: 800, reason };
     if (reason === '账号找回') return { source: 'manual_recover', priority: 1000, reason };
     return { source: 'legacy_carryover', priority: 600, reason };
 }

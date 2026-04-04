@@ -27,6 +27,17 @@ function isUhaozuOnlineDetectReason(reason) {
     return /检测.*游戏在线/.test(text) && /离线后手动上架/.test(text);
 }
 
+function isFaceVerifyReason(reason) {
+    const text = String(reason || '').trim();
+    if (!text) return false;
+    if (text.includes('账号人脸识别')) return true;
+    if (text.includes('人脸识别')) return true;
+    if (text.includes('人脸验证')) return true;
+    if (text.includes('需人脸')) return true;
+    if (text.includes('刷脸')) return true;
+    return false;
+}
+
 function restrictedLabelByReason(reason) {
     const text = String(reason || '').trim();
     if (!text) return NORM_CODE_LABEL_MAP.restricted;
@@ -156,5 +167,6 @@ module.exports = {
     isRestrictedLikeStatus,
     isOnAllowedByCode,
     isUhaozuOnlineDetectReason,
+    isFaceVerifyReason,
     restrictedLabelByReason
 };
