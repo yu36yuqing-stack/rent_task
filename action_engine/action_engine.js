@@ -1,7 +1,7 @@
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { buildAuthMap } = require('../user/user');
 const { youpinOffShelf, youpinOnShelf } = require('../uuzuhao/uuzuhao_api');
-const { uhaozuOffShelf, uhaozuOnShelf } = require('../uhaozu/uhaozu_api');
+const { uhaozuOffShelf, uhaozuOnShelf, uhaozuReshelfByModify } = require('../uhaozu/uhaozu_api');
 const { changeStatus: changeZhwStatus } = require('../zuhaowang/zuhaowang_api');
 const {
     buildPlatformStatusNorm,
@@ -34,6 +34,21 @@ function isUhaozuOnlineDetectSoftBlock(norm = {}) {
     const reason = String((norm && norm.reason) || '').trim();
     if (code !== 'auth_abnormal') return false;
     return isUhaozuOnlineDetectReason(reason);
+}
+
+function platformFromActionType(type = '') {
+    const text = String(type || '').trim();
+    if (text === 'off_y' || text === 'on_y') return 'uuzuhao';
+    if (text === 'off_u' || text === 'on_u' || text === 'on_u_modify') return 'uhaozu';
+    if (text === 'off_z' || text === 'on_z') return 'zuhaowang';
+    return '';
+}
+
+function shouldUseUhaozuModifyReshelf({ statY, statZ, ignoreUhaozuOnlineDetect }) {
+    if (!ignoreUhaozuOnlineDetect) return false;
+    const peerStatuses = [statY, statZ].filter((status) => String(status || '').trim() !== '未找到');
+    if (peerStatuses.length === 0) return false;
+    return peerStatuses.every((status) => isActiveShelfStatus(status));
 }
 
 async function clearPlatformRestrictReliable({
@@ -209,10 +224,24 @@ function detectConflictsAndBuildSnapshot({
                     });
                 }
                 if (u && !isActiveShelfStatus(statU) && !platformRestrictSet.has(`${identityKey}::uhaozu`) && canAutoOnU) {
+                    const useModifyReshelf = shouldUseUhaozuModifyReshelf({
+                        statY,
+                        statZ,
+                        ignoreUhaozuOnlineDetect
+                    });
                     actions.push({
-                        type: 'on_u',
-                        item: { account: acc, game_id: one.game_id, game_name: one.game_name },
-                        reason: ignoreUhaozuOnlineDetect
+                        type: useModifyReshelf ? 'on_u_modify' : 'on_u',
+                        item: {
+                            account: acc,
+                            game_id: one.game_id,
+                            game_name: one.game_name,
+                            goods_id: u.prd_id || '',
+                            prd_id: u.prd_id || '',
+                            platform_game_id: u.platform_game_id || ''
+                        },
+                        reason: useModifyReshelf
+                            ? '无租赁，其他平台已上架，U号租检测在线时改用改价接口原价补上架'
+                            : ignoreUhaozuOnlineDetect
                             ? '无租赁，忽略U号租检测在线并自动补上架'
                             : '无租赁，自动补上架U号租'
                     });
@@ -247,6 +276,7 @@ async function executeActions({
     youpinOnShelf,
     uhaozuOffShelf,
     uhaozuOnShelf,
+    uhaozuReshelfByModify,
     changeZhwStatus,
     readOnly = false
 }) {
@@ -284,17 +314,12 @@ async function executeActions({
 
             let success = false;
             let detail = { code: 0, msg: '' };
-            const platform = action.type.endsWith('_y')
-                ? 'uuzuhao'
-                : action.type.endsWith('_u')
-                ? 'uhaozu'
-                : action.type.endsWith('_z')
-                ? 'zuhaowang'
-                : '';
+            const platform = platformFromActionType(action.type);
 
             // U号租
             if (action.type === 'off_u') success = await uhaozuOffShelf(uhaozuPage, action.item.account, action.item);
             else if (action.type === 'on_u') success = await uhaozuOnShelf(uhaozuPage, action.item.account, action.item);
+            else if (action.type === 'on_u_modify') success = await uhaozuReshelfByModify(uhaozuPage, action.item.account, action.item);
 
             // 悠悠租号
             else if (action.type === 'off_y') success = await youpinOffShelf(youpinPage, action.item.account, action.item);
@@ -573,9 +598,8 @@ async function executeUserActionsIfNeeded({
     const requiredPlatforms = new Set();
     for (const action of actions) {
         const type = String(action && action.type || '');
-        if (type.endsWith('_y')) requiredPlatforms.add('uuzuhao');
-        else if (type.endsWith('_u')) requiredPlatforms.add('uhaozu');
-        else if (type.endsWith('_z')) requiredPlatforms.add('zuhaowang');
+        const platform = platformFromActionType(type);
+        if (platform) requiredPlatforms.add(platform);
     }
     for (const platform of requiredPlatforms) {
         const auth = authMap[platform];
@@ -610,6 +634,11 @@ async function executeUserActionsIfNeeded({
             const auth = authMap.uhaozu;
             if (!auth) return false;
             return uhaozuOnShelf(null, account, { auth, ...item });
+        },
+        uhaozuReshelfByModify: (_page, account, item = {}) => {
+            const auth = authMap.uhaozu;
+            if (!auth) return false;
+            return uhaozuReshelfByModify(null, account, { auth, ...item });
         },
         changeZhwStatus: (account, gameId, type, dataId) => {
             const auth = authMap.zuhaowang;

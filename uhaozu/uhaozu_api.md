@@ -151,6 +151,175 @@ curl -X POST 'https://mapi.uhaozu.com/api/goods/shelves/1132473733' \
 
 
 
+# 这是一个“改价 / 修改商品信息”接口
+从 URL `.../api/goods/modify/1132393091` 可以看出，这是对商品 `goodsId=1132393091` 的整体修改接口，不只是改价格，而是把整份商品资料重新提交一次。
+
+## 接口概览
+- 方法：`POST`
+- URL：`https://mapi.uhaozu.com/api/goods/modify/{goodsId}`
+- 当前样例商品：`1132393091`
+- `Content-Type`：`application/json;charset=UTF-8`
+- 鉴权：依赖登录态 `Cookie`
+- 来源页面：`https://b.uhaozu.com/goods`
+
+## 请求体结构
+顶层主要有这些字段：
+
+```json
+{
+  "goodsId": 1132393091,
+  "info": { "...核心商品信息..." },
+  "options": [ "...商品标签/属性选项..." ],
+  "urls": [ "...商品图片..." ],
+  "goodsDiscountOptions": [ "...多租优惠..." ],
+  "rentDiscountOptions": [],
+  "authSource": "LB",
+  "mode": 0,
+  "randStr": "L9XCEgq00lMu",
+  "authVersion": 2
+}
+```
+
+## 关键理解
+- `goodsId`：商品 ID，URL 和 Body 内要保持一致。
+- `info`：核心商品信息，价格、标题、账号、描述、租赁策略基本都在这里。
+- `options`：商品标签/属性明细，本质是“英雄/皮肤/段位/V 等”等勾选项，不是价格核心字段。
+- `urls`：商品图片列表。
+- `goodsDiscountOptions`：多租优惠。
+- `rentDiscountOptions`：额外租期折扣，当前样例为空。
+
+## `info` 字段解析
+这部分是最关键的。
+
+### 1. 商品基础身份
+- `gameId: "A2705"`：游戏 ID，当前是王者荣耀。
+- `platformId: "A2705PT1002"`：平台 ID。
+- `carrierId: "A2775P001"`：渠道/运营商区服维度。
+- `goodsTitle`：商品标题。
+- `goodsDescription`：商品详情描述。
+- `tencentGroupId: "1542"`：区服/大区 ID。
+- `tencentGroupName: "手Q532区-琥珀纪元"`：区服名称。
+
+### 2. 账号信息
+- `gameAccount: "2874231439"`：游戏账号。
+- `gamePassword: "1024=1kb"`：游戏密码。
+- `gameRoleName: "٩小妤妈妈"`：角色名。
+- `gameRoleLevel: "30"`：角色等级。
+- `loginMethod: 2`：登录方式。
+
+说明：
+- 这个接口会把账号密码一起带上，说明它是“整单覆盖式修改”接口，不是纯价格 patch。
+- 如果后续程序化调用，日志里不要打印 `gamePassword`。
+
+### 3. 价格字段
+样例里的核心价格如下：
+
+- `rentalByHour: "4"`：小时价，4 元/小时
+- `rentalByNight: 15.2`：包夜价，15.2 元/晚
+- `rentalByDay: 22.8`：包天价，22.8 元/天
+- `rentalByWeek: 152`：包周价，152 元/周
+- `deposit: 3`：押金，3 元
+
+补充字段：
+- `discount: 1`：折扣倍率，当前看起来表示不打折
+- `goodsDiscountOptions: [{"buy":5,"checked":true,"free":1}]`
+
+`goodsDiscountOptions` 这条样例可理解为：
+- 租满 `5` 个计费单位
+- 赠送 `1` 个计费单位
+- `checked=true` 表示当前启用
+
+但它最终按“小时 / 夜 / 天 / 周”哪一种口径生效，还需要继续结合前端交互或接口响应确认。
+
+### 4. 租赁规则
+- `minRentTime: 2`：最短租期 2 小时
+- `payPeriod: 10`：支付时长/结算周期字段，当前值 10
+- `rentTimesLimit: 0`：租用次数限制，0 通常表示不限
+- `isAppointment: 0`：不支持预约
+- `freePlay: false`：不是免押/免玩
+- `isBargain: false`：不支持议价
+- `isOrderRebate: 0`：订单返利关闭
+
+### 5. 其它业务字段
+- `channelSupply: false`：非渠道代供
+- `provinceName: null` / `cityName: null`：未设置地域
+- `cotenantId: ""`：无合租配置
+- `minGuaranteeMoney: ""`：最低保障金未填
+- `commission: ""`：佣金字段未填
+- `remark: ""`：备注为空
+
+## `options` 字段怎么理解
+`options` 很长，但本质是“商品属性勾选列表”。
+
+常见结构：
+
+```json
+{
+  "optionId": "A2705YX1089",
+  "optionName": "英雄",
+  "propertyId": "A2705YX",
+  "optionNum": 1
+}
+```
+
+可以这样理解：
+- `propertyId`：属性分类
+- `optionId`：具体选项
+- `optionName`：展示名或数量值
+- `optionNum`：勾选/数量，一般为 `1`
+
+从当前样例看，`options` 主要包含：
+- 英雄明细：`propertyId = A2705YX`
+- 皮肤明细：`propertyId = A2705PF`
+- 部分细分皮肤池/专题标签：如 `A2705S7334X...`
+- 汇总属性：
+  - `A2705S4108` -> `V10`
+  - `A2705DW` -> `至尊星耀`
+  - `A2705XYF` -> `100`
+  - `A2705PFSL` -> `575`
+  - `A2705S2833` -> `7`
+  - `A2705YXSL` -> `129`
+
+说明：
+- 这些汇总值和 `goodsTitle/goodsDescription` 文案可能不完全一致。
+- 例如文案写了“英雄 128、皮肤 572”，但 `options` 末尾汇总看起来是“英雄 129、皮肤 575”。
+- 如果后续做自动改价，价格建议优先依据 `info` 里的显式价格字段；如果要做商品信息校验，再把 `options` 当作属性真值源单独处理。
+
+## `urls` 字段
+- 是商品图片数组
+- 样例里共 8 张图
+- 有 `picture.uhaozu.com` 和 `picture.nj-ss.com` 两类地址
+
+## 这个接口适合怎么用
+- 改价格：改 `info.rentalByHour / rentalByNight / rentalByDay / rentalByWeek / deposit`
+- 改标题或描述：改 `info.goodsTitle / goodsDescription`
+- 改商品标签：改 `options`
+- 改图片：改 `urls`
+
+结论：
+- 这是一个“整商品提交”接口
+- 其中价格等关键信息确实主要在 `info`
+- 真正做自动改价时，最小关注字段通常是：
+  - `goodsId`
+  - `info.rentalByHour`
+  - `info.rentalByNight`
+  - `info.rentalByDay`
+  - `info.rentalByWeek`
+  - `info.deposit`
+  - `goodsDiscountOptions`
+
+## 敏感信息提示
+这类报文里包含：
+- 登录态 Cookie
+- `gameAccount`
+- `gamePassword`
+
+后续如果要在代码里沉淀样例，建议：
+- Cookie 不落盘，改成占位符
+- `gamePassword` 不落盘，改成 `***`
+- 文档中只保留字段结构和语义
+
+
 在`curl` 命令中，**身份验证信息（相当于您的账号密码）完全包含在 `Cookie` 字段里**。
 具体来说，是 `-H 'Cookie: ...'` 这一行。
 ### 核心凭证分析

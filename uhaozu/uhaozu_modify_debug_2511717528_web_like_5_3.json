@@ -1,0 +1,343 @@
+{
+  "captured_at": "2026-04-04T15:45:26.382Z",
+  "replay_type": "web_like_modify_5_3",
+  "goods_id": 1132566414,
+  "target_hour_price": 5.3,
+  "request": {
+    "method": "POST",
+    "url": "https://mapi.uhaozu.com/merchants/goods/modify/1132566414",
+    "headers": {
+      "Accept": "application/json, text/plain, */*",
+      "Accept-Language": "zh-CN,zh;q=0.9",
+      "Connection": "keep-alive",
+      "Content-Type": "application/json;charset=UTF-8",
+      "Origin": "https://b.uhaozu.com",
+      "Referer": "https://b.uhaozu.com/release-goods?id=1132566414&gameId=CJZC001&from=%2Fgoods",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-site",
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+      "X-Requested-With": "XMLHttpRequest",
+      "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": "\"macOS\"",
+      "tml": "{\"platform\":\"20\",\"terminal\":\"0\"}",
+      "Cookie": "HMACCOUNT=1DCDE0E60BCD2A08; JSESSIONID=59C7D0BC4239A96E78FDAD43855D6F0E; uid=d8AZUpWrOsfV1GUYswbdixom5hesDuIqitADwxPIXzOs0XOYUMeoElLUKiEn9TTKJdMk8yOXr3Mj0q08dKBQ-TEEDmCp6e1ix0Hn4cc7KUijV8eDX4GJ0BVYFeKLOPCevhj9rWmO3EfW1tD3V13HMFjjRruDrXjUUQnS09afF42ZcDcCeO-rlMdcOEccz--ay9Oq; Hm_lvt_a3300660f0e3ddfe9253e1e7323179cf=1773587846; Hm_lvt_8ea4fcb9d0854f54b423c1e75b3cefdc=1773587846; Hm_lvt_d8c87cd1dcbd946bc8798d9aa99e46d1=1773587846; Hm_lpvt_d8c87cd1dcbd946bc8798d9aa99e46d1=1773760864; Hm_lpvt_a3300660f0e3ddfe9253e1e7323179cf=1773760864; Hm_lpvt_8ea4fcb9d0854f54b423c1e75b3cefdc=1773760864"
+    },
+    "payload_full": {
+      "id": 1132566414,
+      "info": {
+        "gameId": "CJZC001",
+        "platformId": "CJZC001PT1002",
+        "carrierId": "CJZC001Q1002",
+        "groupId": "CJZC001F1002",
+        "goodsTitle": "不朽星钻Ⅳ27粉 6载具 281套装 14王牌印记卓越王牌18星历史最高段140604热力值",
+        "gameAccount": "2511717528",
+        "gamePassword": "147258369cc",
+        "gameRoleName": "萌鱼脚",
+        "goodsDescription": "不朽星钻Ⅳ27粉，6载具，281套装，14王牌印记，卓越王牌18星历史最高段，140604热力值 平底锅-仲夏莫吉托/AUG-星之彼岸/M416-心之恋语/M416-墨龙九天/AKM-暮色玫影/M417-第五大道/Mk14-盛世惊鸿/Mk14-樱桃泡泡/Mk14-福马献瑞/DP-28-暗夜鎏金/MG3-辉羽雀灵/DP-28-豹影疾电/Kar98K-巳巳如意/M24-镜域双华/AMR-智耀战神/兰博基尼Estoque(银翼灰)/萌喵橘座/糖心拉力赛车(波动紫)/布加迪威龙(海洋蓝)/护世瑞兽/盛世惊鸿摩托车/",
+        "loginMethod": 2,
+        "isBargain": 0,
+        "channelSupply": 0,
+        "rentalByHour": 5.3,
+        "rentalByNight": 21.16,
+        "rentalByDay": 31.74,
+        "rentalByWeek": 211.58,
+        "customId": "",
+        "isAppointment": 0,
+        "isOrderRebate": 0,
+        "deposit": 100,
+        "minRentTime": 2,
+        "rentTimesLimit": 0,
+        "freePlay": false,
+        "remark": "",
+        "support5e": false,
+        "account5e": "",
+        "password5e": "",
+        "rank5eId": "",
+        "supportPerfect": false
+      },
+      "rentDiscountOptions": [
+        {
+          "x": 3,
+          "y": 95
+        }
+      ],
+      "goodsDiscountOptions": [
+        {
+          "buy": 4,
+          "free": 1,
+          "type": 0
+        }
+      ],
+      "publishStatus": 0,
+      "saveDraft": false,
+      "urls": [
+        "//picture.uhaozu.com/index-image/e9a2cc922b2533b593a01c1bd166f286-new-img.png?v=041925",
+        "//picture.nj-ss.com/2026/14/29/9e6aebf9321d4926a63e60ba4051ad79.jpg"
+      ],
+      "options": [
+        {
+          "optionName": "281",
+          "optionId": "CJZC001S0506X0710"
+        },
+        {
+          "optionName": "360",
+          "optionId": "CJZC001S9479X7521"
+        },
+        {
+          "optionName": "27",
+          "optionId": "CJZC001S0260X4254"
+        },
+        {
+          "optionName": "6",
+          "optionId": "CJZC001S4437X8575"
+        },
+        {
+          "optionId": "CJZC001S5772X2243"
+        },
+        {
+          "optionId": "CJZC001S9816X69332"
+        },
+        {
+          "optionName": "15",
+          "optionId": "CJZC001S2673X7955"
+        },
+        {
+          "optionId": "CJZC001S5514X4296"
+        },
+        {
+          "optionName": "14",
+          "optionId": "CJZC001S4304X47103"
+        },
+        {
+          "optionName": "141022",
+          "optionId": "CJZC001S9059X50355"
+        },
+        {
+          "optionName": "卓越王牌18星",
+          "optionId": "CJZC001S1705X55800"
+        },
+        {
+          "optionName": "不朽星钻Ⅰ",
+          "optionId": "CJZC001S5089X08144"
+        },
+        {
+          "optionId": "CJZC001S6839X35911",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X34161",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X5137",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X6892",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X45968",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X06342",
+          "optionNum": 5
+        },
+        {
+          "optionId": "CJZC001S6839X4052",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X27348",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X1237",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X4789",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X4455",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X4941",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X70513",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X1180",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X5517",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X74718",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X9814",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X95771",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X8050",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X9671",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X0011",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X3600",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X2893",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X3758",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X9027",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X89477",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S6839X12063",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S4484X1822",
+          "optionNum": 7
+        },
+        {
+          "optionId": "CJZC001S4484X69022",
+          "optionNum": 3
+        },
+        {
+          "optionId": "CJZC001S4978X92747",
+          "optionNum": 3
+        },
+        {
+          "optionId": "CJZC001S4484X4083",
+          "optionNum": 7
+        },
+        {
+          "optionId": "CJZC001S4484X45492",
+          "optionNum": 3
+        },
+        {
+          "optionId": "CJZC001S4484X71974",
+          "optionNum": 6
+        },
+        {
+          "optionId": "CJZC001S4484X29312",
+          "optionNum": 5
+        },
+        {
+          "optionId": "CJZC001S4484X24728",
+          "optionNum": 3
+        },
+        {
+          "optionId": "CJZC001S5809X19869",
+          "optionNum": 5
+        },
+        {
+          "optionId": "CJZC001S4484X66145",
+          "optionNum": 1
+        },
+        {
+          "optionId": "CJZC001S4484X0063",
+          "optionNum": 1
+        },
+        {
+          "optionId": "CJZC001S6675X99817",
+          "optionNum": 1
+        },
+        {
+          "optionId": "CJZC001S4484X23216",
+          "optionNum": 3
+        },
+        {
+          "optionId": "CJZC001S4484X0023",
+          "optionNum": 5
+        },
+        {
+          "optionId": "CJZC001S4484X1885",
+          "optionNum": 1
+        },
+        {
+          "optionId": "CJZC001S9122X0612",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S9122X5129",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S9122X94919",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S9122X83112",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S9122X15764",
+          "optionNum": 0
+        },
+        {
+          "optionId": "CJZC001S9122X42682",
+          "optionNum": 0
+        }
+      ],
+      "authSource": "LB",
+      "mode": 0,
+      "authVersion": 2
+    }
+  },
+  "response": {
+    "ok": true,
+    "status": 200,
+    "statusText": "",
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "access-control-allow-origin": "https://b.uhaozu.com",
+      "access-control-expose-headers": "version",
+      "connection": "keep-alive",
+      "content-length": "76",
+      "content-type": "application/json;charset=UTF-8",
+      "date": "Sat, 04 Apr 2026 15:45:26 GMT",
+      "server": "nginx",
+      "server-timing": "inner; dur=360",
+      "vary": "Origin",
+      "version": "20260331101906"
+    },
+    "body_text": "{\"object\":true,\"responseCode\":\"0000\",\"responseMsg\":\"success\",\"success\":true}"
+  },
+  "started_at": "2026-04-04T15:45:25.927Z"
+}

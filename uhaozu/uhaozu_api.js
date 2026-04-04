@@ -469,6 +469,182 @@ async function listAllGoods(pageSize = 30, auth = {}) {
     return all;
 }
 
+function cloneJsonSafe(value) {
+    if (value === undefined) return undefined;
+    return JSON.parse(JSON.stringify(value));
+}
+
+function mergeModifyPatch(base, patch) {
+    if (Array.isArray(patch)) return cloneJsonSafe(patch);
+    if (!patch || typeof patch !== 'object') return patch;
+    const out = Array.isArray(base) ? cloneJsonSafe(base) : { ...(base && typeof base === 'object' ? base : {}) };
+    for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined) continue;
+        if (Array.isArray(value)) {
+            out[key] = cloneJsonSafe(value);
+            continue;
+        }
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+            out[key] = mergeModifyPatch(out[key], value);
+            continue;
+        }
+        out[key] = value;
+    }
+    return out;
+}
+
+function toYuanPrice(value) {
+    if (value === null || value === undefined || value === '') return value;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return value;
+    return Number((n / 100).toFixed(2));
+}
+
+function toCentPrice(value) {
+    if (value === null || value === undefined || value === '') return value;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return value;
+    return Math.round(n * 100);
+}
+
+function normalizeAuthSource(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    return text.split('-')[0] || text;
+}
+
+const UHAOZU_NON_HOUR_PRICE_DISCOUNT = 0.9;
+
+function roundPrice(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return value;
+    return Number(n.toFixed(2));
+}
+
+function buildUhaozuModifyReferer(goodsId, gameId) {
+    const id = String(goodsId || '').trim();
+    const gid = String(gameId || '').trim();
+    if (!id || !gid) return '';
+    return `https://b.uhaozu.com/release-goods?id=${encodeURIComponent(id)}&gameId=${encodeURIComponent(gid)}&from=%2Fgoods`;
+}
+
+function deriveUhaozuPriceSet(info = {}, baseInfo = {}) {
+    const src = info && typeof info === 'object' ? info : {};
+    const base = baseInfo && typeof baseInfo === 'object' ? baseInfo : {};
+    const hour = src.rentalByHour;
+    if (!Number.isFinite(Number(hour))) return src;
+    const baseHour = Number(hour);
+    const priceKeys = ['rentalByNight', 'rentalByDay', 'rentalByWeek'];
+    const derived = {
+        ...src,
+        rentalByHour: roundPrice(baseHour)
+    };
+    for (const key of priceKeys) {
+        const baseTarget = Number(base[key]);
+        const baseHourPrice = Number(base.rentalByHour);
+        if (!Number.isFinite(baseTarget) || !Number.isFinite(baseHourPrice) || baseHourPrice <= 0) continue;
+        derived[key] = roundPrice(baseHour * (baseTarget / baseHourPrice) * UHAOZU_NON_HOUR_PRICE_DISCOUNT);
+    }
+    return derived;
+}
+
+function buildOptionsFromPropMap(propMap = {}) {
+    const out = [];
+    const map = propMap && typeof propMap === 'object' ? propMap : {};
+    const optionNameProps = new Set(['A2705XYF', 'A2705PFSL', 'A2705S2833', 'A2705YXSL']);
+    for (const rows of Object.values(map)) {
+        if (!Array.isArray(rows)) continue;
+        for (const row of rows) {
+            const optionId = String(row && (row.optionId || row.id) || '').trim();
+            if (!optionId) continue;
+            const item = { optionId };
+            const propertyId = String(row && row.propertyId || '').trim();
+            const optionName = String(row && row.optionName || '').trim();
+            const propertyType = Number(row && row.propertyType);
+            const optionNumRaw = row && row.optionNum;
+            const optionNum = Number(optionNumRaw);
+            const shouldKeepOptionName = optionName && (
+                optionNameProps.has(propertyId)
+                || propertyType === 2
+                || /^-?\d+(?:\.\d+)?$/.test(optionName)
+            );
+            if (shouldKeepOptionName) item.optionName = optionName;
+            if (optionNumRaw !== undefined && Number.isFinite(optionNum) && optionNum !== 1) item.optionNum = optionNum;
+            out.push(item);
+        }
+    }
+    return out;
+}
+
+function pickFirstArray(...values) {
+    for (const value of values) {
+        if (Array.isArray(value)) return value;
+    }
+    return [];
+}
+
+function normalizeModifyPayloadFromQuery(goodsId, payload = {}) {
+    const src = payload && typeof payload === 'object' ? payload : {};
+    const gameRentInfo = src.gameRentInfo && typeof src.gameRentInfo === 'object' ? src.gameRentInfo : {};
+    const goods = src.goods && typeof src.goods === 'object' ? src.goods : {};
+    const fromRuntimePayload = !gameRentInfo
+        || Object.keys(gameRentInfo).length === 0
+            ? (src.info && typeof src.info === 'object' && !src.propMap && !src.screenShots)
+            : false;
+    const rawInfo = src.info && typeof src.info === 'object'
+        ? src.info
+        : (Object.keys(gameRentInfo).length > 0 ? gameRentInfo : goods);
+    const screenShots = Array.isArray(src.screenShots) ? src.screenShots : [];
+    const screenShotUrls = screenShots
+        .map((item) => String(item && (item.imgUrl || item.url || item.imageUrl) || '').trim())
+        .filter(Boolean);
+    const explicitUrls = Array.isArray(src.urls) ? src.urls : [];
+    const normalizedGoodsId = String(
+        src.goodsId
+        || src.id
+        || rawInfo.goodsId
+        || rawInfo.id
+        || goods.goodsId
+        || goods.id
+        || goodsId
+    ).trim();
+    const info = fromRuntimePayload
+        ? cloneJsonSafe(rawInfo || {})
+        : {
+            ...cloneJsonSafe(rawInfo || {}),
+            isBargain: rawInfo.isBargain ? 1 : 0,
+            channelSupply: rawInfo.channelSupply ? 1 : 0,
+            rentalByHour: toYuanPrice(rawInfo.concreteRentalByHour ?? rawInfo.originRentalByHour ?? rawInfo.rentalByHour),
+            rentalByNight: toYuanPrice(rawInfo.concreteRentalByNight ?? rawInfo.originRentalByNight ?? rawInfo.rentalByNight),
+            rentalByDay: toYuanPrice(rawInfo.concreteRentalByDay ?? rawInfo.originRentalByDay ?? rawInfo.rentalByDay),
+            rentalByWeek: toYuanPrice(rawInfo.concreteRentalByWeek ?? rawInfo.originRentalByWeek ?? rawInfo.rentalByWeek),
+            isAppointment: Number(rawInfo.isAppointment || 0),
+            isOrderRebate: rawInfo.isOrderRebate ? 1 : 0,
+            deposit: toYuanPrice(rawInfo.deposit),
+            freePlay: Boolean(rawInfo.freePlay),
+            support5e: Boolean(rawInfo.support5e),
+            account5e: rawInfo.account5e || '',
+            password5e: rawInfo.password5e || '',
+            rank5eId: rawInfo.rank5eId || '',
+            supportPerfect: Boolean(rawInfo.supportPerfect)
+        };
+    return {
+        id: Number(normalizedGoodsId) || Number(goodsId) || 0,
+        goodsId: Number(normalizedGoodsId) || Number(goodsId) || 0,
+        info: cloneJsonSafe(info || {}),
+        options: cloneJsonSafe(Array.isArray(src.options) ? src.options : buildOptionsFromPropMap(src.propMap)),
+        urls: cloneJsonSafe(explicitUrls.length > 0 ? explicitUrls : screenShotUrls),
+        goodsDiscountOptions: cloneJsonSafe(pickFirstArray(src.goodsDiscountOptions, rawInfo.goodsDiscountOptions, rawInfo.goodsDiscountInfo)),
+        rentDiscountOptions: cloneJsonSafe(pickFirstArray(src.rentDiscountOptions, rawInfo.rentDiscountOptions, rawInfo.rentDiscountInfo)),
+        publishStatus: src.publishStatus === undefined ? 0 : src.publishStatus,
+        saveDraft: src.saveDraft === undefined ? Boolean(rawInfo.saveDraft) : Boolean(src.saveDraft),
+        authSource: normalizeAuthSource(src.authSource === undefined ? rawInfo.authSource : src.authSource),
+        mode: src.mode === undefined ? 0 : src.mode,
+        randStr: src.randStr === undefined ? '' : src.randStr,
+        authVersion: src.authVersion === undefined ? 0 : src.authVersion
+    };
+}
+
 async function queryGoodsDetailByGoodsId(goodsId, auth = {}) {
     const cfg = resolveAuth(auth);
     const headers = buildDefaultHeaders(cfg.cookie, cfg);
@@ -492,6 +668,111 @@ async function queryGoodsDetailByGoodsId(goodsId, auth = {}) {
         role_name: String(goods.gameRoleName || '').trim(),
         game_id: String(goods.gameId || '').trim(),
         goods_id: String(goods.id || id).trim()
+    };
+}
+
+async function queryGoodsModifyPayloadByGoodsId(goodsId, auth = {}) {
+    const cfg = resolveAuth(auth);
+    const headers = buildDefaultHeaders(cfg.cookie, cfg);
+    const id = String(goodsId || '').trim();
+    if (!id) throw new Error('goodsId 不能为空');
+    const url = `${cfg.api_base}/api/goods/modify/query/${encodeURIComponent(id)}`;
+    const json = await requestJson(url, {
+        method: 'POST',
+        headers: {
+            ...headers,
+            'Content-Type': 'application/json;charset=UTF-8'
+        },
+        body: ''
+    }, cfg.timeout_ms);
+    if (!isApiSuccess(json) || String(json.responseCode || '') !== '0000') {
+        throw new Error(`U号租商品查询失败: ${json.responseMsg || json.message || json.msg || JSON.stringify(json).slice(0, 200)}`);
+    }
+    const raw = json && json.object && typeof json.object === 'object' ? json.object : null;
+    if (!raw) throw new Error('U号租商品查询返回为空');
+    return normalizeModifyPayloadFromQuery(id, raw);
+}
+
+async function modifyGoodsByGoodsId(goodsId, payload = {}, auth = {}) {
+    const cfg = resolveAuth(auth);
+    const headers = buildDefaultHeaders(cfg.cookie, cfg);
+    const id = String(goodsId || payload.id || payload.goodsId || '').trim();
+    if (!id) throw new Error('goodsId 不能为空');
+    const bodyPayload = cloneJsonSafe(payload || {});
+    bodyPayload.id = Number(id);
+    bodyPayload.goodsId = Number(id);
+    const referer = buildUhaozuModifyReferer(id, bodyPayload && bodyPayload.info && bodyPayload.info.gameId);
+    const url = `${cfg.api_base}/merchants/goods/modify/${encodeURIComponent(id)}`;
+    const json = await requestJson(url, {
+        method: 'POST',
+        headers: {
+            ...headers,
+            ...(referer ? { Referer: referer } : {}),
+            'Content-Type': 'application/json;charset=UTF-8'
+        },
+        body: JSON.stringify(bodyPayload)
+    }, cfg.timeout_ms);
+    if (!isApiSuccess(json) || String(json.responseCode || '') !== '0000') {
+        throw new Error(`U号租商品修改失败: ${json.responseMsg || json.message || json.msg || JSON.stringify(json).slice(0, 200)}`);
+    }
+    return json;
+}
+
+function buildModifiedGoodsPayload(currentPayload = {}, patch = {}) {
+    const base = normalizeModifyPayloadFromQuery(currentPayload.goodsId, currentPayload);
+    const merged = mergeModifyPatch(base, patch || {});
+    const goodsId = String(merged.id || merged.goodsId || base.id || base.goodsId || '').trim();
+    if (!goodsId) throw new Error('merged goodsId 不能为空');
+    merged.id = Number(goodsId);
+    merged.goodsId = Number(goodsId);
+    merged.info = merged.info && typeof merged.info === 'object' ? merged.info : {};
+    merged.info = deriveUhaozuPriceSet(merged.info, base.info);
+    return merged;
+}
+
+async function patchGoodsByGoodsId(goodsId, patch = {}, auth = {}) {
+    const currentPayload = await queryGoodsModifyPayloadByGoodsId(goodsId, auth);
+    const nextPayload = buildModifiedGoodsPayload(currentPayload, patch);
+    const result = await modifyGoodsByGoodsId(goodsId, nextPayload, auth);
+    return {
+        goodsId: Number(goodsId),
+        payload: nextPayload,
+        result
+    };
+}
+
+async function updateGoodsPriceByGoodsId(goodsId, pricePatch = {}, auth = {}) {
+    const patch = {
+        info: {}
+    };
+    const mapping = {
+        rentalByHour: 'rentalByHour',
+        rentalByNight: 'rentalByNight',
+        rentalByDay: 'rentalByDay',
+        rentalByWeek: 'rentalByWeek',
+        deposit: 'deposit',
+        discount: 'discount',
+        minRentTime: 'minRentTime'
+    };
+    for (const [srcKey, targetKey] of Object.entries(mapping)) {
+        if (pricePatch[srcKey] !== undefined) patch.info[targetKey] = pricePatch[srcKey];
+    }
+    if (pricePatch.goodsDiscountOptions !== undefined) patch.goodsDiscountOptions = pricePatch.goodsDiscountOptions;
+    if (pricePatch.rentDiscountOptions !== undefined) patch.rentDiscountOptions = pricePatch.rentDiscountOptions;
+    return patchGoodsByGoodsId(goodsId, patch, auth);
+}
+
+async function modifyUhaozuGoods(goodsId, patch = {}, auth = {}) {
+    return patchGoodsByGoodsId(goodsId, patch, auth);
+}
+
+async function reshelfGoodsByModify(goodsId, auth = {}) {
+    const currentPayload = await queryGoodsModifyPayloadByGoodsId(goodsId, auth);
+    const result = await modifyGoodsByGoodsId(goodsId, currentPayload, auth);
+    return {
+        goodsId: Number(goodsId),
+        payload: currentPayload,
+        result
     };
 }
 
@@ -824,10 +1105,31 @@ async function uhaozuOnShelf(_page, account, options = {}) {
     }
 }
 
+async function uhaozuReshelfByModify(_page, account, options = {}) {
+    const auth = options.auth || {};
+    try {
+        const goods = await findGoodsByAccount(account, auth, options);
+        if (!goods) {
+            console.log(`[UhaozuAPI] 改价补上架失败，未找到唯一商品: account=${account}, game_id=${options.game_id || ''}, goods_id=${options.goods_id || options.prd_id || ''}`);
+            return false;
+        }
+        const out = await reshelfGoodsByModify(goods.id, auth);
+        const ok = Boolean(out && out.result && isApiSuccess(out.result));
+        if (ok) console.log(`[UhaozuAPI] 改价补上架成功: account=${account}, goodsId=${goods.id}`);
+        else console.warn(`[UhaozuAPI] 改价补上架失败: account=${account}, goodsId=${goods.id}`);
+        return ok;
+    } catch (e) {
+        console.error(`[UhaozuAPI] 改价补上架异常: account=${account}, err=${e.message}`);
+        return false;
+    }
+}
+
 module.exports = {
     collectUhaozuData,
     uhaozuOffShelf,
     uhaozuOnShelf,
+    uhaozuReshelfByModify,
+    modifyUhaozuGoods,
     listOrderPage,
     listAllOrderPages,
     getOrderDetailPage,
@@ -849,6 +1151,7 @@ module.exports = {
         loadGoodsDetailFailCache,
         fillMissingAccountsByGoodsId,
         queryGoodsDetailByGoodsId,
+        queryGoodsModifyPayloadByGoodsId,
         resolveAccountByRole,
         similarityScore,
         guessAccountByFuzzy,
@@ -859,6 +1162,16 @@ module.exports = {
         findGoodsByAccount,
         callUnshelf,
         callShelf,
+        cloneJsonSafe,
+        mergeModifyPatch,
+        normalizeModifyPayloadFromQuery,
+        buildModifiedGoodsPayload,
+        queryGoodsModifyPayloadByGoodsId,
+        modifyGoodsByGoodsId,
+        patchGoodsByGoodsId,
+        updateGoodsPriceByGoodsId,
+        modifyUhaozuGoods,
+        reshelfGoodsByModify,
         buildOrderHeaders,
         buildOrderDetailHeaders,
         buildOrderListPayload,

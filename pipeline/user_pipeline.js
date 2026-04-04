@@ -38,7 +38,7 @@ function applyActionResultToRows(rows = [], actions = []) {
         if (type === 'off_y') cs.uuzuhao = '下架';
         else if (type === 'on_y') cs.uuzuhao = '上架';
         else if (type === 'off_u') cs.uhaozu = '下架';
-        else if (type === 'on_u') cs.uhaozu = '上架';
+        else if (type === 'on_u' || type === 'on_u_modify') cs.uhaozu = '上架';
         else if (type === 'off_z') cs.zuhaowang = '下架';
         else if (type === 'on_z') cs.zuhaowang = '上架';
         row.channel_status = cs;
