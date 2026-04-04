@@ -2094,6 +2094,12 @@
       color: #1f5f99;
     }
 
+    .order-chip.pending {
+      background: #fff8eb;
+      border-color: #f0d7a6;
+      color: #96621f;
+    }
+
     .order-chip.risk-failed {
       background: #fff4f6;
       border-color: #f1c8cf;

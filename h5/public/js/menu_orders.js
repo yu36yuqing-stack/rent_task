@@ -75,6 +75,13 @@
       return s === '租赁中' || s === '出租中';
     }
 
+    function orderStatusClass(status) {
+      const s = String(status || '').trim();
+      if (s === '租赁中' || s === '出租中') return 'progress';
+      if (s === '待支付' || s === '预约中') return 'pending';
+      return 'done';
+    }
+
     function buildOrderCountdownHtml(item) {
       if (!isOrderRenting(item)) return '';
       const end = parseDateTimeText(item && item.end_time);
@@ -543,7 +550,7 @@
           <div class="order-card">
             <div class="order-card-top">
               <p class="order-card-role">${buildOrderGameAvatarHtml(item)}<span class="order-role-text">${item.display_name || item.game_account || '-'}</span></p>
-              <span class="order-chip ${(String(item.order_status || '') === '租赁中' || String(item.order_status || '') === '出租中') ? 'progress' : 'done'}">${item.order_status || '-'}</span>
+              <span class="order-chip ${orderStatusClass(item.order_status)}">${item.order_status || '-'}</span>
             </div>
             <div class="order-id-row">
               <span class="order-id-label">No.${item.order_no || '-'}</span>

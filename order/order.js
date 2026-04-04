@@ -214,6 +214,25 @@ function normalizeOrderListOptions(options = {}) {
     return { page, pageSize, quickFilter, statusFilter, gameName };
 }
 
+function isOrderProgressStatus(status) {
+    const text = String(status || '').trim();
+    return text === '租赁中' || text === '出租中';
+}
+
+function isOrderRefundStatus(status) {
+    const text = String(status || '').trim();
+    return text === '已退款';
+}
+
+function isOrderDoneStatus(status) {
+    const text = String(status || '').trim();
+    return text === '已完成'
+        || text === '部分完成'
+        || text === '已撤单'
+        || text === '已退款'
+        || text === '投诉/撤单';
+}
+
 async function listOrdersForUser(userId, options = {}) {
     await initOrderDb();
     await initOrderComplaintDb();
@@ -243,7 +262,7 @@ async function listOrdersForUser(userId, options = {}) {
     } else if (cfg.statusFilter === 'refund') {
         where.push("COALESCE(order_status, '') IN ('已退款')");
     } else if (cfg.statusFilter === 'done') {
-        where.push("COALESCE(order_status, '') NOT IN ('租赁中', '出租中')");
+        where.push("COALESCE(order_status, '') IN ('已完成', '部分完成', '已撤单', '已退款', '投诉/撤单')");
     }
 
     const whereSql = where.join(' AND ');
@@ -257,9 +276,9 @@ async function listOrdersForUser(userId, options = {}) {
         const countsRow = await dbGet(db, `
             SELECT
               SUM(CASE WHEN COALESCE(order_status, '') IN ('租赁中', '出租中') THEN 1 ELSE 0 END) AS progress_cnt,
-              SUM(CASE WHEN COALESCE(order_status, '') NOT IN ('租赁中', '出租中') THEN 1 ELSE 0 END) AS done_cnt,
+              SUM(CASE WHEN COALESCE(order_status, '') IN ('已完成', '部分完成', '已撤单', '已退款', '投诉/撤单') THEN 1 ELSE 0 END) AS done_cnt,
               SUM(CASE
-                    WHEN COALESCE(order_status, '') NOT IN ('租赁中', '出租中')
+                    WHEN COALESCE(order_status, '') IN ('已完成', '部分完成', '已撤单', '已退款', '投诉/撤单')
                      AND COALESCE(rec_amount, 0) <= 0
                     THEN 1 ELSE 0 END
               ) AS done_zero_cnt
@@ -1516,6 +1535,10 @@ module.exports = {
     buildUuzuhaoProductIndex,
     buildUhaozuProductIndex,
     buildZuhaowangAccountIndex,
+    isOrderProgressStatus,
+    isOrderRefundStatus,
+    isOrderDoneStatus,
+    shouldSyncUhaozuOrderDetailByStatus,
     UUZUHAO_ORDER_FIELD_MAPPING,
     UHAOZU_ORDER_FIELD_MAPPING,
     ZUHAOWANG_ORDER_FIELD_MAPPING
