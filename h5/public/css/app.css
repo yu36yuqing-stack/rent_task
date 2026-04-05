@@ -1560,6 +1560,21 @@
       gap: 8px;
     }
 
+    #pricingView .pricing-title-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    #pricingView .pricing-title-row .auth-title {
+      margin: 0;
+    }
+
+    #pricingView .drawer-help-popover {
+      margin-top: 0;
+    }
+
     #pricingView .pricing-config-actions {
       display: flex;
       align-items: center;

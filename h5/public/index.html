@@ -126,11 +126,21 @@
       <div id="pricingGameTabs" class="stats-game-tabs"></div>
       <div class="panel pricing-config-card">
         <div class="pricing-config-head">
-          <p class="auth-title">回本周期模式</p>
+          <div class="pricing-title-row">
+            <p class="auth-title">回本周期模式</p>
+            <button id="pricingFormulaHelpBtn" class="drawer-help-btn" aria-label="查看价格换算公式说明" type="button">?</button>
+          </div>
           <div class="pricing-config-actions">
             <button id="pricingPublishBtn" class="btn btn-ghost btn-page-action">发布定价</button>
             <button id="pricingCalcBtn" class="btn btn-ghost btn-page-action">重新计算</button>
           </div>
+        </div>
+        <div id="pricingFormulaHelp" class="drawer-help-popover hidden">
+          <p class="drawer-help-title">价格换算公式</p>
+          <p class="drawer-help-text">包夜价 = 时租价 * 5 * 0.95</p>
+          <p class="drawer-help-text">包天价 = 时租价 * 7 * 0.95</p>
+          <p class="drawer-help-text">包周价 = 时租价 * 40 * 0.95</p>
+          <p class="drawer-help-text">其中 0.95 系数用于预留不超出平台价格上限的缓冲区域。</p>
         </div>
         <div class="pricing-config-grid">
           <div class="field pricing-field">

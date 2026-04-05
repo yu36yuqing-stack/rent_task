@@ -426,6 +426,8 @@
       authView: document.getElementById('authView'),
       pricingView: document.getElementById('pricingView'),
       pricingGameTabs: document.getElementById('pricingGameTabs'),
+      pricingFormulaHelpBtn: document.getElementById('pricingFormulaHelpBtn'),
+      pricingFormulaHelp: document.getElementById('pricingFormulaHelp'),
       pricingCalcBtn: document.getElementById('pricingCalcBtn'),
       pricingPublishBtn: document.getElementById('pricingPublishBtn'),
       pricingPaybackDays: document.getElementById('pricingPaybackDays'),

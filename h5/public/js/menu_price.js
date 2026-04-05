@@ -311,6 +311,17 @@ function renderPricingMetricGrid() {
   els.pricingMetricGrid.innerHTML = '';
 }
 
+function closePricingFormulaHelp() {
+  if (!els.pricingFormulaHelp) return;
+  els.pricingFormulaHelp.classList.add('hidden');
+}
+
+function togglePricingFormulaHelp() {
+  if (!els.pricingFormulaHelp) return;
+  const opened = !els.pricingFormulaHelp.classList.contains('hidden');
+  els.pricingFormulaHelp.classList.toggle('hidden', opened);
+}
+
 function renderPricingList() {
   if (!els.pricingListContainer) return;
   const pricing = state.pricing || {};
@@ -431,6 +442,12 @@ function readPricingFormValues() {
 }
 
 function bindPricingEvents() {
+  if (els.pricingFormulaHelpBtn) {
+    els.pricingFormulaHelpBtn.onclick = (e) => {
+      e.stopPropagation();
+      togglePricingFormulaHelp();
+    };
+  }
   if (els.pricingCalcBtn) {
     els.pricingCalcBtn.onclick = async () => {
       readPricingFormValues();
@@ -456,6 +473,12 @@ function bindPricingEvents() {
   inputNodes.forEach((node) => {
     if (!node) return;
     node.onchange = () => readPricingFormValues();
+  });
+  document.addEventListener('click', (e) => {
+    if (!els.pricingFormulaHelp || !els.pricingFormulaHelpBtn) return;
+    const t = e.target;
+    if (els.pricingFormulaHelp.contains(t) || els.pricingFormulaHelpBtn.contains(t)) return;
+    closePricingFormulaHelp();
   });
 }
 
