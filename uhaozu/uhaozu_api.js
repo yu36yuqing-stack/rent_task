@@ -513,8 +513,6 @@ function normalizeAuthSource(value) {
     return text.split('-')[0] || text;
 }
 
-const UHAOZU_NON_HOUR_PRICE_DISCOUNT = 0.9;
-
 function roundPrice(value) {
     const n = Number(value);
     if (!Number.isFinite(n)) return value;
@@ -530,42 +528,63 @@ function buildUhaozuModifyReferer(goodsId, gameId) {
 
 function deriveUhaozuPriceSet(info = {}, baseInfo = {}) {
     const src = info && typeof info === 'object' ? info : {};
-    const base = baseInfo && typeof baseInfo === 'object' ? baseInfo : {};
     const hour = src.rentalByHour;
     if (!Number.isFinite(Number(hour))) return src;
     const baseHour = Number(hour);
-    const priceKeys = ['rentalByNight', 'rentalByDay', 'rentalByWeek'];
     const derived = {
         ...src,
         rentalByHour: roundPrice(baseHour)
     };
-    for (const key of priceKeys) {
-        const baseTarget = Number(base[key]);
-        const baseHourPrice = Number(base.rentalByHour);
-        if (!Number.isFinite(baseTarget) || !Number.isFinite(baseHourPrice) || baseHourPrice <= 0) continue;
-        derived[key] = roundPrice(baseHour * (baseTarget / baseHourPrice) * UHAOZU_NON_HOUR_PRICE_DISCOUNT);
+
+    const ratioMap = {
+        rentalByNight: 5,
+        rentalByDay: 7,
+        rentalByWeek: 40
+    };
+    for (const [key, ratio] of Object.entries(ratioMap)) {
+        derived[key] = roundPrice(baseHour * ratio * 0.95);
     }
     return derived;
 }
 
-function buildOptionsFromPropMap(propMap = {}) {
+function normalizeOptionMatchText(value = '') {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[^\p{Script=Han}\p{L}\p{N}]/gu, '');
+}
+
+function buildOptionsFromPropMap(propMap = {}, contextText = '') {
     const out = [];
     const map = propMap && typeof propMap === 'object' ? propMap : {};
     const optionNameProps = new Set(['A2705XYF', 'A2705PFSL', 'A2705S2833', 'A2705YXSL']);
+    const normalizedContextText = normalizeOptionMatchText(contextText);
     for (const rows of Object.values(map)) {
         if (!Array.isArray(rows)) continue;
         for (const row of rows) {
             const optionId = String(row && (row.optionId || row.id) || '').trim();
             if (!optionId) continue;
-            const item = { optionId };
-            const propertyId = String(row && row.propertyId || '').trim();
             const optionName = String(row && row.optionName || '').trim();
             const propertyType = Number(row && row.propertyType);
             const optionNumRaw = row && row.optionNum;
             const optionNum = Number(optionNumRaw);
+            const propertyName = String(row && row.propertyName || '').trim();
+            const normalizedOptionName = normalizeOptionMatchText(optionName);
+            const matchedInContent = normalizedOptionName && normalizedContextText && normalizedContextText.includes(normalizedOptionName);
+            const shouldKeep = (
+                matchedInContent
+                || (optionNumRaw !== undefined && optionNumRaw !== null && Number.isFinite(optionNum) && optionNum !== 1)
+                || propertyType === 1
+                || propertyType === 2
+                || propertyType === 3
+            ) && propertyName !== '伙伴';
+            if (!shouldKeep) continue;
+
+            const item = { optionId };
+            const propertyId = String(row && row.propertyId || '').trim();
             const shouldKeepOptionName = optionName && (
                 optionNameProps.has(propertyId)
                 || propertyType === 2
+                || propertyType === 3
                 || /^-?\d+(?:\.\d+)?$/.test(optionName)
             );
             if (shouldKeepOptionName) item.optionName = optionName;
@@ -587,10 +606,9 @@ function normalizeModifyPayloadFromQuery(goodsId, payload = {}) {
     const src = payload && typeof payload === 'object' ? payload : {};
     const gameRentInfo = src.gameRentInfo && typeof src.gameRentInfo === 'object' ? src.gameRentInfo : {};
     const goods = src.goods && typeof src.goods === 'object' ? src.goods : {};
-    const fromRuntimePayload = !gameRentInfo
-        || Object.keys(gameRentInfo).length === 0
-            ? (src.info && typeof src.info === 'object' && !src.propMap && !src.screenShots)
-            : false;
+    const fromRuntimePayload = (!gameRentInfo || Object.keys(gameRentInfo).length === 0)
+        ? (src.info && typeof src.info === 'object' && !src.propMap && !src.screenShots)
+        : false;
     const rawInfo = src.info && typeof src.info === 'object'
         ? src.info
         : (Object.keys(gameRentInfo).length > 0 ? gameRentInfo : goods);
@@ -608,20 +626,38 @@ function normalizeModifyPayloadFromQuery(goodsId, payload = {}) {
         || goods.id
         || goodsId
     ).trim();
+    const optionContextText = [
+        rawInfo.goodsTitle,
+        rawInfo.goodsDescription,
+        rawInfo.extendedField
+    ].filter(Boolean).join(' ');
     const info = fromRuntimePayload
         ? cloneJsonSafe(rawInfo || {})
         : {
-            ...cloneJsonSafe(rawInfo || {}),
+            gameId: rawInfo.gameId || '',
+            platformId: rawInfo.platformId || '',
+            carrierId: rawInfo.carrierId || '',
+            groupId: rawInfo.groupId || '',
+            goodsTitle: rawInfo.goodsTitle || '',
+            gameAccount: rawInfo.gameAccount || '',
+            gamePassword: rawInfo.gamePassword || '',
+            gameRoleName: rawInfo.gameRoleName || '',
+            goodsDescription: rawInfo.goodsDescription || '',
+            loginMethod: Number(rawInfo.loginMethod || 0),
             isBargain: rawInfo.isBargain ? 1 : 0,
             channelSupply: rawInfo.channelSupply ? 1 : 0,
             rentalByHour: toYuanPrice(rawInfo.concreteRentalByHour ?? rawInfo.originRentalByHour ?? rawInfo.rentalByHour),
             rentalByNight: toYuanPrice(rawInfo.concreteRentalByNight ?? rawInfo.originRentalByNight ?? rawInfo.rentalByNight),
             rentalByDay: toYuanPrice(rawInfo.concreteRentalByDay ?? rawInfo.originRentalByDay ?? rawInfo.rentalByDay),
             rentalByWeek: toYuanPrice(rawInfo.concreteRentalByWeek ?? rawInfo.originRentalByWeek ?? rawInfo.rentalByWeek),
+            customId: rawInfo.customId || '',
             isAppointment: Number(rawInfo.isAppointment || 0),
             isOrderRebate: rawInfo.isOrderRebate ? 1 : 0,
             deposit: toYuanPrice(rawInfo.deposit),
+            minRentTime: Number(rawInfo.minRentTime || 0),
+            rentTimesLimit: Number(rawInfo.rentTimesLimit || 0),
             freePlay: Boolean(rawInfo.freePlay),
+            remark: rawInfo.remark || '',
             support5e: Boolean(rawInfo.support5e),
             account5e: rawInfo.account5e || '',
             password5e: rawInfo.password5e || '',
@@ -632,15 +668,14 @@ function normalizeModifyPayloadFromQuery(goodsId, payload = {}) {
         id: Number(normalizedGoodsId) || Number(goodsId) || 0,
         goodsId: Number(normalizedGoodsId) || Number(goodsId) || 0,
         info: cloneJsonSafe(info || {}),
-        options: cloneJsonSafe(Array.isArray(src.options) ? src.options : buildOptionsFromPropMap(src.propMap)),
+        options: cloneJsonSafe(Array.isArray(src.options) ? src.options : buildOptionsFromPropMap(src.propMap, optionContextText)),
         urls: cloneJsonSafe(explicitUrls.length > 0 ? explicitUrls : screenShotUrls),
-        goodsDiscountOptions: cloneJsonSafe(pickFirstArray(src.goodsDiscountOptions, rawInfo.goodsDiscountOptions, rawInfo.goodsDiscountInfo)),
-        rentDiscountOptions: cloneJsonSafe(pickFirstArray(src.rentDiscountOptions, rawInfo.rentDiscountOptions, rawInfo.rentDiscountInfo)),
+        goodsDiscountOptions: cloneJsonSafe(pickFirstArray(rawInfo.goodsDiscountOptions, rawInfo.goodsDiscountInfo, src.goodsDiscountOptions)),
+        rentDiscountOptions: cloneJsonSafe(pickFirstArray(rawInfo.rentDiscountOptions, rawInfo.rentDiscountInfo, src.rentDiscountOptions)),
         publishStatus: src.publishStatus === undefined ? 0 : src.publishStatus,
         saveDraft: src.saveDraft === undefined ? Boolean(rawInfo.saveDraft) : Boolean(src.saveDraft),
         authSource: normalizeAuthSource(src.authSource === undefined ? rawInfo.authSource : src.authSource),
         mode: src.mode === undefined ? 0 : src.mode,
-        randStr: src.randStr === undefined ? '' : src.randStr,
         authVersion: src.authVersion === undefined ? 0 : src.authVersion
     };
 }
@@ -700,7 +735,7 @@ async function modifyGoodsByGoodsId(goodsId, payload = {}, auth = {}) {
     if (!id) throw new Error('goodsId 不能为空');
     const bodyPayload = cloneJsonSafe(payload || {});
     bodyPayload.id = Number(id);
-    bodyPayload.goodsId = Number(id);
+    delete bodyPayload.goodsId;
     const referer = buildUhaozuModifyReferer(id, bodyPayload && bodyPayload.info && bodyPayload.info.gameId);
     const url = `${cfg.api_base}/merchants/goods/modify/${encodeURIComponent(id)}`;
     const json = await requestJson(url, {
@@ -719,12 +754,11 @@ async function modifyGoodsByGoodsId(goodsId, payload = {}, auth = {}) {
 }
 
 function buildModifiedGoodsPayload(currentPayload = {}, patch = {}) {
-    const base = normalizeModifyPayloadFromQuery(currentPayload.goodsId, currentPayload);
+    const base = normalizeModifyPayloadFromQuery(currentPayload.id || currentPayload.goodsId, currentPayload);
     const merged = mergeModifyPatch(base, patch || {});
-    const goodsId = String(merged.id || merged.goodsId || base.id || base.goodsId || '').trim();
+    const goodsId = String(merged.id || merged.goodsId || base.id || '').trim();
     if (!goodsId) throw new Error('merged goodsId 不能为空');
     merged.id = Number(goodsId);
-    merged.goodsId = Number(goodsId);
     merged.info = merged.info && typeof merged.info === 'object' ? merged.info : {};
     merged.info = deriveUhaozuPriceSet(merged.info, base.info);
     return merged;

@@ -721,7 +721,6 @@
       };
       renderCostSheet();
     }
-
     function closeCostSheet() {
       state.costSheet = {
         open: false,

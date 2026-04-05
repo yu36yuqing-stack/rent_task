@@ -102,6 +102,7 @@
       total: 0,
       list: [],
       currentMenu: 'products',
+      drawerExpandedGroups: { pricing: false },
       drawerOpen: false,
       pullRefresh: { dragging: false, ready: false, loading: false, startY: 0, distance: 0 },
       stats: {
@@ -284,6 +285,29 @@
           release_delay_min: 10
         }
       },
+      pricing: {
+        loading: false,
+        publishing: false,
+        channel: 'uhaozu',
+        game_name: 'WZRY',
+        form: {
+          payback_days: 210,
+          avg_daily_rent_hours: 3.5,
+          platform_fee_rate: 0.2,
+          withdrawal_fee_rate: 0.02,
+          price_step: 0.5,
+          deposit: 100
+        },
+        summary: {
+          account_count: 0,
+          zero_cost_count: 0,
+          total_cost_amount: 0,
+          avg_suggested_listing_hourly_price: 0
+        },
+        list: [],
+        error: '',
+        loaded_once: false
+      },
       onlineStatusMap: {},
       onlineLoadingMap: {},
       forbiddenLoadingMap: {},
@@ -327,6 +351,18 @@
         result_type: '',
         loading: false
       },
+      pricingCostSheet: {
+        open: false,
+        account: '',
+        game_name: 'WZRY',
+        role_name: '',
+        pricing_cost_amount: '',
+        base_cost_amount: '',
+        note: '',
+        result_text: '',
+        result_type: '',
+        loading: false
+      },
       cardNodeMap: {}
     };
     const API_BASE = window.location.pathname.startsWith('/h5local') ? '/h5local' : '';
@@ -342,18 +378,33 @@
       if (k === 'risk') return '风控中心';
       if (k === 'stats') return '统计看板';
       if (k === 'auth') return '授权管理';
+      if (k === 'pricing_uhaozu') return '定价规则 · U号租';
+      if (k === 'pricing_uuzuhao') return '定价规则 · 悠悠租号';
+      if (k === 'pricing_zuhaowang') return '定价规则 · 租号王';
       if (k === 'board') return '板卡管理';
       if (k === 'profile') return '个人中心';
       return '商品列表';
     }
 
-    function parseInitialMenuFromUrl() {
+    function pricingChannelFromMenu(key) {
+      const k = String(key || '').trim();
+      if (k === 'pricing_uuzuhao') return 'uuzuhao';
+      if (k === 'pricing_zuhaowang') return 'zuhaowang';
+      return 'uhaozu';
+    }
+
+    function parseInitialRouteFromUrl() {
       try {
         const url = new URL(window.location.href);
         const m = String(url.searchParams.get('menu') || '').trim().toLowerCase();
-        if (m === 'orders' || m === 'risk' || m === 'stats' || m === 'auth' || m === 'board' || m === 'profile' || m === 'products') return m;
+        if (m === 'pricing_uhaozu' || m === 'pricing_uuzuhao' || m === 'pricing_zuhaowang') {
+          return { menu: m, pricingChannel: pricingChannelFromMenu(m) };
+        }
+        if (m === 'orders' || m === 'risk' || m === 'stats' || m === 'auth' || m === 'board' || m === 'profile' || m === 'products') {
+          return { menu: m, pricingChannel: 'uhaozu' };
+        }
       } catch (_) {}
-      return 'products';
+      return { menu: 'products', pricingChannel: 'uhaozu' };
     }
 
     function showReason(reason) {
@@ -373,6 +424,18 @@
       orderComplaintView: document.getElementById('orderComplaintView'),
       statsView: document.getElementById('statsView'),
       authView: document.getElementById('authView'),
+      pricingView: document.getElementById('pricingView'),
+      pricingGameTabs: document.getElementById('pricingGameTabs'),
+      pricingCalcBtn: document.getElementById('pricingCalcBtn'),
+      pricingPublishBtn: document.getElementById('pricingPublishBtn'),
+      pricingPaybackDays: document.getElementById('pricingPaybackDays'),
+      pricingAvgDailyRentHours: document.getElementById('pricingAvgDailyRentHours'),
+      pricingPlatformFeeRate: document.getElementById('pricingPlatformFeeRate'),
+      pricingWithdrawalFeeRate: document.getElementById('pricingWithdrawalFeeRate'),
+      pricingPriceStep: document.getElementById('pricingPriceStep'),
+      pricingDeposit: document.getElementById('pricingDeposit'),
+      pricingMetricGrid: document.getElementById('pricingMetricGrid'),
+      pricingListContainer: document.getElementById('pricingListContainer'),
       boardView: document.getElementById('boardView'),
       profileView: document.getElementById('profileView'),
       heroLoginView: document.getElementById('heroLoginView'),
@@ -528,6 +591,14 @@
       costDetailBtn: document.getElementById('costDetailBtn'),
       costSaveBtn: document.getElementById('costSaveBtn'),
       costCancelBtn: document.getElementById('costCancelBtn'),
+      pricingCostSheet: document.getElementById('pricingCostSheet'),
+      pricingCostSheetTitle: document.getElementById('pricingCostSheetTitle'),
+      pricingCostSheetResult: document.getElementById('pricingCostSheetResult'),
+      pricingCostAmountInput: document.getElementById('pricingCostAmountInput'),
+      pricingBaseCostInput: document.getElementById('pricingBaseCostInput'),
+      pricingCostNoteInput: document.getElementById('pricingCostNoteInput'),
+      pricingCostSaveBtn: document.getElementById('pricingCostSaveBtn'),
+      pricingCostCancelBtn: document.getElementById('pricingCostCancelBtn'),
       orderOffThresholdSheet: document.getElementById('orderOffThresholdSheet'),
       orderOffThresholdSheetResult: document.getElementById('orderOffThresholdSheetResult'),
       orderOffThresholdInput: document.getElementById('orderOffThresholdInput'),
@@ -1049,6 +1120,12 @@
       }
     }
 
+    async function loadPricingViewSafe() {
+      if (typeof window.loadPricingView === 'function') {
+        await window.loadPricingView();
+      }
+    }
+
     function renderProfileViewSafe() {
       if (typeof window.renderProfileView === 'function') {
         window.renderProfileView();
@@ -1058,6 +1135,12 @@
     function renderBoardViewSafe() {
       if (typeof window.renderBoardView === 'function') {
         window.renderBoardView();
+      }
+    }
+
+    function renderPricingViewSafe() {
+      if (typeof window.renderPricingView === 'function') {
+        window.renderPricingView();
       }
     }
 
@@ -1084,6 +1167,23 @@
         const baseLabel = String(n.getAttribute('data-label') || n.textContent || '').trim();
         n.classList.toggle('active', active);
         n.textContent = active ? `${baseLabel}（当前）` : baseLabel;
+      });
+      Array.from(document.querySelectorAll('[data-drawer-group]')).forEach((node) => {
+        const key = String(node.getAttribute('data-drawer-group') || '').trim();
+        const active = key === 'pricing'
+          ? (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang')
+          : key === state.currentMenu;
+        const expanded = Boolean(state.drawerExpandedGroups && state.drawerExpandedGroups[key]);
+        node.classList.toggle('active', active);
+        const toggle = node.querySelector('[data-drawer-group-toggle]');
+        const list = node.querySelector('[data-drawer-group-list]');
+        if (toggle) toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        if (list) list.classList.toggle('hidden', !expanded);
+      });
+      Array.from(document.querySelectorAll('.drawer-sub-item')).forEach((n) => {
+        const key = String(n.getAttribute('data-menu') || '').trim();
+        const active = key === state.currentMenu;
+        n.classList.toggle('active', active);
       });
     }
 
@@ -1150,6 +1250,7 @@
       const showRisk = loggedIn && state.currentMenu === 'risk';
       const showStats = loggedIn && state.currentMenu === 'stats';
       const showAuth = loggedIn && state.currentMenu === 'auth';
+      const showPricing = loggedIn && (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang');
       const showBoard = loggedIn && state.currentMenu === 'board';
       const showProfile = loggedIn && state.currentMenu === 'profile';
       els.listView.classList.toggle('hidden', !showProducts);
@@ -1159,6 +1260,7 @@
       if (els.orderDetailView) els.orderDetailView.classList.toggle('hidden', !showOrderDetail);
       els.statsView.classList.toggle('hidden', !showStats);
       els.authView.classList.toggle('hidden', !showAuth);
+      if (els.pricingView) els.pricingView.classList.toggle('hidden', !showPricing);
       if (els.boardView) els.boardView.classList.toggle('hidden', !showBoard);
       if (els.profileView) els.profileView.classList.toggle('hidden', !showProfile);
       els.heroLoginView.classList.toggle('hidden', loggedIn);
@@ -1193,6 +1295,7 @@
         if (showRisk) renderRiskCenterView();
         if (showStats) renderStatsView();
         if (showAuth) renderAuthView();
+        if (showPricing) renderPricingViewSafe();
         if (showBoard) renderBoardViewSafe();
         if (showProfile) renderProfileViewSafe();
         renderDrawer();
@@ -1231,6 +1334,137 @@
       }
     }
 
+    function resetStatsCostDetail() {
+      state.statsCostDetail = {
+        open: false,
+        loading: false,
+        deleting: false,
+        game_account: '',
+        game_name: 'WZRY',
+        display_name: '',
+        total_cost_amount: 0,
+        purchase_cost_amount: 0,
+        list: [],
+        error: ''
+      };
+    }
+
+    function activateMenu(key, options = {}) {
+      const nextMenu = String(key || 'products').trim() || 'products';
+      state.currentMenu = nextMenu;
+      if (nextMenu === 'pricing_uhaozu' || nextMenu === 'pricing_uuzuhao' || nextMenu === 'pricing_zuhaowang') {
+        state.pricing.channel = pricingChannelFromMenu(String(options.pricingChannel || nextMenu).trim());
+        state.drawerExpandedGroups.pricing = true;
+      }
+      resetStatsCostDetail();
+      closeActionSheets();
+      closeAuthUuzuhaoSheet();
+      closeAuthUhaozuSheet();
+      closeDrawer();
+    }
+
+    function navigateMenu(key, options = {}) {
+      activateMenu(key, options);
+      if (key === 'products') {
+        render();
+        return;
+      }
+      if (key === 'orders') {
+        state.orders.complaint_detail = { open: false, loading: false, error: '', order_no: '', channel: '', order: null, data: null, preview_image_url: '' };
+        state.orders.detail_view = { open: false, loading: false, error: '', order_no: '', channel: '', order: null, detail: null };
+        render();
+        (async () => {
+          try {
+            await loadOrders();
+            render();
+          } catch (e) {
+            showToast(e.message || '订单列表加载失败');
+          }
+        })();
+        return;
+      }
+      if (key === 'risk') {
+        render();
+        (async () => {
+          try {
+            await loadRiskCenter();
+            render();
+          } catch (e) {
+            showToast(e.message || '风控中心加载失败');
+          }
+        })();
+        return;
+      }
+      if (key === 'stats') {
+        render();
+        (async () => {
+          try {
+            await loadStatsBoard();
+            if (typeof loadStatsCalendar === 'function') {
+              await loadStatsCalendar((state.statsBoard.calendar && state.statsBoard.calendar.month) || '');
+            }
+            render();
+          } catch (e) {
+            showToast(e.message || '统计看板加载失败');
+          }
+        })();
+        return;
+      }
+      if (key === 'auth') {
+        render();
+        (async () => {
+          try {
+            await loadAuthManage();
+            render();
+          } catch (e) {
+            showToast(e.message || '授权列表加载失败');
+          }
+        })();
+        return;
+      }
+      if (key === 'pricing_uhaozu' || key === 'pricing_uuzuhao' || key === 'pricing_zuhaowang') {
+        render();
+        (async () => {
+          try {
+            await loadPricingViewSafe();
+            render();
+            if (state.pricing.channel !== 'uhaozu') {
+              showToast('该渠道定价页开发中');
+            }
+          } catch (e) {
+            showToast(e.message || '定价规则加载失败');
+          }
+        })();
+        return;
+      }
+      if (key === 'board') {
+        render();
+        (async () => {
+          try {
+            await loadBoardCardsSafe();
+            render();
+          } catch (e) {
+            showToast(e.message || '板卡管理加载失败');
+          }
+        })();
+        return;
+      }
+      if (key === 'profile') {
+        render();
+        (async () => {
+          try {
+            await loadProfileSafe();
+            render();
+          } catch (e) {
+            showToast(e.message || '个人中心加载失败');
+          }
+        })();
+        return;
+      }
+      render();
+      alert('该功能正在开发中');
+    }
+
     els.btnLogin.addEventListener('click', login);
     els.btnLogout.addEventListener('click', () => {
       closeDrawer();
@@ -1241,6 +1475,7 @@
       state.page = 1;
       state.product_game_name = 'WZRY';
       state.currentMenu = 'products';
+      state.drawerExpandedGroups = { pricing: false };
       state.drawerOpen = false;
       state.onlineStatusMap = {};
       state.onlineLoadingMap = {};
@@ -1258,8 +1493,31 @@
         query_status: '',
         query_text: ''
       };
-      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false };
       state.activeActionSheet = '';
+      state.pricing = {
+        loading: false,
+        publishing: false,
+        channel: 'uhaozu',
+        game_name: 'WZRY',
+        form: {
+          payback_days: 210,
+          avg_daily_rent_hours: 3.5,
+          platform_fee_rate: 0.2,
+          withdrawal_fee_rate: 0.02,
+          price_step: 0.5,
+          deposit: 100
+        },
+        summary: {
+          account_count: 0,
+          zero_cost_count: 0,
+          total_cost_amount: 0,
+          avg_suggested_listing_hourly_price: 0
+        },
+        list: [],
+        error: '',
+        loaded_once: false
+      };
       state.board = {
         loading: false,
         query: '',
@@ -1341,6 +1599,18 @@
         cost_amount: '',
         cost_date: '',
         cost_desc: '',
+        result_text: '',
+        result_type: '',
+        loading: false
+      };
+      state.pricingCostSheet = {
+        open: false,
+        account: '',
+        game_name: 'WZRY',
+        role_name: '',
+        pricing_cost_amount: '',
+        base_cost_amount: '',
+        note: '',
         result_text: '',
         result_type: '',
         loading: false
@@ -1671,6 +1941,21 @@
         if (e.target === els.costSheet) closeCostSheet();
       });
     }
+    if (els.pricingCostCancelBtn) {
+      els.pricingCostCancelBtn.addEventListener('click', () => {
+        if (typeof window.closePricingCostSheet === 'function') window.closePricingCostSheet();
+      });
+    }
+    if (els.pricingCostSaveBtn) {
+      els.pricingCostSaveBtn.addEventListener('click', () => {
+        if (typeof window.submitPricingCostConfig === 'function') void window.submitPricingCostConfig();
+      });
+    }
+    if (els.pricingCostSheet) {
+      els.pricingCostSheet.addEventListener('click', (e) => {
+        if (e.target === els.pricingCostSheet && typeof window.closePricingCostSheet === 'function') window.closePricingCostSheet();
+      });
+    }
     if (els.authUuzuhaoSaveBtn) {
       els.authUuzuhaoSaveBtn.addEventListener('click', () => submitAuthUuzuhao());
     }
@@ -1746,108 +2031,24 @@
 
     els.menuTrigger.addEventListener('click', openDrawer);
     els.drawerMask.addEventListener('click', closeDrawer);
-    Array.from(document.querySelectorAll('.drawer-item')).forEach((n) => {
+    Array.from(document.querySelectorAll('.drawer-item[data-menu]')).forEach((n) => {
       n.addEventListener('click', () => {
         const key = String(n.getAttribute('data-menu') || '').trim();
-        state.currentMenu = key || 'products';
-        state.statsCostDetail = {
-          open: false,
-          loading: false,
-          game_account: '',
-          game_name: 'WZRY',
-          display_name: '',
-          total_cost_amount: 0,
-          purchase_cost_amount: 0,
-          list: [],
-          error: ''
-        };
-        closeActionSheets();
-        closeAuthUuzuhaoSheet();
-        closeAuthUhaozuSheet();
-        closeDrawer();
-        if (key === 'products') {
-          render();
-          return;
-        }
-        if (key === 'orders') {
-          state.orders.complaint_detail = { open: false, loading: false, error: '', order_no: '', channel: '', order: null, data: null, preview_image_url: '' };
-          state.orders.detail_view = { open: false, loading: false, error: '', order_no: '', channel: '', order: null, detail: null };
-          render();
-          (async () => {
-            try {
-              await loadOrders();
-              render();
-            } catch (e) {
-              showToast(e.message || '订单列表加载失败');
-            }
-          })();
-          return;
-        }
-        if (key === 'risk') {
-          render();
-          (async () => {
-            try {
-              await loadRiskCenter();
-              render();
-            } catch (e) {
-              showToast(e.message || '风控中心加载失败');
-            }
-          })();
-          return;
-        }
-        if (key === 'stats') {
-          render();
-          (async () => {
-            try {
-              await loadStatsBoard();
-              if (typeof loadStatsCalendar === 'function') {
-                await loadStatsCalendar((state.statsBoard.calendar && state.statsBoard.calendar.month) || '');
-              }
-              render();
-            } catch (e) {
-              showToast(e.message || '统计看板加载失败');
-            }
-          })();
-          return;
-        }
-        if (key === 'auth') {
-          render();
-          (async () => {
-            try {
-              await loadAuthManage();
-              render();
-            } catch (e) {
-              showToast(e.message || '授权列表加载失败');
-            }
-          })();
-          return;
-        }
-        if (key === 'board') {
-          render();
-          (async () => {
-            try {
-              await loadBoardCardsSafe();
-              render();
-            } catch (e) {
-              showToast(e.message || '板卡管理加载失败');
-            }
-          })();
-          return;
-        }
-        if (key === 'profile') {
-          render();
-          (async () => {
-            try {
-              await loadProfileSafe();
-              render();
-            } catch (e) {
-              showToast(e.message || '个人中心加载失败');
-            }
-          })();
-          return;
-        }
-        render();
-        alert('该功能正在开发中');
+        navigateMenu(key || 'products');
+      });
+    });
+    Array.from(document.querySelectorAll('[data-drawer-group-toggle]')).forEach((n) => {
+      n.addEventListener('click', () => {
+        const group = String(n.getAttribute('data-drawer-group-toggle') || '').trim();
+        if (!group) return;
+        state.drawerExpandedGroups[group] = !Boolean(state.drawerExpandedGroups[group]);
+        renderDrawer();
+      });
+    });
+    Array.from(document.querySelectorAll('.drawer-sub-item')).forEach((n) => {
+      n.addEventListener('click', () => {
+        const key = String(n.getAttribute('data-menu') || '').trim();
+        navigateMenu(key || 'pricing_uhaozu', { pricingChannel: pricingChannelFromMenu(key) });
       });
     });
 
@@ -1861,6 +2062,7 @@
         (state.forbiddenSheet && state.forbiddenSheet.open) ||
         (state.purchaseSheet && state.purchaseSheet.open) ||
         (state.costSheet && state.costSheet.open) ||
+        (state.pricingCostSheet && state.pricingCostSheet.open) ||
         (state.statsCostDetail && state.statsCostDetail.open) ||
         (state.authEditor && state.authEditor.open) ||
         (state.authCookieEditor && state.authCookieEditor.open)
@@ -1909,7 +2111,12 @@
     }, { passive: true });
 
     window.__bootH5App = async () => {
-      state.currentMenu = parseInitialMenuFromUrl();
+      const initialRoute = parseInitialRouteFromUrl();
+      state.currentMenu = initialRoute.menu;
+      state.pricing.channel = initialRoute.pricingChannel;
+      if (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang') {
+        state.drawerExpandedGroups.pricing = true;
+      }
       if (state.user && !state.token && state.refreshToken) {
         try {
           await tryRefreshAccessToken();
@@ -1925,6 +2132,9 @@
           await loadOrders();
           await loadRiskCenter();
           await loadStatsBoard();
+          if (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang') {
+            await loadPricingViewSafe();
+          }
           if (state.currentMenu === 'board') {
             await loadBoardCardsSafe();
           }

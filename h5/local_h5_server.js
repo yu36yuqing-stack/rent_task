@@ -107,6 +107,19 @@ const {
     getIncomeCalendarByUser,
     getAccountCostDetailByUser
 } = require('../stats/order_stats');
+const {
+    getUhaozuPricingDashboardByUser,
+    saveUhaozuPricingDashboardConfigByUser
+} = require('../price/price_h5_service');
+const { saveUhaozuPricingAccountCostByUser } = require('../price/price_rule_service');
+const {
+    publishUhaozuPricingByUser,
+    listPricePublishBatchLogsByUser,
+    getPricePublishBatchLogByBatchId,
+    listPricePublishItemLogsByBatchId
+} = require('../price/price_publish_service');
+const { initUserPriceRuleDb } = require('../database/user_price_rule_db');
+const { initPricePublishLogDb } = require('../database/price_publish_log_db');
 
 const HOST = process.env.H5_HOST || '0.0.0.0';
 const PORT = Number(process.env.H5_PORT || 8080);
@@ -964,6 +977,93 @@ async function handleStatsDashboard(req, res, urlObj) {
         game_name: gameName
     });
     return json(res, 200, { ok: true, ...data });
+}
+
+async function handlePricingUhaozu(req, res, urlObj) {
+    const user = await requireAuth(req);
+    const out = await getUhaozuPricingDashboardByUser(user.id, {
+        game_name: urlObj.searchParams.get('game_name') || 'WZRY',
+        payback_days: urlObj.searchParams.get('payback_days'),
+        avg_daily_rent_hours: urlObj.searchParams.get('avg_daily_rent_hours'),
+        platform_fee_rate: urlObj.searchParams.get('platform_fee_rate'),
+        withdrawal_fee_rate: urlObj.searchParams.get('withdrawal_fee_rate'),
+        price_step: urlObj.searchParams.get('price_step'),
+        deposit: urlObj.searchParams.get('deposit')
+    });
+    return json(res, 200, { ok: true, ...out });
+}
+
+async function handleSetPricingUhaozuConfig(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const out = await saveUhaozuPricingDashboardConfigByUser(user.id, {
+        game_name: body.game_name || 'WZRY',
+        payback_days: body.payback_days,
+        avg_daily_rent_hours: body.avg_daily_rent_hours,
+        platform_fee_rate: body.platform_fee_rate,
+        withdrawal_fee_rate: body.withdrawal_fee_rate,
+        price_step: body.price_step,
+        deposit: body.deposit
+    });
+    return json(res, 200, { ok: true, ...out });
+}
+
+async function handleSetPricingUhaozuAccountCost(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const gameAccount = String(body.game_account || '').trim();
+    const totalCostAmount = Number(body.total_cost_amount);
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    if (!Number.isFinite(totalCostAmount) || totalCostAmount < 0) {
+        return json(res, 400, { ok: false, message: 'total_cost_amount 不合法' });
+    }
+    const out = await saveUhaozuPricingAccountCostByUser(user.id, {
+        game_name: body.game_name || 'WZRY',
+        game_account: gameAccount,
+        total_cost_amount: totalCostAmount
+    }, {
+        desc: 'set by h5 pricing account cost'
+    });
+    return json(res, 200, { ok: true, ...out });
+}
+
+async function handlePublishPricingUhaozu(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const rawDeposit = body.deposit;
+    if (rawDeposit !== undefined && rawDeposit !== null && String(rawDeposit).trim() !== '') {
+        const deposit = Number(rawDeposit);
+        if (!Number.isFinite(deposit) || deposit < 0) {
+            return json(res, 400, { ok: false, message: 'deposit 不合法' });
+        }
+    }
+    const out = await publishUhaozuPricingByUser(user.id, {
+        game_name: body.game_name || 'WZRY',
+        deposit: body.deposit,
+        trigger_source: 'pricing_h5'
+    });
+    return json(res, 200, { ok: true, ...out });
+}
+
+async function handlePricingPublishLogsUhaozu(req, res, urlObj) {
+    const user = await requireAuth(req);
+    const out = await listPricePublishBatchLogsByUser(user.id, {
+        channel: 'uhaozu',
+        game_name: urlObj.searchParams.get('game_name') || '',
+        page: urlObj.searchParams.get('page') || 1,
+        page_size: urlObj.searchParams.get('page_size') || 20
+    });
+    return json(res, 200, { ok: true, ...out });
+}
+
+async function handlePricingPublishLogItemsUhaozu(req, res, urlObj) {
+    const user = await requireAuth(req);
+    const batchId = String(urlObj.searchParams.get('batch_id') || '').trim();
+    if (!batchId) return json(res, 400, { ok: false, message: 'batch_id 不能为空' });
+    const hit = await getPricePublishBatchLogByBatchId(user.id, batchId);
+    if (!hit) return json(res, 404, { ok: false, message: '批次不存在' });
+    const list = await listPricePublishItemLogsByBatchId(batchId);
+    return json(res, 200, { ok: true, batch_id: batchId, list });
 }
 
 async function handleStatsCalendar(req, res, urlObj) {
@@ -1980,6 +2080,8 @@ async function bootstrap() {
     await initOrderDb();
     await initUserSessionDb();
     await initUserRuleDb();
+    await initUserPriceRuleDb();
+    await initPricePublishLogDb();
     await initProdRiskEventDb();
     await initProdGuardTaskDb();
     await initBoardCardDb();
@@ -2002,6 +2104,12 @@ async function bootstrap() {
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/calendar') return await handleStatsCalendar(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/account-cost-detail') return await handleStatsAccountCostDetail(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/stats/refresh') return await handleStatsRefresh(req, res);
+            if (req.method === 'GET' && urlObj.pathname === '/api/pricing/uhaozu') return await handlePricingUhaozu(req, res, urlObj);
+            if (req.method === 'POST' && urlObj.pathname === '/api/pricing/uhaozu/config') return await handleSetPricingUhaozuConfig(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/pricing/uhaozu/account-cost') return await handleSetPricingUhaozuAccountCost(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/pricing/uhaozu/publish') return await handlePublishPricingUhaozu(req, res);
+            if (req.method === 'GET' && urlObj.pathname === '/api/pricing/uhaozu/publish-logs') return await handlePricingPublishLogsUhaozu(req, res, urlObj);
+            if (req.method === 'GET' && urlObj.pathname === '/api/pricing/uhaozu/publish-log-items') return await handlePricingPublishLogItemsUhaozu(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/profile') return await handleGetProfile(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/profile/notify') return await handleSetProfileNotify(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/profile/order-off') return await handleSetProfileOrderOff(req, res);

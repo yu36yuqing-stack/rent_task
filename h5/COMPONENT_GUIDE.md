@@ -29,6 +29,7 @@
 - Header / Drawer
   - `.hero` `.hero-toolbar` `.hero-menu-trigger` `.hero-menu-title`
   - `.drawer-item` `.drawer-item.active`
+  - `.drawer-group` `.drawer-group-toggle` `.drawer-sub-list` `.drawer-sub-item`
 - Button
   - `.btn` `.btn-primary` `.btn-ghost` `.btn-ok` `.btn-danger`
 - Tabs / Filters
@@ -52,6 +53,13 @@
   - `#profileView .profile-head-row`：卡片头部横向布局
   - `#profileView .profile-field`：字段行紧凑间距
   - `#profileView .profile-mode-inline`：通知模式三按钮横排（复用 `.mode-options` / `.mode-option-row`）
+- Pricing（页面锚点变体）
+  - `#pricingView .pricing-config-card`：定价规则配置主卡片（基于 `.panel`）
+  - `#pricingView .pricing-config-grid`：定价参数输入区，两列网格
+  - `#pricingView .pricing-metric-grid`：定价摘要指标区
+  - `#pricingView .pricing-account-card`：账号定价结果卡片
+  - `#pricingView .pricing-price-pill`：建议挂价高亮标签
+  - `#pricingView .pricing-account-grid`：单账号定价指标网格
   - `#profileView .profile-threshold-row`：单量阈值标题与输入同一行
   - `#profileView .profile-threshold-input-wrap`：阈值输入容器（含单位）
   - `#profileView .profile-threshold-input`：阈值数字输入框样式

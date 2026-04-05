@@ -537,6 +537,71 @@
       box-shadow: 0 4px 10px rgba(20, 101, 181, 0.12);
     }
 
+    .drawer-group {
+      display: grid;
+      gap: 6px;
+    }
+
+    .drawer-group-toggle {
+      border: 1px solid #dde6f0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: #f8fbff;
+      color: #23364d;
+      font-size: 13px;
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .drawer-group.active .drawer-group-toggle,
+    .drawer-group-toggle[aria-expanded="true"] {
+      border-color: #83b7ec;
+      background: linear-gradient(135deg, #f0f7ff, #e5f1ff);
+      box-shadow: 0 4px 10px rgba(20, 101, 181, 0.12);
+    }
+
+    .drawer-group-chevron {
+      font-size: 12px;
+      color: #56708c;
+      transition: transform .16s ease;
+    }
+
+    .drawer-group-toggle[aria-expanded="true"] .drawer-group-chevron {
+      transform: rotate(180deg);
+    }
+
+    .drawer-sub-list {
+      display: grid;
+      gap: 6px;
+      padding-left: 12px;
+    }
+
+    .drawer-sub-list.hidden {
+      display: none;
+    }
+
+    .drawer-sub-item {
+      border: 1px solid #e2eaf3;
+      border-radius: 10px;
+      padding: 9px 12px;
+      background: #ffffff;
+      color: #3c536d;
+      font-size: 12px;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .drawer-sub-item.active {
+      border-color: #83b7ec;
+      background: linear-gradient(135deg, #f6fbff, #eaf4ff);
+      color: #1f3e5f;
+      box-shadow: 0 4px 10px rgba(20, 101, 181, 0.1);
+    }
+
     .filter-tab {
       cursor: pointer;
       border: 1px solid #d8e1ec;
@@ -725,6 +790,12 @@
 
     @media (max-width: 640px) {
       .sheet-inline-fields {
+        grid-template-columns: 1fr;
+      }
+
+      #pricingView .pricing-config-grid,
+      #pricingView .pricing-metric-grid,
+      #pricingView .pricing-account-grid {
         grid-template-columns: 1fr;
       }
     }
@@ -1461,6 +1532,203 @@
       min-height: 34px;
       padding: 7px 8px;
       justify-content: center;
+    }
+
+    #pricingView.orders-view {
+      gap: 10px;
+    }
+
+    #pricingView .pricing-channel-tabs {
+      margin-bottom: 0;
+    }
+
+    #pricingView .pricing-config-card {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid #d9e4ef;
+      background:
+        radial-gradient(circle at top right, rgba(91, 164, 238, 0.12), transparent 32%),
+        linear-gradient(180deg, #ffffff, #f8fbff);
+    }
+
+    #pricingView .pricing-config-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    #pricingView .pricing-config-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    #pricingView .pricing-config-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    #pricingView .pricing-field {
+      margin-top: 0;
+    }
+
+    #pricingView .pricing-field label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #40576f;
+    }
+
+    #pricingView .pricing-input-with-unit {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid #d3dbe5;
+      border-radius: 10px;
+      padding: 0 10px;
+      background: #ffffff;
+    }
+
+    #pricingView .pricing-input-with-unit:focus-within {
+      border-color: #5fa3eb;
+      box-shadow: 0 0 0 3px rgba(36, 127, 226, 0.12);
+    }
+
+    #pricingView .pricing-input-with-unit input {
+      width: 100%;
+      min-width: 0;
+      border: none;
+      outline: none;
+      padding: 9px 0;
+      font-size: 13px;
+      font-weight: 600;
+      color: #21364d;
+      background: transparent;
+    }
+
+    #pricingView .pricing-input-unit {
+      font-size: 11px;
+      color: #68829d;
+      white-space: nowrap;
+    }
+
+    #pricingView .pricing-config-card.pricing-config-disabled {
+      opacity: 0.78;
+    }
+
+    #pricingView .pricing-metric-grid {
+      display: none;
+    }
+
+    #pricingView .pricing-account-card,
+    #pricingView .pricing-empty-card {
+      border-radius: 14px;
+      border: 1px solid #d9e4ef;
+      background: #ffffff;
+      padding: 10px 10px 9px;
+    }
+
+    #pricingView .pricing-account-card {
+      margin-top: 8px;
+      margin-bottom: 0;
+      box-shadow: 0 4px 12px rgba(24, 40, 63, 0.06);
+    }
+
+    #pricingView .pricing-empty-card {
+      color: #5f7892;
+      font-size: 12px;
+    }
+
+    #pricingView .pricing-error {
+      color: #b14545;
+    }
+
+    #pricingView .pricing-account-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    #pricingView .pricing-account-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    #pricingView .pricing-account-name {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 700;
+      color: #1f3148;
+      line-height: 1.25;
+    }
+
+    #pricingView .pricing-account-meta {
+      margin: 4px 0 0;
+      font-size: 11px;
+      color: #607a94;
+      line-height: 1.3;
+    }
+
+    #pricingView .pricing-price-pill {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      font-size: 10px;
+      padding: 3px 10px;
+      min-height: 24px;
+      color: #0f6f67;
+      border-color: #b7ddd8;
+      background: #ecfbf8;
+      box-shadow: 0 1px 2px rgba(15, 111, 103, 0.06);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      text-align: center;
+    }
+
+    #pricingView .pricing-account-actions .btn-card-action {
+      min-height: 24px;
+      padding: 3px 10px;
+      white-space: nowrap;
+    }
+
+    #pricingView .pricing-account-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    #pricingView .pricing-account-metric {
+      border-radius: 10px;
+      padding: 7px;
+      background: #f6faff;
+      border: 1px solid #e1eaf4;
+      display: grid;
+      gap: 3px;
+    }
+
+    #pricingView .pricing-account-metric-label {
+      font-size: 10px;
+      color: #66809b;
+      line-height: 1.25;
+    }
+
+    #pricingView .pricing-account-metric strong {
+      font-size: 12px;
+      color: #21364d;
+      line-height: 1.25;
     }
 
     #boardView.orders-view {
@@ -2307,7 +2575,8 @@
 
     #statsGameTabs.stats-game-tabs,
     #productGameTabs.stats-game-tabs,
-    #orderGameTabs.stats-game-tabs {
+    #orderGameTabs.stats-game-tabs,
+    #pricingGameTabs.stats-game-tabs {
       display: flex;
       align-items: flex-end;
       flex-wrap: nowrap;
@@ -2320,11 +2589,13 @@
 
     #statsGameTabs.stats-game-tabs::-webkit-scrollbar,
     #productGameTabs.stats-game-tabs::-webkit-scrollbar,
-    #orderGameTabs.stats-game-tabs::-webkit-scrollbar { display: none; }
+    #orderGameTabs.stats-game-tabs::-webkit-scrollbar,
+    #pricingGameTabs.stats-game-tabs::-webkit-scrollbar { display: none; }
 
     #statsGameTabs .stats-game-tab,
     #productGameTabs .stats-game-tab,
-    #orderGameTabs .stats-game-tab {
+    #orderGameTabs .stats-game-tab,
+    #pricingGameTabs .stats-game-tab {
       border: 1px solid transparent;
       border-bottom: 0;
       border-radius: 9px 9px 0 0;
@@ -2348,7 +2619,8 @@
 
     #statsGameTabs .stats-game-tab:not(:last-child)::after,
     #productGameTabs .stats-game-tab:not(:last-child)::after,
-    #orderGameTabs .stats-game-tab:not(:last-child)::after {
+    #orderGameTabs .stats-game-tab:not(:last-child)::after,
+    #pricingGameTabs .stats-game-tab:not(:last-child)::after {
       content: "";
       position: absolute;
       right: 0;
@@ -2361,7 +2633,8 @@
 
     #statsGameTabs .stats-game-tab .game-avatar,
     #productGameTabs .stats-game-tab .game-avatar,
-    #orderGameTabs .stats-game-tab .game-avatar {
+    #orderGameTabs .stats-game-tab .game-avatar,
+    #pricingGameTabs .stats-game-tab .game-avatar {
       width: 14px;
       height: 14px;
       border-radius: 3px;
@@ -2371,14 +2644,16 @@
 
     #statsGameTabs .stats-game-tab-text,
     #productGameTabs .stats-game-tab-text,
-    #orderGameTabs .stats-game-tab-text {
+    #orderGameTabs .stats-game-tab-text,
+    #pricingGameTabs .stats-game-tab-text {
       font-size: 12px;
       line-height: 1.2;
     }
 
     #statsGameTabs .stats-game-tab.active,
     #productGameTabs .stats-game-tab.active,
-    #orderGameTabs .stats-game-tab.active {
+    #orderGameTabs .stats-game-tab.active,
+    #pricingGameTabs .stats-game-tab.active {
       border-color: #cfd9e5;
       background: #fff;
       color: #1f3550;
@@ -2389,7 +2664,8 @@
 
     #statsGameTabs .stats-game-tab.active::after,
     #productGameTabs .stats-game-tab.active::after,
-    #orderGameTabs .stats-game-tab.active::after {
+    #orderGameTabs .stats-game-tab.active::after,
+    #pricingGameTabs .stats-game-tab.active::after {
       content: "";
       position: absolute;
       left: 0;
@@ -3014,28 +3290,33 @@
       .stats-acc-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
       #statsGameTabs.stats-game-tabs,
       #productGameTabs.stats-game-tabs,
-      #orderGameTabs.stats-game-tabs { gap: 0; }
+      #orderGameTabs.stats-game-tabs,
+      #pricingGameTabs.stats-game-tabs { gap: 0; }
       #statsGameTabs .stats-game-tab,
       #productGameTabs .stats-game-tab,
-      #orderGameTabs .stats-game-tab {
+      #orderGameTabs .stats-game-tab,
+      #pricingGameTabs .stats-game-tab {
         font-size: 10px;
         padding: 7px 8px 6px;
       }
       #statsGameTabs .stats-game-tab:not(:last-child)::after,
       #productGameTabs .stats-game-tab:not(:last-child)::after,
-      #orderGameTabs .stats-game-tab:not(:last-child)::after {
+      #orderGameTabs .stats-game-tab:not(:last-child)::after,
+      #pricingGameTabs .stats-game-tab:not(:last-child)::after {
         top: 8px;
         bottom: 8px;
       }
       #statsGameTabs .stats-game-tab .game-avatar,
       #productGameTabs .stats-game-tab .game-avatar,
-      #orderGameTabs .stats-game-tab .game-avatar {
+      #orderGameTabs .stats-game-tab .game-avatar,
+      #pricingGameTabs .stats-game-tab .game-avatar {
         width: 13px;
         height: 13px;
       }
       #statsGameTabs .stats-game-tab-text,
       #productGameTabs .stats-game-tab-text,
-      #orderGameTabs .stats-game-tab-text { font-size: 10px; }
+      #orderGameTabs .stats-game-tab-text,
+      #pricingGameTabs .stats-game-tab-text { font-size: 10px; }
       #statsPeriods.stats-periods { gap: 5px; }
       #statsPeriods .stats-period-btn {
         font-size: 10px;

@@ -2,9 +2,11 @@ const {
     openMainDatabase,
     openRuntimeDatabase,
     openStatsDatabase,
+    openPriceDatabase,
     MAIN_DB_FILE,
     RUNTIME_DB_FILE,
-    STATS_DB_FILE
+    STATS_DB_FILE,
+    PRICE_DB_FILE
 } = require('./sqlite_client');
 const { initUserDb } = require('./user_db');
 const { initUserGameAccountDb } = require('./user_game_account_db');
@@ -26,6 +28,8 @@ const { initOrderStatsJobStateDb } = require('./order_stats_job_state_db');
 const { initOrderComplaintDb } = require('./order_complaint_db');
 const { initOrderDetailDb } = require('./order_detail_db');
 const { initLockDb } = require('./lock_db');
+const { initUserPriceRuleDb } = require('./user_price_rule_db');
+const { initPricePublishLogDb } = require('./price_publish_log_db');
 
 function run(db, sql, params = []) {
     return new Promise((resolve, reject) => {
@@ -64,10 +68,13 @@ async function main() {
     await initOrderComplaintDb();
     await initOrderDetailDb();
     await initLockDb();
+    await initUserPriceRuleDb();
+    await initPricePublishLogDb();
 
     const mainDb = openMainDatabase();
     const runtimeDb = openRuntimeDatabase();
     const statsDb = openStatsDatabase();
+    const priceDb = openPriceDatabase();
     try {
         await run(mainDb, `
             CREATE TABLE IF NOT EXISTS health_check (
@@ -104,10 +111,23 @@ async function main() {
         const statsRow = await get(statsDb, `SELECT COUNT(*) AS total FROM stats_health_check`);
         console.log(`[SQLite] 统计库连接成功 db=${STATS_DB_FILE}`);
         console.log(`[SQLite] stats_health_check total=${statsRow?.total ?? 0}`);
+
+        await run(priceDb, `
+            CREATE TABLE IF NOT EXISTS price_health_check (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tag TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        await run(priceDb, `INSERT INTO price_health_check(tag) VALUES (?)`, ['init_ok']);
+        const priceRow = await get(priceDb, `SELECT COUNT(*) AS total FROM price_health_check`);
+        console.log(`[SQLite] 价格库连接成功 db=${PRICE_DB_FILE}`);
+        console.log(`[SQLite] price_health_check total=${priceRow?.total ?? 0}`);
     } finally {
         mainDb.close();
         runtimeDb.close();
         statsDb.close();
+        priceDb.close();
     }
 }
 

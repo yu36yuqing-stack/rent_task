@@ -122,6 +122,65 @@
       <div id="authChannelList" class="auth-channel-list"></div>
     </section>
 
+    <section id="pricingView" class="hidden orders-view">
+      <div id="pricingGameTabs" class="stats-game-tabs"></div>
+      <div class="panel pricing-config-card">
+        <div class="pricing-config-head">
+          <p class="auth-title">回本周期模式</p>
+          <div class="pricing-config-actions">
+            <button id="pricingPublishBtn" class="btn btn-ghost btn-page-action">发布定价</button>
+            <button id="pricingCalcBtn" class="btn btn-ghost btn-page-action">重新计算</button>
+          </div>
+        </div>
+        <div class="pricing-config-grid">
+          <div class="field pricing-field">
+            <label for="pricingPaybackDays">回本周期</label>
+            <div class="pricing-input-with-unit">
+              <input id="pricingPaybackDays" type="number" step="1" min="1" inputmode="numeric" placeholder="例如 240">
+              <span class="pricing-input-unit">天</span>
+            </div>
+          </div>
+          <div class="field pricing-field">
+            <label for="pricingAvgDailyRentHours">日均出租时长</label>
+            <div class="pricing-input-with-unit">
+              <input id="pricingAvgDailyRentHours" type="number" step="0.1" min="0.1" inputmode="decimal" placeholder="例如 3.5">
+              <span class="pricing-input-unit">小时</span>
+            </div>
+          </div>
+          <div class="field pricing-field">
+            <label for="pricingPlatformFeeRate">平台手续费</label>
+            <div class="pricing-input-with-unit">
+              <input id="pricingPlatformFeeRate" type="number" step="0.01" min="0" max="0.99" inputmode="decimal" placeholder="0.20">
+              <span class="pricing-input-unit">比例</span>
+            </div>
+          </div>
+          <div class="field pricing-field">
+            <label for="pricingWithdrawalFeeRate">提现手续费</label>
+            <div class="pricing-input-with-unit">
+              <input id="pricingWithdrawalFeeRate" type="number" step="0.01" min="0" max="0.99" inputmode="decimal" placeholder="0.02">
+              <span class="pricing-input-unit">比例</span>
+            </div>
+          </div>
+          <div class="field pricing-field">
+            <label for="pricingPriceStep">挂价步长</label>
+            <div class="pricing-input-with-unit">
+              <input id="pricingPriceStep" type="number" step="0.1" min="0.1" inputmode="decimal" placeholder="0.5">
+              <span class="pricing-input-unit">元</span>
+            </div>
+          </div>
+          <div class="field pricing-field">
+            <label for="pricingDeposit">押金</label>
+            <div class="pricing-input-with-unit">
+              <input id="pricingDeposit" type="number" step="1" min="0" inputmode="decimal" placeholder="100">
+              <span class="pricing-input-unit">元</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="pricingMetricGrid" class="pricing-metric-grid"></div>
+      <div id="pricingListContainer"></div>
+    </section>
+
     <section id="boardView" class="hidden orders-view">
       <div class="board-top-row">
         <p class="auth-title">板卡管理</p>
@@ -231,6 +290,17 @@
         <button class="drawer-item" data-menu="stats" data-label="统计看板">统计看板</button>
         <button class="drawer-item" data-menu="risk" data-label="风控中心">风控中心</button>
         <button class="drawer-item" data-menu="auth" data-label="授权管理">授权管理</button>
+        <div class="drawer-group" data-drawer-group="pricing">
+          <button class="drawer-group-toggle" data-drawer-group-toggle="pricing" type="button" aria-expanded="false">
+            <span>定价规则</span>
+            <span class="drawer-group-chevron" aria-hidden="true">▾</span>
+          </button>
+          <div class="drawer-sub-list hidden" data-drawer-group-list="pricing">
+            <button class="drawer-sub-item" data-menu="pricing_uhaozu" data-label="U号租定价">U号租</button>
+            <button class="drawer-sub-item" data-menu="pricing_uuzuhao" data-label="悠悠租号定价">悠悠租号</button>
+            <button class="drawer-sub-item" data-menu="pricing_zuhaowang" data-label="租号王定价">租号王</button>
+          </div>
+        </div>
         <button class="drawer-item" data-menu="board" data-label="板卡管理">板卡管理</button>
         <button class="drawer-item" data-menu="profile" data-label="个人中心">个人中心</button>
       </div>
@@ -354,6 +424,36 @@
         <button id="costDetailBtn" class="sheet-btn">看明细</button>
         <button id="costSaveBtn" class="sheet-btn">保存</button>
         <button id="costCancelBtn" class="sheet-btn">关闭弹窗</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pricingCostSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon">费</span>
+          <div id="pricingCostSheetTitle" class="sheet-title">修改定价成本</div>
+        </div>
+        <div id="pricingCostSheetResult" class="sheet-result"></div>
+      </div>
+      <div class="sheet-inline-fields">
+        <div class="field sheet-inline-field" style="margin-top:0;">
+          <label for="pricingCostAmountInput">定价成本</label>
+          <input id="pricingCostAmountInput" type="number" step="0.01" min="0" inputmode="decimal" placeholder="例如 1888.88">
+        </div>
+        <div class="field sheet-inline-field" style="margin-top:0;">
+          <label>当前商品成本</label>
+          <input id="pricingBaseCostInput" type="text" placeholder="未设置" readonly>
+        </div>
+      </div>
+      <div class="field">
+        <label for="pricingCostNoteInput">说明</label>
+        <textarea id="pricingCostNoteInput" class="sheet-textarea sheet-textarea-compact" rows="2" placeholder="仅影响定价页，不写入商品成本"></textarea>
+      </div>
+      <div class="sheet-actions">
+        <button id="pricingCostSaveBtn" class="sheet-btn">保存</button>
+        <button id="pricingCostCancelBtn" class="sheet-btn">关闭弹窗</button>
       </div>
     </div>
   </div>
@@ -586,12 +686,13 @@
       <span>加载中...</span>
     </div>
   </div>
-  <script defer src="/js/app_core.js?v=20260329b"></script>
+  <script defer src="/js/app_core.js?v=20260405b"></script>
   <script defer src="/js/menu_user.js?v=20260303a"></script>
   <script defer src="/js/menu_products.js?v=20260329b"></script>
   <script defer src="/js/menu_orders.js?v=20260303a"></script>
   <script defer src="/js/menu_risk.js?v=20260303a"></script>
   <script defer src="/js/menu_stats.js?v=20260329b"></script>
+  <script defer src="/js/menu_price.js?v=20260405b"></script>
   <script defer src="/js/menu_board.js?v=20260329a"></script>
 </body>
 </html>

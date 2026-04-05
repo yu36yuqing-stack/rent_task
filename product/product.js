@@ -50,6 +50,11 @@ function buildPlatformPrdInfo(platform, row = {}) {
     }
     if (platform === PLATFORM_UHZ) {
         const raw = row.raw && typeof row.raw === 'object' ? row.raw : {};
+        const toYuanPrice = (value) => {
+            const n = Number(value);
+            if (!Number.isFinite(n)) return 0;
+            return Number((n / 100).toFixed(2));
+        };
         return {
             prd_id: String(row.id || ''),
             game_id: String(raw.gameId || ''),
@@ -60,7 +65,11 @@ function buildPlatformPrdInfo(platform, row = {}) {
             auth_status: raw.authStatus === undefined ? null : raw.authStatus,
             goods_status: Number(raw.goodsStatus),
             rent_status: Number(raw.rentStatus),
-            customer_unshelves: Boolean(raw.customerUnshelves)
+            customer_unshelves: Boolean(raw.customerUnshelves),
+            rentalByHour: toYuanPrice(raw.concreteRentalByHour ?? raw.originRentalByHour ?? raw.rentalByHour),
+            rentalByNight: toYuanPrice(raw.concreteRentalByNight ?? raw.originRentalByNight ?? raw.rentalByNight),
+            rentalByDay: toYuanPrice(raw.concreteRentalByDay ?? raw.originRentalByDay ?? raw.rentalByDay),
+            rentalByWeek: toYuanPrice(raw.concreteRentalByWeek ?? raw.originRentalByWeek ?? raw.rentalByWeek)
         };
     }
     if (platform === PLATFORM_YYZ) {
@@ -464,5 +473,8 @@ async function listAllUserGameAccountsByUser(userId) {
 module.exports = {
     syncUserAccountsByAuth,
     listAllUserGameAccountsByUser,
-    ensureLinkedGameAccountsByOrders
+    ensureLinkedGameAccountsByOrders,
+    _internals: {
+        buildPlatformPrdInfo
+    }
 };

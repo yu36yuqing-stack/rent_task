@@ -58,9 +58,9 @@ async function main() {
         }
     });
     assertEqual(String((built.info || {}).rentalByHour || ''), '5', 'build payload overrides hour price');
-    assertEqual(Number((built.info || {}).rentalByNight || 0), 17.1, 'build payload derives night price by current ratio then discount');
-    assertEqual(Number((built.info || {}).rentalByDay || 0), 25.65, 'build payload derives day price by current ratio then discount');
-    assertEqual(Number((built.info || {}).rentalByWeek || 0), 171, 'build payload derives week price by current ratio then discount');
+    assertEqual(Number((built.info || {}).rentalByNight || 0), 23.75, 'build payload derives night price by fixed ratio');
+    assertEqual(Number((built.info || {}).rentalByDay || 0), 33.25, 'build payload derives day price by fixed ratio');
+    assertEqual(Number((built.info || {}).rentalByWeek || 0), 190, 'build payload derives week price by fixed ratio');
     assertEqual(String((built.info || {}).goodsTitle || ''), 'new title', 'build payload overrides title');
     assertEqual(Number(built.goodsId || 0), 1132393091, 'build payload keeps goodsId');
 
@@ -121,9 +121,9 @@ async function main() {
         assertEqual(captured.length, 2, 'price api does query + modify');
         const priceReq = JSON.parse(String((captured[1] && captured[1].options && captured[1].options.body) || '{}'));
         assertEqual(String((((priceReq || {}).info || {}).rentalByHour || '')), '6', 'price api updates hourly price');
-        assertEqual(Number((((priceReq || {}).info || {}).rentalByNight || 0)), 20.52, 'price api derives night price by current ratio then discount');
-        assertEqual(Number((((priceReq || {}).info || {}).rentalByDay || 0)), 30.78, 'price api derives day price by current ratio then discount');
-        assertEqual(Number((((priceReq || {}).info || {}).rentalByWeek || 0)), 205.2, 'price api derives week price by current ratio then discount');
+        assertEqual(Number((((priceReq || {}).info || {}).rentalByNight || 0)), 28.5, 'price api derives night price by fixed ratio');
+        assertEqual(Number((((priceReq || {}).info || {}).rentalByDay || 0)), 39.9, 'price api derives day price by fixed ratio');
+        assertEqual(Number((((priceReq || {}).info || {}).rentalByWeek || 0)), 228, 'price api derives week price by fixed ratio');
         assertEqual(Number((((priceReq || {}).info || {}).deposit || 0)), 5, 'price api updates deposit');
         assertEqual(String((((captured[1] || {}).options || {}).headers || {}).Referer || ''), 'https://b.uhaozu.com/release-goods?id=1132393091&gameId=A2705&from=%2Fgoods', 'price api uses modify referer');
 
