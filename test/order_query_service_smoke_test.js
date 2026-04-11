@@ -4,6 +4,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { openDatabase } = require('../database/sqlite_client');
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rent-order-query-'));
 process.env.MAIN_DB_FILE_PATH = path.join(tempDir, 'rent_robot.db');
@@ -82,8 +83,28 @@ async function seedOrder(row) {
     });
 }
 
+async function listOrderIndexNames() {
+    const db = openDatabase();
+    try {
+        return await new Promise((resolve, reject) => {
+            db.all(`PRAGMA index_list("order")`, [], (err, rows) => {
+                if (err) return reject(err);
+                resolve((rows || []).map((row) => String(row.name || '')));
+            });
+        });
+    } finally {
+        db.close();
+    }
+}
+
 async function main() {
     await initOrderQueryService();
+    const indexNames = await listOrderIndexNames();
+    assertTrue(indexNames.includes('idx_order_user_account_start'), '订单表包含账号起始时间索引');
+    assertTrue(indexNames.includes('idx_order_user_account_end'), '订单表包含账号结束时间索引');
+    assertTrue(indexNames.includes('idx_order_user_account_status_end'), '订单表包含账号状态结束时间索引');
+    assertTrue(indexNames.includes('idx_order_user_order_no'), '订单表包含用户订单号索引');
+    assertTrue(indexNames.includes('idx_order_user_game_account_end'), '订单表包含统计聚合索引');
 
     const now = new Date();
     const nowMinus3h = addHours(now, -3);

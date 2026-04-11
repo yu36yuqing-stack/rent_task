@@ -8,6 +8,7 @@ const { startOrderStatsWorkerIfNeeded } = require('./stats/order_stats');
 const { tryAcquireLock: tryAcquireDbLock, releaseLock: releaseDbLock } = require('./database/lock_db');
 const { runFullUserPipeline } = require('./pipeline/user_pipeline');
 const { startBlacklistInspectorIfNeeded } = require('./blacklist/blacklist_inspector');
+const { ensureMigrationsReady } = require('./database/migration_runner');
 
 // ===== 基础目录与运行开关 =====
 const TASK_DIR = __dirname;
@@ -201,6 +202,7 @@ async function runPipeline(runRecord) {
     };
 
     try {
+        await ensureMigrationsReady({ logger: console });
         // 顶层编排入口：执行完整链路
         startOrderSyncWorkerIfNeeded({
             enabled: ORDER_ASYNC_ENABLED,

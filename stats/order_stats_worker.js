@@ -8,6 +8,7 @@ const {
     normalizeStatsRefreshRange,
     STATS_JOB_KEY_ALL_USERS
 } = require('./order_stats');
+const { ensureMigrationsReady } = require('../database/migration_runner');
 
 const TASK_DIR = path.join(__dirname, '..');
 const LOG_DIR = path.join(TASK_DIR, 'log');
@@ -43,6 +44,7 @@ function todayText() {
 setupLogger();
 
 (async () => {
+    await ensureMigrationsReady({ logger: console });
     const lock = await tryAcquireLock(LOCK_KEY, 3600, `pid=${process.pid}`);
     if (!lock.acquired) {
         console.log(`[OrderStatsWorker] 已有任务在执行，跳过。lease_until=${lock.lease_until}`);

@@ -30,6 +30,7 @@ const { initOrderDetailDb } = require('./order_detail_db');
 const { initLockDb } = require('./lock_db');
 const { initUserPriceRuleDb } = require('./user_price_rule_db');
 const { initPricePublishLogDb } = require('./price_publish_log_db');
+const { ensureMigrationsReady } = require('./migration_runner');
 
 function run(db, sql, params = []) {
     return new Promise((resolve, reject) => {
@@ -50,6 +51,7 @@ function get(db, sql, params = []) {
 }
 
 async function main() {
+    await ensureMigrationsReady({ logger: console });
     await initUserDb();
     await initUserGameAccountDb();
     await initAccountCostRecordDb();

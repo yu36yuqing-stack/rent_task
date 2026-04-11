@@ -120,6 +120,7 @@ const {
 } = require('../price/price_publish_service');
 const { initUserPriceRuleDb } = require('../database/user_price_rule_db');
 const { initPricePublishLogDb } = require('../database/price_publish_log_db');
+const { ensureMigrationsReady } = require('../database/migration_runner');
 
 const HOST = process.env.H5_HOST || '0.0.0.0';
 const PORT = Number(process.env.H5_PORT || 8080);
@@ -2068,6 +2069,7 @@ function tryServeStatic(req, urlObj, res) {
 }
 
 async function bootstrap() {
+    await ensureMigrationsReady({ logger: console });
     await initUserDb();
     await initUserGameAccountDb();
     await initAccountCostRecordDb();

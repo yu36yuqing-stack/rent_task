@@ -270,105 +270,141 @@ async function rebuildOrderTableToTargetSchemaIfNeeded(db) {
     await run(db, `DROP TABLE order_old`);
 }
 
+async function ensureOrderTableBase(db) {
+    await run(db, `
+        CREATE TABLE IF NOT EXISTS "order" (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            channel TEXT NOT NULL DEFAULT '',
+            order_no TEXT NOT NULL DEFAULT '',
+            game_id TEXT NOT NULL DEFAULT '',
+            game_name TEXT NOT NULL DEFAULT 'WZRY',
+            game_account TEXT NOT NULL DEFAULT '',
+            role_name TEXT NOT NULL DEFAULT '',
+            order_status TEXT NOT NULL DEFAULT '',
+            order_amount REAL NOT NULL DEFAULT 0,
+            rent_hour INTEGER NOT NULL DEFAULT 0,
+            ren_way TEXT NOT NULL DEFAULT '',
+            rec_amount REAL NOT NULL DEFAULT 0,
+            start_time TEXT NOT NULL DEFAULT '',
+            end_time TEXT NOT NULL DEFAULT '',
+            create_date TEXT NOT NULL DEFAULT '',
+            modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            desc TEXT NOT NULL DEFAULT ''
+        )
+    `);
+}
+
+async function ensureOrderIndexes(db) {
+    await run(db, `
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_order_alive
+        ON "order"(user_id, channel, order_no, is_deleted)
+    `);
+    await run(db, `
+        CREATE INDEX IF NOT EXISTS idx_order_user_time
+        ON "order"(user_id, create_date, is_deleted)
+    `);
+    await run(db, `
+        CREATE INDEX IF NOT EXISTS idx_order_channel_time
+        ON "order"(channel, create_date, is_deleted)
+    `);
+    await run(db, `
+        CREATE INDEX IF NOT EXISTS idx_order_user_account_start
+        ON "order"(user_id, is_deleted, game_id, game_account, start_time)
+    `);
+    await run(db, `
+        CREATE INDEX IF NOT EXISTS idx_order_user_account_end
+        ON "order"(user_id, is_deleted, game_id, game_account, end_time)
+    `);
+    await run(db, `
+        CREATE INDEX IF NOT EXISTS idx_order_user_account_status_end
+        ON "order"(user_id, is_deleted, game_id, game_account, order_status, end_time)
+    `);
+    await run(db, `
+        CREATE INDEX IF NOT EXISTS idx_order_user_order_no
+        ON "order"(user_id, is_deleted, order_no)
+    `);
+    await run(db, `
+        CREATE INDEX IF NOT EXISTS idx_order_user_game_account_end
+        ON "order"(user_id, is_deleted, game_name, game_account, end_time)
+    `);
+}
+
+async function normalizeOrderTableData(db) {
+    await run(db, `
+        UPDATE "order"
+        SET game_name = 'WZRY', modify_date = ?
+        WHERE channel = 'uuzuhao'
+          AND is_deleted = 0
+          AND (game_name = '王者荣耀' OR UPPER(game_name) = 'WZRY')
+    `, [nowText()]);
+    await run(db, `
+        UPDATE "order"
+        SET game_name = 'CFM', game_id = '3', modify_date = ?
+        WHERE is_deleted = 0
+          AND (
+              COALESCE(game_name, '') IN ('枪战王者', '穿越火线', '穿越火线手游', '手游版CF', '1104512706')
+              OR COALESCE(game_id, '') IN ('3', 'A2804', '1104512706')
+          )
+    `, [nowText()]);
+    await run(db, `
+        UPDATE "order"
+        SET order_status = CASE
+            WHEN order_status IN ('待支付', '预约中', '租赁中', '出租中', '已完成', '部分完成', '已撤单', '退款中', '已退款', '结算中', '投诉/撤单')
+                THEN CASE WHEN order_status = '出租中' THEN '租赁中' ELSE order_status END
+            WHEN order_status IN ('10', 10) THEN '待支付'
+            WHEN order_status IN ('30', 30) THEN '预约中'
+            WHEN order_status IN ('50', 50) THEN '已完成'
+            WHEN order_status IN ('52', 52) THEN '部分完成'
+            WHEN order_status IN ('60', 60) THEN '已撤单'
+            WHEN order_status IN ('3000', 3000) THEN '租赁中'
+            WHEN order_status IN ('4000', 4000) THEN '已完成'
+            WHEN order_status IN ('4100', 4100) THEN '退款中'
+            WHEN order_status IN ('4200', 4200) THEN '已退款'
+            WHEN order_status IN ('8000', 8000) THEN '结算中'
+            WHEN order_status IN ('9900', 9900) THEN '投诉/撤单'
+            WHEN TRIM(CAST(order_status AS TEXT)) = '' THEN ''
+            ELSE CAST(order_status AS TEXT)
+        END,
+        modify_date = ?
+        WHERE is_deleted = 0
+    `, [nowText()]);
+    await run(db, `
+        UPDATE "order"
+        SET order_amount = ROUND(COALESCE(order_amount, 0), 2),
+            modify_date = ?
+        WHERE is_deleted = 0
+    `, [nowText()]);
+    await run(db, `
+        UPDATE "order"
+        SET ren_way = CASE
+            WHEN TRIM(COALESCE(ren_way, '')) <> '' THEN ren_way
+            WHEN channel = 'uuzuhao' THEN '时租'
+            ELSE ''
+        END,
+        modify_date = ?
+        WHERE is_deleted = 0
+    `, [nowText()]);
+}
+
+let initOrderDbPromise = null;
+
 async function initOrderDb() {
-    const db = openDatabase();
-    try {
-        await run(db, `
-            CREATE TABLE IF NOT EXISTS "order" (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                channel TEXT NOT NULL DEFAULT '',
-                order_no TEXT NOT NULL DEFAULT '',
-                game_id TEXT NOT NULL DEFAULT '',
-                game_name TEXT NOT NULL DEFAULT 'WZRY',
-                game_account TEXT NOT NULL DEFAULT '',
-                role_name TEXT NOT NULL DEFAULT '',
-                order_status TEXT NOT NULL DEFAULT '',
-                order_amount REAL NOT NULL DEFAULT 0,
-                rent_hour INTEGER NOT NULL DEFAULT 0,
-                ren_way TEXT NOT NULL DEFAULT '',
-                rec_amount REAL NOT NULL DEFAULT 0,
-                start_time TEXT NOT NULL DEFAULT '',
-                end_time TEXT NOT NULL DEFAULT '',
-                create_date TEXT NOT NULL DEFAULT '',
-                modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                is_deleted INTEGER NOT NULL DEFAULT 0,
-                desc TEXT NOT NULL DEFAULT ''
-            )
-        `);
-
-        await migrateFromLegacyUserOrderTable(db);
-        await rebuildOrderTableToTargetSchemaIfNeeded(db);
-
-        await run(db, `
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_order_alive
-            ON "order"(user_id, channel, order_no, is_deleted)
-        `);
-        await run(db, `
-            CREATE INDEX IF NOT EXISTS idx_order_user_time
-            ON "order"(user_id, create_date, is_deleted)
-        `);
-        await run(db, `
-            CREATE INDEX IF NOT EXISTS idx_order_channel_time
-            ON "order"(channel, create_date, is_deleted)
-        `);
-        await run(db, `
-            UPDATE "order"
-            SET game_name = 'WZRY', modify_date = ?
-            WHERE channel = 'uuzuhao'
-              AND is_deleted = 0
-              AND (game_name = '王者荣耀' OR UPPER(game_name) = 'WZRY')
-        `, [nowText()]);
-        await run(db, `
-            UPDATE "order"
-            SET game_name = 'CFM', game_id = '3', modify_date = ?
-            WHERE is_deleted = 0
-              AND (
-                  COALESCE(game_name, '') IN ('枪战王者', '穿越火线', '穿越火线手游', '手游版CF', '1104512706')
-                  OR COALESCE(game_id, '') IN ('3', 'A2804', '1104512706')
-              )
-        `, [nowText()]);
-        await run(db, `
-            UPDATE "order"
-            SET order_status = CASE
-                WHEN order_status IN ('待支付', '预约中', '租赁中', '出租中', '已完成', '部分完成', '已撤单', '退款中', '已退款', '结算中', '投诉/撤单')
-                    THEN CASE WHEN order_status = '出租中' THEN '租赁中' ELSE order_status END
-                WHEN order_status IN ('10', 10) THEN '待支付'
-                WHEN order_status IN ('30', 30) THEN '预约中'
-                WHEN order_status IN ('50', 50) THEN '已完成'
-                WHEN order_status IN ('52', 52) THEN '部分完成'
-                WHEN order_status IN ('60', 60) THEN '已撤单'
-                WHEN order_status IN ('3000', 3000) THEN '租赁中'
-                WHEN order_status IN ('4000', 4000) THEN '已完成'
-                WHEN order_status IN ('4100', 4100) THEN '退款中'
-                WHEN order_status IN ('4200', 4200) THEN '已退款'
-                WHEN order_status IN ('8000', 8000) THEN '结算中'
-                WHEN order_status IN ('9900', 9900) THEN '投诉/撤单'
-                WHEN TRIM(CAST(order_status AS TEXT)) = '' THEN ''
-                ELSE CAST(order_status AS TEXT)
-            END,
-            modify_date = ?
-            WHERE is_deleted = 0
-        `, [nowText()]);
-        await run(db, `
-            UPDATE "order"
-            SET order_amount = ROUND(COALESCE(order_amount, 0), 2),
-                modify_date = ?
-            WHERE is_deleted = 0
-        `, [nowText()]);
-        await run(db, `
-            UPDATE "order"
-            SET ren_way = CASE
-                WHEN TRIM(COALESCE(ren_way, '')) <> '' THEN ren_way
-                WHEN channel = 'uuzuhao' THEN '时租'
-                ELSE ''
-            END,
-            modify_date = ?
-            WHERE is_deleted = 0
-        `, [nowText()]);
-    } finally {
-        db.close();
-    }
+    if (initOrderDbPromise) return initOrderDbPromise;
+    initOrderDbPromise = (async () => {
+        const db = openDatabase();
+        try {
+            await ensureOrderTableBase(db);
+            await ensureOrderIndexes(db);
+        } finally {
+            db.close();
+        }
+    })().catch((err) => {
+        initOrderDbPromise = null;
+        throw err;
+    });
+    return initOrderDbPromise;
 }
 
 function normalizeOrder(input = {}) {
@@ -768,6 +804,19 @@ module.exports = {
     listTodayPaidOrderCountByAccounts,
     listRolling24hPaidOrderCountByAccounts,
     listRentingOrderWindowByAccounts,
+    _internal: {
+        run,
+        get,
+        all,
+        nowText,
+        tableExists,
+        tableColumns,
+        migrateFromLegacyUserOrderTable,
+        rebuildOrderTableToTargetSchemaIfNeeded,
+        ensureOrderTableBase,
+        ensureOrderIndexes,
+        normalizeOrderTableData
+    },
     // 兼容旧调用名
     initUserOrderDb: initOrderDb,
     upsertUserOrder: upsertOrder,

@@ -47,8 +47,9 @@ exit \$code
 EOF
 echo "[OK] 宿主机已提交并推送"
 
-echo "[Step 3/5] 重启宿主机常驻服务并做健康检查..."
+echo "[Step 3/5] 执行迁移、重启宿主机常驻服务并做健康检查..."
 REMOTE_H5_CMD="cd '${REMOTE_DIR}' && \
+node scripts/run_migrations.js && \
 pkill -f 'h5/local_h5_server.js' || true; \
 pkill -f 'rent_robot_main.js' || true; \
 pkill -f 'order/order_worker.js' || true; \

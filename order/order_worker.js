@@ -3,6 +3,7 @@ const fs = require('fs');
 const util = require('util');
 const { syncOrdersForAllUsers } = require('./order');
 const { tryAcquireLock, releaseLock } = require('../database/lock_db');
+const { ensureMigrationsReady } = require('../database/migration_runner');
 
 const TASK_DIR = path.join(__dirname, '..');
 const LOG_DIR = path.join(TASK_DIR, 'log');
@@ -32,6 +33,7 @@ function setupLogger() {
 setupLogger();
 
 (async () => {
+    await ensureMigrationsReady({ logger: console });
     const leaseSec = Math.max(300, Number(process.env.ORDER_WORKER_LOCK_LEASE_SEC || 1800));
     const lock = await tryAcquireLock(LOCK_KEY, leaseSec, `pid=${process.pid}`);
     if (!lock.acquired) {
