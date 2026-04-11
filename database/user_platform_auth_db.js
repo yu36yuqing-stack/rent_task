@@ -398,37 +398,51 @@ function rowToAuth(row = {}, options = {}) {
     return out;
 }
 
+async function ensureUserPlatformAuthTableBase(db) {
+    await run(db, `
+        CREATE TABLE IF NOT EXISTS user_platform_auth (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            platform TEXT NOT NULL,
+            auth_type TEXT NOT NULL,
+            auth_payload TEXT NOT NULL,
+            auth_status TEXT NOT NULL DEFAULT 'valid',
+            expire_at TEXT DEFAULT '',
+            modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            desc TEXT NOT NULL DEFAULT ''
+        )
+    `);
+}
+
+async function ensureUserPlatformAuthIndexes(db) {
+    await run(db, `
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_user_platform_auth_alive
+        ON user_platform_auth(user_id, platform, is_deleted)
+    `);
+    await run(db, `
+        CREATE INDEX IF NOT EXISTS idx_user_platform_auth_status
+        ON user_platform_auth(user_id, auth_status, is_deleted)
+    `);
+}
+
+let initUserPlatformAuthDbPromise = null;
+
 async function initUserPlatformAuthDb() {
-    const db = openDatabase();
-    try {
-        await run(db, `
-            CREATE TABLE IF NOT EXISTS user_platform_auth (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                platform TEXT NOT NULL,
-                auth_type TEXT NOT NULL,
-                auth_payload TEXT NOT NULL,
-                auth_status TEXT NOT NULL DEFAULT 'valid',
-                expire_at TEXT DEFAULT '',
-                modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                is_deleted INTEGER NOT NULL DEFAULT 0,
-                desc TEXT NOT NULL DEFAULT ''
-            )
-        `);
-        await run(db, `
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_user_platform_auth_alive
-            ON user_platform_auth(user_id, platform, is_deleted)
-        `);
-        await run(db, `
-            CREATE INDEX IF NOT EXISTS idx_user_platform_auth_status
-            ON user_platform_auth(user_id, auth_status, is_deleted)
-        `);
-        await migrateAuthPayloadToPlaintext(db);
-        await migrateZuhaowangPayloadToYuanbaoOnly(db);
-        await migrateUhaozuPayloadToDefaultHeaders(db);
-    } finally {
-        db.close();
-    }
+    if (initUserPlatformAuthDbPromise) return initUserPlatformAuthDbPromise;
+    initUserPlatformAuthDbPromise = (async () => {
+        const db = openDatabase();
+        try {
+            await ensureUserPlatformAuthTableBase(db);
+            await ensureUserPlatformAuthIndexes(db);
+        } finally {
+            db.close();
+        }
+    })().catch((err) => {
+        initUserPlatformAuthDbPromise = null;
+        throw err;
+    });
+    return initUserPlatformAuthDbPromise;
 }
 
 async function upsertUserPlatformAuth(input = {}) {
@@ -531,5 +545,17 @@ module.exports = {
     upsertUserPlatformAuth,
     listUserPlatformAuth,
     listValidPlatformsByUser,
-    markPlatformAuthExpired
+    markPlatformAuthExpired,
+    _internal: {
+        run,
+        get,
+        all,
+        nowText,
+        parseStoredPayload,
+        migrateAuthPayloadToPlaintext,
+        migrateZuhaowangPayloadToYuanbaoOnly,
+        migrateUhaozuPayloadToDefaultHeaders,
+        ensureUserPlatformAuthTableBase,
+        ensureUserPlatformAuthIndexes
+    }
 };

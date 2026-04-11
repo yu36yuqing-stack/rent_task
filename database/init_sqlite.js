@@ -11,9 +11,7 @@ const {
 const { initUserDb } = require('./user_db');
 const { initUserGameAccountDb } = require('./user_game_account_db');
 const {
-    initAccountCostRecordDb,
-    migrateAccountCostRecordFromMainToStatsIfNeeded,
-    backfillPurchaseCostRecordsFromUserGameAccount
+    initAccountCostRecordDb
 } = require('./account_cost_record_db');
 const { initUserPlatformAuthDb } = require('./user_platform_auth_db');
 const { initUserPlatformRestrictDb } = require('./user_platform_restrict_db');
@@ -55,8 +53,6 @@ async function main() {
     await initUserDb();
     await initUserGameAccountDb();
     await initAccountCostRecordDb();
-    await migrateAccountCostRecordFromMainToStatsIfNeeded();
-    await backfillPurchaseCostRecordsFromUserGameAccount();
     await initUserPlatformAuthDb();
     await initUserPlatformRestrictDb();
     await initUserSessionDb();

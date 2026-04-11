@@ -133,7 +133,7 @@ async function main() {
     assertTrue(pendingBefore.length > 0, '初始状态存在待执行 migration');
 
     const summary = await runPendingMigrations({ logger: console });
-    assertEqual(summary.pending_before, 1, '首次执行应命中一个 pending migration');
+    assertEqual(summary.pending_before, 7, '首次执行应命中全部 pending migrations');
     assertEqual(summary.pending_after, 0, '首次执行后不应残留 pending migration');
 
     const db2 = openDatabase();
@@ -160,8 +160,9 @@ async function main() {
     }
 
     const applied = await listAppliedSchemaMigrations();
-    assertEqual(applied.length, 1, 'schema_migration 记录一次已执行 migration');
-    assertEqual(String(applied[0].version || ''), '20260411_001', '已执行 migration 版本正确');
+    assertEqual(applied.length, 7, 'schema_migration 记录全部已执行 migrations');
+    assertEqual(String(applied[0].version || ''), '20260411_001', '首个 migration 版本正确');
+    assertEqual(String(applied[6].version || ''), '20260411_007', '最后一个 migration 版本正确');
 
     const summarySecond = await runPendingMigrations({ logger: console });
     assertEqual(summarySecond.pending_before, 0, '重复执行 migration 不应重复跑');

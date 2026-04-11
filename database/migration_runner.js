@@ -84,7 +84,10 @@ async function runPendingMigrations(options = {}) {
         logger.log(`[Migration] applying version=${migration.version} name=${migration.name}`);
         const db = openMainDatabase();
         try {
-            await run(db, 'BEGIN IMMEDIATE');
+            const useTransaction = migration.use_transaction !== false;
+            if (useTransaction) {
+                await run(db, 'BEGIN IMMEDIATE');
+            }
             await migration.up({
                 db,
                 run,
@@ -96,7 +99,9 @@ async function runPendingMigrations(options = {}) {
                 (version, name, create_date, modify_date, is_deleted, desc)
                 VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, ?)
             `, [migration.version, migration.name, String(migration.desc || migration.filename || '')]);
-            await run(db, 'COMMIT');
+            if (useTransaction) {
+                await run(db, 'COMMIT');
+            }
         } catch (err) {
             await run(db, 'ROLLBACK').catch(() => {});
             throw new Error(`migration_failed version=${migration.version} name=${migration.name}: ${String(err && err.message ? err.message : err)}`);

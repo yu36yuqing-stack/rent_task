@@ -366,97 +366,101 @@ async function backfillBlacklistGameIdentityByAccount(db) {
     }
 }
 
+async function ensureUserBlacklistTables(db) {
+    await run(db, `
+        CREATE TABLE IF NOT EXISTS user_blacklist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            game_account TEXT NOT NULL,
+            game_id TEXT NOT NULL DEFAULT '1',
+            game_name TEXT NOT NULL DEFAULT 'WZRY',
+            remark TEXT NOT NULL DEFAULT '',
+            reason TEXT NOT NULL DEFAULT '',
+            create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            desc TEXT NOT NULL DEFAULT ''
+        )
+    `);
+    await run(db, `
+        CREATE TABLE IF NOT EXISTS user_blacklist_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            game_account TEXT NOT NULL DEFAULT '',
+            game_id TEXT NOT NULL DEFAULT '1',
+            game_name TEXT NOT NULL DEFAULT 'WZRY',
+            before_data TEXT NOT NULL DEFAULT '',
+            after_data TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT '',
+            operator TEXT NOT NULL DEFAULT '',
+            create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            desc TEXT NOT NULL DEFAULT ''
+        )
+    `);
+    await run(db, `
+        CREATE TABLE IF NOT EXISTS user_blacklist_source (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            game_account TEXT NOT NULL,
+            game_id TEXT NOT NULL DEFAULT '1',
+            game_name TEXT NOT NULL DEFAULT 'WZRY',
+            source TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 0,
+            reason TEXT NOT NULL DEFAULT '',
+            priority INTEGER NOT NULL DEFAULT 0,
+            detail TEXT NOT NULL DEFAULT '{}',
+            expire_at TEXT NOT NULL DEFAULT '',
+            create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            desc TEXT NOT NULL DEFAULT ''
+        )
+    `);
+}
+
+async function ensureUserBlacklistIndexes(db) {
+    await run(db, `
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_user_blacklist_alive
+        ON user_blacklist(user_id, game_id, game_account, is_deleted)
+    `);
+    await run(db, `
+        CREATE INDEX IF NOT EXISTS idx_user_blacklist_user_alive
+        ON user_blacklist(user_id, game_id, is_deleted)
+    `);
+    await run(db, `
+        CREATE INDEX IF NOT EXISTS idx_user_blacklist_history_user
+        ON user_blacklist_history(user_id, is_deleted, id)
+    `);
+    await run(db, `
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_user_blacklist_source_alive
+        ON user_blacklist_source(user_id, game_id, game_account, source, is_deleted)
+    `);
+    await run(db, `
+        CREATE INDEX IF NOT EXISTS idx_user_blacklist_source_user_alive
+        ON user_blacklist_source(user_id, game_id, active, modify_date, is_deleted)
+    `);
+}
+
+let initUserBlacklistDbPromise = null;
+
 async function initUserBlacklistDb() {
-    const db = openDatabase();
-    try {
-        await run(db, `
-            CREATE TABLE IF NOT EXISTS user_blacklist (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                game_account TEXT NOT NULL,
-                game_id TEXT NOT NULL DEFAULT '1',
-                game_name TEXT NOT NULL DEFAULT 'WZRY',
-                remark TEXT NOT NULL DEFAULT '',
-                reason TEXT NOT NULL DEFAULT '',
-                create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                is_deleted INTEGER NOT NULL DEFAULT 0,
-                desc TEXT NOT NULL DEFAULT ''
-            )
-        `);
-        await ensureUserBlacklistColumns(db);
-        await reorderUserBlacklistColumnsIfNeeded(db);
-        await run(db, `DROP INDEX IF EXISTS uq_user_blacklist_alive`);
-        await run(db, `
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_user_blacklist_alive
-            ON user_blacklist(user_id, game_id, game_account, is_deleted)
-        `);
-        await run(db, `
-            CREATE INDEX IF NOT EXISTS idx_user_blacklist_user_alive
-            ON user_blacklist(user_id, game_id, is_deleted)
-        `);
-        await run(db, `
-            CREATE TABLE IF NOT EXISTS user_blacklist_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                event_type TEXT NOT NULL,
-                game_account TEXT NOT NULL DEFAULT '',
-                game_id TEXT NOT NULL DEFAULT '1',
-                game_name TEXT NOT NULL DEFAULT 'WZRY',
-                before_data TEXT NOT NULL DEFAULT '',
-                after_data TEXT NOT NULL DEFAULT '',
-                source TEXT NOT NULL DEFAULT '',
-                operator TEXT NOT NULL DEFAULT '',
-                create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                is_deleted INTEGER NOT NULL DEFAULT 0,
-                desc TEXT NOT NULL DEFAULT ''
-            )
-        `);
-        await ensureColumn(db, 'user_blacklist_history', 'game_id', "game_id TEXT NOT NULL DEFAULT '1'");
-        await ensureColumn(db, 'user_blacklist_history', 'game_name', "game_name TEXT NOT NULL DEFAULT 'WZRY'");
-        await run(db, `
-            CREATE INDEX IF NOT EXISTS idx_user_blacklist_history_user
-            ON user_blacklist_history(user_id, is_deleted, id)
-        `);
-        await run(db, `
-            CREATE TABLE IF NOT EXISTS user_blacklist_source (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                game_account TEXT NOT NULL,
-                game_id TEXT NOT NULL DEFAULT '1',
-                game_name TEXT NOT NULL DEFAULT 'WZRY',
-                source TEXT NOT NULL,
-                active INTEGER NOT NULL DEFAULT 0,
-                reason TEXT NOT NULL DEFAULT '',
-                priority INTEGER NOT NULL DEFAULT 0,
-                detail TEXT NOT NULL DEFAULT '{}',
-                expire_at TEXT NOT NULL DEFAULT '',
-                create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                is_deleted INTEGER NOT NULL DEFAULT 0,
-                desc TEXT NOT NULL DEFAULT ''
-            )
-        `);
-        await ensureColumn(db, 'user_blacklist_source', 'game_id', "game_id TEXT NOT NULL DEFAULT '1'");
-        await ensureColumn(db, 'user_blacklist_source', 'game_name', "game_name TEXT NOT NULL DEFAULT 'WZRY'");
-        await run(db, `
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_user_blacklist_source_alive
-            ON user_blacklist_source(user_id, game_id, game_account, source, is_deleted)
-        `);
-        await run(db, `
-            CREATE INDEX IF NOT EXISTS idx_user_blacklist_source_user_alive
-            ON user_blacklist_source(user_id, game_id, active, modify_date, is_deleted)
-        `);
+    if (initUserBlacklistDbPromise) return initUserBlacklistDbPromise;
+    initUserBlacklistDbPromise = (async () => {
+        const db = openDatabase();
         try {
-            await backfillUserBlacklistRemarkFromUserGameAccount(db);
-            await backfillBlacklistGameIdentityByAccount(db);
-        } catch (_) {
-            // user_game_account 尚未初始化时，允许跳过一次回填。
+            await ensureUserBlacklistTables(db);
+            await ensureUserBlacklistIndexes(db);
+        } finally {
+            db.close();
         }
-    } finally {
-        db.close();
-    }
+    })().catch((err) => {
+        initUserBlacklistDbPromise = null;
+        throw err;
+    });
+    return initUserBlacklistDbPromise;
 }
 
 async function listBlacklistedAccountsByUser(userId) {
@@ -783,5 +787,18 @@ module.exports = {
     listUserBlacklistByUserWithMeta,
     upsertUserBlacklistEntry,
     removeUserBlacklistEntry,
-    hardDeleteUserBlacklistEntry
+    hardDeleteUserBlacklistEntry,
+    _internal: {
+        run,
+        all,
+        get,
+        ensureColumn,
+        ensureUserBlacklistColumns,
+        tableColumnNamesInOrder,
+        reorderUserBlacklistColumnsIfNeeded,
+        backfillUserBlacklistRemarkFromUserGameAccount,
+        backfillBlacklistGameIdentityByAccount,
+        ensureUserBlacklistTables,
+        ensureUserBlacklistIndexes
+    }
 };

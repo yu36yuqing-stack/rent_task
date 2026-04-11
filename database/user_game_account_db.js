@@ -236,89 +236,60 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
     await run(db, `DROP TABLE user_game_account_old`);
 }
 
+async function ensureUserGameAccountTableBase(db) {
+    await run(db, `
+        CREATE TABLE IF NOT EXISTS user_game_account (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            game_account TEXT NOT NULL,
+            account_remark TEXT NOT NULL DEFAULT '',
+            game_id TEXT NOT NULL DEFAULT '1',
+            game_name TEXT NOT NULL DEFAULT 'WZRY',
+            channel_status TEXT NOT NULL DEFAULT '{}',
+            channel_prd_info TEXT NOT NULL DEFAULT '{}',
+            switch TEXT NOT NULL DEFAULT '{}',
+            online_probe_snapshot TEXT NOT NULL DEFAULT '{}',
+            forbidden_probe_snapshot TEXT NOT NULL DEFAULT '{}',
+            purchase_price REAL NOT NULL DEFAULT 0,
+            purchase_date TEXT NOT NULL DEFAULT '',
+            total_cost_amount REAL NOT NULL DEFAULT 0,
+            modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            manual_deleted INTEGER NOT NULL DEFAULT 0,
+            manual_deleted_at TEXT NOT NULL DEFAULT '',
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            desc TEXT NOT NULL DEFAULT ''
+        )
+    `);
+}
+
+async function ensureUserGameAccountIndexes(db) {
+    await run(db, `
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_user_game_account_alive
+        ON user_game_account(user_id, game_id, game_account, is_deleted)
+    `);
+    await run(db, `
+        CREATE INDEX IF NOT EXISTS idx_user_game_account_user_alive
+        ON user_game_account(user_id, is_deleted)
+    `);
+}
+
+let initUserGameAccountDbPromise = null;
+
 async function initUserGameAccountDb() {
-    const db = openDatabase();
-    try {
-        await run(db, `
-            CREATE TABLE IF NOT EXISTS user_game_account (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                game_account TEXT NOT NULL,
-                account_remark TEXT NOT NULL DEFAULT '',
-                game_id TEXT NOT NULL DEFAULT '1',
-                game_name TEXT NOT NULL DEFAULT 'WZRY',
-                channel_status TEXT NOT NULL DEFAULT '{}',
-                channel_prd_info TEXT NOT NULL DEFAULT '{}',
-                switch TEXT NOT NULL DEFAULT '{}',
-                online_probe_snapshot TEXT NOT NULL DEFAULT '{}',
-                forbidden_probe_snapshot TEXT NOT NULL DEFAULT '{}',
-                purchase_price REAL NOT NULL DEFAULT 0,
-                purchase_date TEXT NOT NULL DEFAULT '',
-                total_cost_amount REAL NOT NULL DEFAULT 0,
-                modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                manual_deleted INTEGER NOT NULL DEFAULT 0,
-                manual_deleted_at TEXT NOT NULL DEFAULT '',
-                is_deleted INTEGER NOT NULL DEFAULT 0,
-                desc TEXT NOT NULL DEFAULT ''
-            )
-        `);
-        const cols = await tableColumns(db, 'user_game_account');
-        if (!cols.has('account_remark')) {
-            await run(db, `ALTER TABLE user_game_account ADD COLUMN account_remark TEXT NOT NULL DEFAULT ''`);
+    if (initUserGameAccountDbPromise) return initUserGameAccountDbPromise;
+    initUserGameAccountDbPromise = (async () => {
+        const db = openDatabase();
+        try {
+            await ensureUserGameAccountTableBase(db);
+            await ensureUserGameAccountIndexes(db);
+        } finally {
+            db.close();
         }
-        if (!cols.has('game_id')) {
-            await run(db, `ALTER TABLE user_game_account ADD COLUMN game_id TEXT NOT NULL DEFAULT '1'`);
-            await run(db, `
-                UPDATE user_game_account
-                SET game_id = CASE
-                    WHEN COALESCE(game_name, 'WZRY') IN ('和平精英') THEN '2'
-                    WHEN COALESCE(game_name, 'WZRY') IN ('CFM', '枪战王者', '穿越火线', '穿越火线手游') THEN '3'
-                    ELSE '1'
-                END
-                WHERE TRIM(COALESCE(game_id, '')) = ''
-            `);
-        }
-        if (!cols.has('channel_prd_info')) {
-            await run(db, `ALTER TABLE user_game_account ADD COLUMN channel_prd_info TEXT NOT NULL DEFAULT '{}'`);
-        }
-        if (!cols.has('switch')) {
-            await run(db, `ALTER TABLE user_game_account ADD COLUMN "switch" TEXT NOT NULL DEFAULT '{}'`);
-        }
-        if (!cols.has('purchase_price')) {
-            await run(db, `ALTER TABLE user_game_account ADD COLUMN purchase_price REAL NOT NULL DEFAULT 0`);
-        }
-        if (!cols.has('purchase_date')) {
-            await run(db, `ALTER TABLE user_game_account ADD COLUMN purchase_date TEXT NOT NULL DEFAULT ''`);
-        }
-        if (!cols.has('total_cost_amount')) {
-            await run(db, `ALTER TABLE user_game_account ADD COLUMN total_cost_amount REAL NOT NULL DEFAULT 0`);
-        }
-        if (!cols.has('manual_deleted')) {
-            await run(db, `ALTER TABLE user_game_account ADD COLUMN manual_deleted INTEGER NOT NULL DEFAULT 0`);
-        }
-        if (!cols.has('manual_deleted_at')) {
-            await run(db, `ALTER TABLE user_game_account ADD COLUMN manual_deleted_at TEXT NOT NULL DEFAULT ''`);
-        }
-        if (!cols.has('online_probe_snapshot')) {
-            await run(db, `ALTER TABLE user_game_account ADD COLUMN online_probe_snapshot TEXT NOT NULL DEFAULT '{}'`);
-        }
-        if (!cols.has('forbidden_probe_snapshot')) {
-            await run(db, `ALTER TABLE user_game_account ADD COLUMN forbidden_probe_snapshot TEXT NOT NULL DEFAULT '{}'`);
-        }
-        await reorderUserGameAccountColumnsIfNeeded(db);
-        await run(db, `DROP INDEX IF EXISTS uq_user_game_account_alive`);
-        await run(db, `
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_user_game_account_alive
-            ON user_game_account(user_id, game_id, game_account, is_deleted)
-        `);
-        await run(db, `
-            CREATE INDEX IF NOT EXISTS idx_user_game_account_user_alive
-            ON user_game_account(user_id, is_deleted)
-        `);
-        await compactCanonicalGameNames(db);
-    } finally {
-        db.close();
-    }
+    })().catch((err) => {
+        initUserGameAccountDbPromise = null;
+        throw err;
+    });
+    return initUserGameAccountDbPromise;
 }
 
 function parseJsonObject(raw) {
@@ -1274,5 +1245,16 @@ module.exports = {
     updateUserGameAccountOnlineProbeSnapshot,
     updateUserGameAccountForbiddenProbeSnapshot,
     isUserGameAccountManuallyDeleted,
-    normalizeAccountSwitch
+    normalizeAccountSwitch,
+    _internal: {
+        run,
+        get,
+        all,
+        tableColumns,
+        tableColumnNamesInOrder,
+        reorderUserGameAccountColumnsIfNeeded,
+        compactCanonicalGameNames,
+        ensureUserGameAccountTableBase,
+        ensureUserGameAccountIndexes
+    }
 };

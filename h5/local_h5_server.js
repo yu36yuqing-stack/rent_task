@@ -11,9 +11,7 @@ const {
     updateUserGameAccountSwitchByUserAndAccount
 } = require('../database/user_game_account_db');
 const {
-    initAccountCostRecordDb,
-    migrateAccountCostRecordFromMainToStatsIfNeeded,
-    backfillPurchaseCostRecordsFromUserGameAccount
+    initAccountCostRecordDb
 } = require('../database/account_cost_record_db');
 const {
     initUserBlacklistDb,
@@ -2073,8 +2071,6 @@ async function bootstrap() {
     await initUserDb();
     await initUserGameAccountDb();
     await initAccountCostRecordDb();
-    await migrateAccountCostRecordFromMainToStatsIfNeeded();
-    await backfillPurchaseCostRecordsFromUserGameAccount();
     await initUserBlacklistDb();
     await initUserPlatformRestrictDb();
     await initOrderQueryService();

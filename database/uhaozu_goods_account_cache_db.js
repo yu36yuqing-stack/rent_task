@@ -357,7 +357,6 @@ async function initUhaozuGoodsAccountCacheDb() {
         const db = openDatabase();
         try {
             await createTableAndIndexes(db);
-            await migrateToV2IfNeeded(db);
         } finally {
             db.close();
         }
@@ -474,5 +473,18 @@ module.exports = {
     listUhaozuAccountRoleCache,
     listUhaozuActiveGoodsDetailFailCache,
     upsertUhaozuGoodsResolved,
-    upsertUhaozuGoodsDetailFail
+    upsertUhaozuGoodsDetailFail,
+    _internal: {
+        run,
+        get,
+        all,
+        createTableAndIndexes,
+        tableColumns,
+        migrateToV2IfNeeded,
+        loadExistingRowsV2,
+        loadLegacyRowsV1,
+        loadLegacyJsonRecords,
+        mergeRecordMaps,
+        replaceRows
+    }
 };

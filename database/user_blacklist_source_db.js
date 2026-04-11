@@ -247,49 +247,56 @@ async function backfillSourceGameIdentityByAccount(db) {
     }
 }
 
+async function ensureUserBlacklistSourceTableBase(db) {
+    await run(db, `
+        CREATE TABLE IF NOT EXISTS user_blacklist_source (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            game_account TEXT NOT NULL,
+            game_id TEXT NOT NULL DEFAULT '1',
+            game_name TEXT NOT NULL DEFAULT 'WZRY',
+            source TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 0,
+            reason TEXT NOT NULL DEFAULT '',
+            priority INTEGER NOT NULL DEFAULT 0,
+            detail TEXT NOT NULL DEFAULT '{}',
+            expire_at TEXT NOT NULL DEFAULT '',
+            create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            desc TEXT NOT NULL DEFAULT ''
+        )
+    `);
+}
+
+async function ensureUserBlacklistSourceIndexes(db) {
+    await run(db, `
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_user_blacklist_source_alive
+        ON user_blacklist_source(user_id, game_id, game_account, source, is_deleted)
+    `);
+    await run(db, `
+        CREATE INDEX IF NOT EXISTS idx_user_blacklist_source_user_alive
+        ON user_blacklist_source(user_id, game_id, active, modify_date, is_deleted)
+    `);
+}
+
+let initUserBlacklistSourceDbPromise = null;
+
 async function initUserBlacklistSourceDb() {
-    const db = openDatabase();
-    try {
-        await run(db, `
-            CREATE TABLE IF NOT EXISTS user_blacklist_source (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                game_account TEXT NOT NULL,
-                game_id TEXT NOT NULL DEFAULT '1',
-                game_name TEXT NOT NULL DEFAULT 'WZRY',
-                source TEXT NOT NULL,
-                active INTEGER NOT NULL DEFAULT 0,
-                reason TEXT NOT NULL DEFAULT '',
-                priority INTEGER NOT NULL DEFAULT 0,
-                detail TEXT NOT NULL DEFAULT '{}',
-                expire_at TEXT NOT NULL DEFAULT '',
-                create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                is_deleted INTEGER NOT NULL DEFAULT 0,
-                desc TEXT NOT NULL DEFAULT ''
-            )
-        `);
-        const cols = new Set(await tableColumns(db, 'user_blacklist_source'));
-        if (!cols.has('game_id')) {
-            await run(db, `ALTER TABLE user_blacklist_source ADD COLUMN game_id TEXT NOT NULL DEFAULT '1'`);
+    if (initUserBlacklistSourceDbPromise) return initUserBlacklistSourceDbPromise;
+    initUserBlacklistSourceDbPromise = (async () => {
+        const db = openDatabase();
+        try {
+            await ensureUserBlacklistSourceTableBase(db);
+            await ensureUserBlacklistSourceIndexes(db);
+        } finally {
+            db.close();
         }
-        if (!cols.has('game_name')) {
-            await run(db, `ALTER TABLE user_blacklist_source ADD COLUMN game_name TEXT NOT NULL DEFAULT 'WZRY'`);
-        }
-        await rebuildUserBlacklistSourceTable(db);
-        await run(db, `DROP INDEX IF EXISTS uq_user_blacklist_source_alive`);
-        await run(db, `
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_user_blacklist_source_alive
-            ON user_blacklist_source(user_id, game_id, game_account, source, is_deleted)
-        `);
-        await run(db, `
-            CREATE INDEX IF NOT EXISTS idx_user_blacklist_source_user_alive
-            ON user_blacklist_source(user_id, game_id, active, modify_date, is_deleted)
-        `);
-        await backfillSourceGameIdentityByAccount(db);
-    } finally {
-        db.close();
-    }
+    })().catch((err) => {
+        initUserBlacklistSourceDbPromise = null;
+        throw err;
+    });
+    return initUserBlacklistSourceDbPromise;
 }
 
 async function upsertBlacklistSource(userId, gameAccount, source, patch = {}, opts = {}) {
@@ -437,5 +444,15 @@ module.exports = {
     listBlacklistSourcesByUser,
     listBlacklistSourcesByUserAndAccounts,
     listActiveBlacklistSourcesByUser,
-    softDeleteBlacklistSource
+    softDeleteBlacklistSource,
+    _internal: {
+        run,
+        all,
+        get,
+        tableColumns,
+        rebuildUserBlacklistSourceTable,
+        backfillSourceGameIdentityByAccount,
+        ensureUserBlacklistSourceTableBase,
+        ensureUserBlacklistSourceIndexes
+    }
 };

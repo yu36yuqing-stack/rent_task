@@ -439,5 +439,11 @@ module.exports = {
     upsertPurchaseCostRecord,
     listAccountCostRecordsByUserAndAccount,
     sumAccountCostAmountByUserAndAccount,
-    softDeleteAccountCostRecordById
+    softDeleteAccountCostRecordById,
+    _internal: {
+        run,
+        get,
+        all,
+        nowText
+    }
 };
