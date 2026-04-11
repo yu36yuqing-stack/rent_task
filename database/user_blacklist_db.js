@@ -6,8 +6,8 @@ const BL_MODE_DUAL_READ_OLD = 1;
 const BL_MODE_DUAL_READ_NEW = 2;
 const BL_MODE_V2 = 3;
 
-function nowText() {
-    const d = new Date();
+function nowText(input = null) {
+    const d = input instanceof Date ? input : new Date();
     const p = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
@@ -231,6 +231,98 @@ function rowToPublicEntry(row = {}) {
         reason: String(row.reason || '').trim(),
         create_date: String(row.create_date || '').trim()
     };
+}
+
+async function pruneUserBlacklistHistory(options = {}) {
+    const retainDays = Math.max(1, Number(options.retain_days || options.retainDays || 30));
+    const cutoffTs = Date.now() - retainDays * 24 * 3600 * 1000;
+    const cutoffText = nowText(new Date(cutoffTs));
+    const db = openDatabase();
+    try {
+        const tableRow = await get(db, `
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'user_blacklist_history'
+            LIMIT 1
+        `);
+        if (!tableRow) {
+            return {
+                retain_days: retainDays,
+                cutoff_text: cutoffText,
+                before: 0,
+                after: 0,
+                deleted: 0
+            };
+        }
+        const beforeRow = await get(db, `SELECT COUNT(*) AS total FROM user_blacklist_history`);
+        const staleRow = await get(db, `
+            SELECT COUNT(*) AS total
+            FROM user_blacklist_history
+            WHERE COALESCE(modify_date, create_date, '') <> ''
+              AND datetime(COALESCE(modify_date, create_date)) < datetime(?)
+        `, [cutoffText]);
+        const before = Number((beforeRow && beforeRow.total) || 0);
+        const stale = Number((staleRow && staleRow.total) || 0);
+        if (stale <= 0) {
+            return {
+                retain_days: retainDays,
+                cutoff_text: cutoffText,
+                before,
+                after: before,
+                deleted: 0
+            };
+        }
+        await run(db, 'BEGIN IMMEDIATE');
+        try {
+            await run(db, `
+                CREATE TABLE user_blacklist_history_prune_tmp (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    game_account TEXT NOT NULL DEFAULT '',
+                    before_data TEXT NOT NULL DEFAULT '',
+                    after_data TEXT NOT NULL DEFAULT '',
+                    source TEXT NOT NULL DEFAULT '',
+                    operator TEXT NOT NULL DEFAULT '',
+                    create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    is_deleted INTEGER NOT NULL DEFAULT 0,
+                    desc TEXT NOT NULL DEFAULT '',
+                    game_id TEXT NOT NULL DEFAULT '1',
+                    game_name TEXT NOT NULL DEFAULT 'WZRY'
+                )
+            `);
+            await run(db, `
+                INSERT INTO user_blacklist_history_prune_tmp
+                (user_id, event_type, game_account, before_data, after_data, source, operator, create_date, modify_date, is_deleted, desc, game_id, game_name)
+                SELECT user_id, event_type, game_account, before_data, after_data, source, operator, create_date, modify_date, is_deleted, desc, game_id, game_name
+                FROM user_blacklist_history NOT INDEXED
+                WHERE COALESCE(modify_date, create_date, '') = ''
+                   OR datetime(COALESCE(modify_date, create_date)) >= datetime(?)
+            `, [cutoffText]);
+            await run(db, `DROP TABLE user_blacklist_history`);
+            await run(db, `ALTER TABLE user_blacklist_history_prune_tmp RENAME TO user_blacklist_history`);
+            await run(db, `
+                CREATE INDEX IF NOT EXISTS idx_user_blacklist_history_user
+                ON user_blacklist_history(user_id, is_deleted, id)
+            `);
+            await run(db, 'COMMIT');
+        } catch (err) {
+            await run(db, 'ROLLBACK').catch(() => {});
+            throw err;
+        }
+        const afterRow = await get(db, `SELECT COUNT(*) AS total FROM user_blacklist_history`);
+        const after = Number((afterRow && afterRow.total) || 0);
+        return {
+            retain_days: retainDays,
+            cutoff_text: cutoffText,
+            before,
+            after,
+            deleted: Math.max(0, before - after)
+        };
+    } finally {
+        db.close();
+    }
 }
 
 async function ensureUserBlacklistColumns(db) {
@@ -785,6 +877,7 @@ module.exports = {
     listBlacklistedAccountsByUser,
     listUserBlacklistByUser,
     listUserBlacklistByUserWithMeta,
+    pruneUserBlacklistHistory,
     upsertUserBlacklistEntry,
     removeUserBlacklistEntry,
     hardDeleteUserBlacklistEntry,

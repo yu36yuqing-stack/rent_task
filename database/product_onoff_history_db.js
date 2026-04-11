@@ -1,9 +1,98 @@
 const { openDatabase } = require('./sqlite_client');
 
-function nowText() {
-    const d = new Date();
+function nowText(input = null) {
+    const d = input instanceof Date ? input : new Date();
     const p = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+async function pruneProductOnoffHistory(options = {}) {
+    const retainDays = Math.max(1, Number(options.retain_days || options.retainDays || 30));
+    const cutoffMs = Date.now() - retainDays * 24 * 3600 * 1000;
+    const cutoffText = nowText(new Date(cutoffMs));
+    const db = openDatabase();
+    try {
+        const tableRow = await all(db, `
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'product_onoff_history'
+            LIMIT 1
+        `);
+        if (!tableRow || tableRow.length <= 0) {
+            return {
+                retain_days: retainDays,
+                cutoff_ms: cutoffMs,
+                cutoff_text: cutoffText,
+                before: 0,
+                after: 0,
+                deleted: 0
+            };
+        }
+        const beforeRows = await all(db, `SELECT COUNT(*) AS total FROM product_onoff_history`);
+        const before = Number((((beforeRows || [])[0] || {}).total) || 0);
+        await run(db, 'BEGIN IMMEDIATE');
+        try {
+            await run(db, `
+                CREATE TABLE product_onoff_history_prune_tmp (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    user_account TEXT NOT NULL DEFAULT '',
+                    action_type TEXT NOT NULL DEFAULT '',
+                    platform TEXT NOT NULL DEFAULT '',
+                    game_account TEXT NOT NULL DEFAULT '',
+                    reason TEXT NOT NULL DEFAULT '',
+                    success INTEGER NOT NULL DEFAULT 0,
+                    skipped INTEGER NOT NULL DEFAULT 0,
+                    mode TEXT NOT NULL DEFAULT '',
+                    event_time INTEGER NOT NULL DEFAULT 0,
+                    create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    is_deleted INTEGER NOT NULL DEFAULT 0,
+                    desc TEXT NOT NULL DEFAULT '',
+                    game_id TEXT NOT NULL DEFAULT '1',
+                    game_name TEXT NOT NULL DEFAULT 'WZRY'
+                )
+            `);
+            await run(db, `
+                INSERT INTO product_onoff_history_prune_tmp
+                (user_id, user_account, action_type, platform, game_account, reason, success, skipped, mode, event_time, create_date, modify_date, is_deleted, desc, game_id, game_name)
+                SELECT user_id, user_account, action_type, platform, game_account, reason, success, skipped, mode, event_time, create_date, modify_date, is_deleted, desc, game_id, game_name
+                FROM product_onoff_history NOT INDEXED
+                WHERE (
+                    COALESCE(event_time, 0) > 0
+                    AND event_time >= ?
+                ) OR (
+                    COALESCE(event_time, 0) <= 0
+                    AND (
+                        COALESCE(modify_date, create_date, '') = ''
+                        OR datetime(COALESCE(modify_date, create_date)) >= datetime(?)
+                    )
+                )
+            `, [cutoffMs, cutoffText]);
+            await run(db, `DROP TABLE product_onoff_history`);
+            await run(db, `ALTER TABLE product_onoff_history_prune_tmp RENAME TO product_onoff_history`);
+            await run(db, `
+                CREATE INDEX IF NOT EXISTS idx_product_onoff_history_user_time
+                ON product_onoff_history(user_id, event_time, is_deleted)
+            `);
+            await run(db, 'COMMIT');
+        } catch (err) {
+            await run(db, 'ROLLBACK').catch(() => {});
+            throw err;
+        }
+        const afterRows = await all(db, `SELECT COUNT(*) AS total FROM product_onoff_history`);
+        const after = Number((((afterRows || [])[0] || {}).total) || 0);
+        return {
+            retain_days: retainDays,
+            cutoff_ms: cutoffMs,
+            cutoff_text: cutoffText,
+            before,
+            after,
+            deleted: Math.max(0, before - after)
+        };
+    } finally {
+        db.close();
+    }
 }
 
 function run(db, sql, params = []) {
@@ -189,5 +278,6 @@ async function listRecentProductOnoffByUser(userId, options = {}) {
 module.exports = {
     initProductOnoffHistoryDb,
     appendProductOnoffHistory,
-    listRecentProductOnoffByUser
+    listRecentProductOnoffByUser,
+    pruneProductOnoffHistory
 };
