@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
 const { openDatabase, openStatsDatabase } = require('../database/sqlite_client');
+const { queryDailyRowsFromOrders } = require('../order/service/order_query_service');
 const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('../database/user_db');
 const { initUserGameAccountDb } = require('../database/user_game_account_db');
 const {
@@ -383,66 +384,7 @@ function normalizeDailyRowsFromOrders(orderRows = [], configMap = new Map()) {
 }
 
 async function queryDailyRowsFromOrder(userId, statDate, gameName, configuredAccounts = []) {
-    const uid = Number(userId || 0);
-    const g = String(gameName || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
-    const day = String(statDate || '').slice(0, 10);
-    if (!uid || !day) return [];
-    const accs = Array.from(new Set((configuredAccounts || []).map((a) => String(a.game_account || '').trim()).filter(Boolean)));
-    if (accs.length === 0) return [];
-
-    const dayStart = getNaturalDayStartByDateText(day);
-    const dayEnd = addDays(dayStart, 1);
-    const startText = toDateTimeText(dayStart);
-    const endText = toDateTimeText(dayEnd);
-    const placeholders = accs.map(() => '?').join(',');
-    const db = openDatabase();
-    try {
-        return await all(db, `
-            SELECT
-                '' AS channel,
-                game_account,
-                COALESCE(game_name, '') AS game_name,
-                MAX(COALESCE(role_name, '')) AS role_name,
-                COUNT(*) AS order_cnt_total,
-                SUM(CASE
-                    WHEN COALESCE(order_status, '') IN ('租赁中', '出租中')
-                      OR (COALESCE(order_status, '') NOT IN ('租赁中', '出租中') AND COALESCE(rec_amount, 0) > 0)
-                    THEN 1 ELSE 0 END
-                ) AS order_cnt_effective,
-                SUM(CASE WHEN COALESCE(order_status, '') IN ('租赁中', '出租中') THEN 1 ELSE 0 END) AS order_cnt_progress,
-                SUM(CASE WHEN COALESCE(order_status, '') IN ('已完成', '部分完成', '结算中') THEN 1 ELSE 0 END) AS order_cnt_done,
-                SUM(CASE WHEN COALESCE(order_status, '') IN ('退款中', '已退款') THEN 1 ELSE 0 END) AS order_cnt_refund,
-                SUM(CASE WHEN COALESCE(order_status, '') IN ('已撤单', '投诉/撤单') THEN 1 ELSE 0 END) AS order_cnt_cancel,
-                SUM(CASE WHEN COALESCE(rec_amount, 0) <= 0 THEN 1 ELSE 0 END) AS order_cnt_zero_rec,
-                ROUND(SUM(CASE
-                    WHEN COALESCE(order_status, '') IN ('租赁中', '出租中')
-                      OR (COALESCE(order_status, '') NOT IN ('租赁中', '出租中') AND COALESCE(rec_amount, 0) > 0)
-                    THEN COALESCE(rent_hour, 0)
-                    ELSE 0 END
-                ), 2) AS rent_hour_sum,
-                ROUND(SUM(CASE
-                    WHEN COALESCE(order_status, '') IN ('租赁中', '出租中')
-                      OR (COALESCE(order_status, '') NOT IN ('租赁中', '出租中') AND COALESCE(rec_amount, 0) > 0)
-                    THEN COALESCE(order_amount, 0)
-                    ELSE 0 END
-                ), 2) AS amount_order_sum,
-                ROUND(SUM(COALESCE(rec_amount, 0)), 2) AS amount_rec_sum,
-                ROUND(SUM(CASE
-                    WHEN COALESCE(order_status, '') IN ('退款中', '已退款') THEN COALESCE(order_amount, 0) - COALESCE(rec_amount, 0)
-                    ELSE 0 END
-                ), 2) AS amount_refund_sum
-            FROM "order"
-            WHERE user_id = ?
-              AND is_deleted = 0
-              AND game_account IN (${placeholders})
-              ${g === ALL_GAME_NAME ? '' : 'AND COALESCE(game_name, \'\') = ?'}
-              AND end_time >= ?
-              AND end_time < ?
-            GROUP BY game_name, game_account
-        `, g === ALL_GAME_NAME ? [uid, ...accs, startText, endText] : [uid, ...accs, g, startText, endText]);
-    } finally {
-        db.close();
-    }
+    return queryDailyRowsFromOrders(userId, statDate, gameName, configuredAccounts);
 }
 
 async function listConfiguredGamesByUser(userId) {

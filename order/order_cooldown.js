@@ -1,5 +1,3 @@
-const { openDatabase } = require('../database/sqlite_client');
-const { initOrderDb } = require('../database/order_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { getLastSyncTimestamp } = require('../database/order_sync_db');
 const { listBlacklistSourcesByUser } = require('../database/user_blacklist_source_db');
@@ -11,6 +9,11 @@ const {
     getCooldownConfigByUser,
     DEFAULT_COOLDOWN_RELEASE_DELAY_MIN
 } = require('./order_cooldown_config');
+const {
+    listActiveRentingOrdersByUser,
+    getOrderStatusByOrderNo,
+    getOrderEndTimeByOrderNo
+} = require('./service/order_query_service');
 
 const CHANNEL_UUZUHAO = 'uuzuhao';
 const CHANNEL_UHAOZU = 'uhaozu';
@@ -22,24 +25,6 @@ const COOLDOWN_SOURCE = 'order_cooldown';
 const COOLDOWN_NEAR_END_SEC = 10 * 60;
 const COOLDOWN_END_DELAY_SEC = DEFAULT_COOLDOWN_RELEASE_DELAY_MIN * 60;
 const COOLDOWN_SYNC_FRESH_WINDOW_SEC = 12 * 60;
-
-function dbAll(db, sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.all(sql, params, (err, rows) => {
-            if (err) return reject(err);
-            resolve(rows || []);
-        });
-    });
-}
-
-function dbGet(db, sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.get(sql, params, (err, row) => {
-            if (err) return reject(err);
-            resolve(row || null);
-        });
-    });
-}
 
 function parseDateTimeTextToSec(v) {
     const text = String(v || '').trim();
@@ -124,74 +109,6 @@ function parseCooldownMetaFromSourceRow(row = {}) {
     };
 }
 
-async function getOrderStatusByOrderNo(userId, orderNo, channel = '') {
-    const uid = Number(userId || 0);
-    const no = String(orderNo || '').trim();
-    const ch = normalizeOrderPlatform(channel);
-    if (!uid || !no) return '';
-    await initOrderDb();
-    const db = openDatabase();
-    try {
-        const row = ch
-            ? await dbGet(db, `
-                SELECT order_status
-                FROM "order"
-                WHERE user_id = ?
-                  AND is_deleted = 0
-                  AND order_no = ?
-                  AND channel = ?
-                ORDER BY id DESC
-                LIMIT 1
-            `, [uid, no, ch])
-            : await dbGet(db, `
-                SELECT order_status
-                FROM "order"
-                WHERE user_id = ?
-                  AND is_deleted = 0
-                  AND order_no = ?
-                ORDER BY id DESC
-                LIMIT 1
-            `, [uid, no]);
-        return String((row && row.order_status) || '').trim();
-    } finally {
-        db.close();
-    }
-}
-
-async function getOrderEndTimeByOrderNo(userId, orderNo, channel = '') {
-    const uid = Number(userId || 0);
-    const no = String(orderNo || '').trim();
-    const ch = normalizeOrderPlatform(channel);
-    if (!uid || !no) return '';
-    await initOrderDb();
-    const db = openDatabase();
-    try {
-        const row = ch
-            ? await dbGet(db, `
-                SELECT end_time
-                FROM "order"
-                WHERE user_id = ?
-                  AND is_deleted = 0
-                  AND order_no = ?
-                  AND channel = ?
-                ORDER BY id DESC
-                LIMIT 1
-            `, [uid, no, ch])
-            : await dbGet(db, `
-                SELECT end_time
-                FROM "order"
-                WHERE user_id = ?
-                  AND is_deleted = 0
-                  AND order_no = ?
-                ORDER BY id DESC
-                LIMIT 1
-            `, [uid, no]);
-        return String((row && row.end_time) || '').trim();
-    } finally {
-        db.close();
-    }
-}
-
 async function listAuthorizedOrderPlatforms(userId) {
     const uid = Number(userId || 0);
     if (!uid) return [];
@@ -225,34 +142,6 @@ async function isOrderSyncFreshByUser(userId, freshWindowSec = COOLDOWN_SYNC_FRE
         return { fresh: false, reason: 'stale_sync', lag_sec: maxLag, channels };
     }
     return { fresh: true, reason: '', lag_sec: maxLag, channels };
-}
-
-async function listActiveRentingOrdersByUser(userId) {
-    const uid = Number(userId || 0);
-    if (!uid) return [];
-    await initOrderDb();
-    const db = openDatabase();
-    try {
-        const rows = await dbAll(db, `
-            SELECT game_account, game_id, game_name, start_time, end_time, order_no, channel
-            FROM "order"
-            WHERE user_id = ?
-              AND is_deleted = 0
-              AND COALESCE(order_status, '') IN ('租赁中', '出租中')
-              AND TRIM(COALESCE(game_account, '')) <> ''
-        `, [uid]);
-        return rows.map((r) => ({
-            game_account: String(r.game_account || '').trim(),
-            game_id: String(r.game_id || '1').trim() || '1',
-            game_name: String(r.game_name || 'WZRY').trim() || 'WZRY',
-            start_time: String(r.start_time || '').trim(),
-            end_time: String(r.end_time || '').trim(),
-            order_no: String(r.order_no || '').trim(),
-            channel: String(r.channel || '').trim()
-        })).filter((r) => r.game_account);
-    } finally {
-        db.close();
-    }
 }
 
 async function reconcileOrderCooldownEntryByUser(userId, options = {}) {

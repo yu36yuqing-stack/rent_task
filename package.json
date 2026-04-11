@@ -5,11 +5,16 @@
     "test:smoke": "node test/prod_channel_status_smoke_test.js",
     "test:stats-refresh-policy": "node test/order_stats_refresh_policy_smoke_test.js",
     "test:game-identity": "node test/game_identity_smoke_test.js",
-    "test:identity-regression": "node test/game_identity_smoke_test.js && node test/prod_guard_account_switch_smoke_test.js"
+    "test:identity-regression": "node test/game_identity_smoke_test.js && node test/prod_guard_account_switch_smoke_test.js",
+    "test:order-service-regression": "node test/order_query_service_smoke_test.js && node test/order_command_service_smoke_test.js && node test/order_rule_service_smoke_test.js && node test/product_order_service_regression_smoke_test.js && node test/order_cooldown_release_smoke_test.js && node test/order_stats_refresh_policy_smoke_test.js",
+    "coverage:order-service": "c8 --reporter=text --reporter=html --report-dir coverage/order-service node test/order_query_service_smoke_test.js && c8 --reporter=text --reporter=html --report-dir coverage/order-service --no-clean node test/order_command_service_smoke_test.js && c8 --reporter=text --reporter=html --report-dir coverage/order-service --no-clean node test/order_rule_service_smoke_test.js && c8 --reporter=text --reporter=html --report-dir coverage/order-service --no-clean node test/product_order_service_regression_smoke_test.js && c8 --reporter=text --reporter=html --report-dir coverage/order-service --no-clean node test/order_cooldown_release_smoke_test.js && c8 --reporter=text --reporter=html --report-dir coverage/order-service --no-clean node test/order_stats_refresh_policy_smoke_test.js"
   },
   "dependencies": {
     "puppeteer-core": "^24.37.2",
     "sqlite3": "^5.1.7",
     "undici": "^7.21.0"
+  },
+  "devDependencies": {
+    "c8": "^11.0.0"
   }
 }

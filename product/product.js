@@ -8,7 +8,8 @@ const {
 } = require('../database/user_game_account_db');
 const { openDatabase } = require('../database/sqlite_client');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
-const { releaseOrderCooldownBlacklistByUser } = require('../order/order_cooldown');
+const { releaseOrderCooldownBlacklistByUser } = require('../order/service/order_rule_service');
+const { listLinkedOrderAccountsByUser } = require('../order/service/order_query_service');
 const { normalizeZuhaowangAuthPayload } = require('../user/user');
 const { normalizeGameProfile } = require('../common/game_profile');
 const {
@@ -224,15 +225,7 @@ async function ensureLinkedGameAccountsByOrders(userId) {
 
     const db = openDatabase();
     try {
-        const orderRows = await dbAll(db, `
-            SELECT DISTINCT user_id, game_account, game_id, game_name, MAX(COALESCE(role_name, '')) AS role_name
-            FROM "order"
-            WHERE user_id = ?
-              AND is_deleted = 0
-              AND TRIM(COALESCE(game_account, '')) <> ''
-              AND TRIM(COALESCE(game_id, '')) <> ''
-            GROUP BY user_id, game_account, game_id, game_name
-        `, [uid]);
+        const orderRows = await listLinkedOrderAccountsByUser(uid);
 
         let mirrored = 0;
         let skipped = 0;

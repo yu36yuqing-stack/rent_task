@@ -9,7 +9,7 @@ const {
 } = require('../report/report_rent_status');
 const { syncUserAccountsByAuth, listAllUserGameAccountsByUser } = require('../product/product');
 const { triggerProdStatusGuard, probeProdOnlineStatus } = require('../product/prod_status_guard');
-const { reconcileOrder3OffBlacklistByUser } = require('../order/order');
+const { reconcileOrderNOffByUser } = require('../order/service/order_rule_service');
 const { loadUserBlacklistSet, loadUserBlacklistReasonMap } = require('../user/user');
 const { executeUserActionsIfNeeded } = require('../action_engine/action_engine');
 const { isFaceVerifyReason } = require('../product/prod_channel_status');
@@ -173,7 +173,7 @@ async function runFullUserPipeline(user, options = {}) {
         rows = await listAllUserGameAccountsByUser(uid);
 
         try {
-            const reconcile = await reconcileOrder3OffBlacklistByUser(user);
+            const reconcile = await reconcileOrderNOffByUser(user);
             logger.log(`[Order3Off] user_id=${uid} reconcile=${JSON.stringify(reconcile)}`);
         } catch (e) {
             const msg = String(e && e.message ? e.message : e || 'reconcile_failed');

@@ -30,11 +30,11 @@ const {
     removePlatformRestrict
 } = require('../database/user_platform_restrict_db');
 const {
-    initOrderDb,
-    listTodayPaidOrderCountByAccounts,
-    listRolling24hPaidOrderCountByAccounts,
-    listRentingOrderWindowByAccounts
-} = require('../database/order_db');
+    initOrderQueryService,
+    listPaidCountByAccounts,
+    listRentingWindowByAccounts,
+    listOrdersForUser
+} = require('../order/service/order_query_service');
 const { listOpenProductSyncAnomaliesByUser } = require('../database/product_sync_anomaly_db');
 const {
     initUserSessionDb,
@@ -73,7 +73,7 @@ const {
 const { startProdRiskTaskWorker } = require('../product/prod_status_guard');
 const { resolveDisplayNameByRow } = require('../product/display_name');
 const { normalizeGameProfile } = require('../common/game_profile');
-const { listOrdersForUser, syncOrdersByUser } = require('../order/order');
+const { syncOrdersByUser } = require('../order/order');
 const {
     savePurchaseCostByUserAndAccount,
     createAccountCostByUserAndAccount,
@@ -666,12 +666,10 @@ async function handleProducts(req, res, urlObj) {
             .filter(([acc]) => Boolean(acc))
     );
     const paidMap = allAccs.length > 0
-        ? (orderOffRule.mode === ORDER_OFF_MODE_ROLLING_24H
-            ? await listRolling24hPaidOrderCountByAccounts(user.id, allAccs)
-            : await listTodayPaidOrderCountByAccounts(user.id, allAccs))
+        ? await listPaidCountByAccounts(user.id, allAccs, { mode: orderOffRule.mode })
         : {};
     const rentingWindowMap = allAccs.length > 0
-        ? await listRentingOrderWindowByAccounts(user.id, allAccs)
+        ? await listRentingWindowByAccounts(user.id, allAccs)
         : {};
     const restrictRowsRaw = allAccs.length > 0
         ? await listPlatformRestrictByUserAndAccounts(user.id, allAccs)
@@ -2077,7 +2075,7 @@ async function bootstrap() {
     await backfillPurchaseCostRecordsFromUserGameAccount();
     await initUserBlacklistDb();
     await initUserPlatformRestrictDb();
-    await initOrderDb();
+    await initOrderQueryService();
     await initUserSessionDb();
     await initUserRuleDb();
     await initUserPriceRuleDb();

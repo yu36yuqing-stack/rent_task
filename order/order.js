@@ -3,20 +3,23 @@ const path = require('path');
 const { fork } = require('child_process');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const {
-    initOrderDb,
+    initOrderQueryService,
+    listPaidCountByAccounts
+} = require('./service/order_query_service');
+const {
+    initOrderCommandService,
     upsertOrder,
     getOrderByKey,
     updateOrderRecAmount,
-    listTodayPaidOrderCountByAccounts,
-    listRolling24hPaidOrderCountByAccounts
-} = require('../database/order_db');
-const {
-    initOrderDetailDb,
     upsertOrderDetail,
     getOrderDetailByOrder,
-    listPendingUhaozuOrderDetailsByUser
-} = require('../database/order_detail_db');
-const { getLastSyncTimestamp, setLastSyncTimestamp } = require('../database/order_sync_db');
+    listPendingUhaozuOrderDetailsByUser,
+    getLastSyncTimestamp,
+    setLastSyncTimestamp,
+    initOrderComplaintDb,
+    upsertOrderComplaint,
+    getOrderComplaintByOrder
+} = require('./service/order_command_service');
 const { getUserRuleByName } = require('../database/user_rule_db');
 const {
     listUserBlacklistByUserWithMeta
@@ -25,7 +28,6 @@ const { upsertSourceAndReconcile } = require('../blacklist/blacklist_source_gate
 const {
     reconcileOrderCooldownEntryByUser
 } = require('./order_cooldown');
-const { initOrderComplaintDb, upsertOrderComplaint, getOrderComplaintByOrder } = require('../database/order_complaint_db');
 const { sendDingdingMessage, resolveDingdingAtOptions } = require('../report/dingding/ding_notify');
 const { buildComplaintFirstHitText } = require('../report/dingding/ding_style');
 const { listAllOrders, getOrderDetail } = require('../uuzuhao/uuzuhao_api');
@@ -234,7 +236,7 @@ function isOrderDoneStatus(status) {
 }
 
 async function listOrdersForUser(userId, options = {}) {
-    await initOrderDb();
+    await initOrderQueryService();
     await initOrderComplaintDb();
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
@@ -506,7 +508,7 @@ async function fetchAndStoreUhaozuOrderDetailByOrder(userId, orderNo, options = 
 async function syncUhaozuCompletedOrderDetails(userId, auth, orderNos = [], options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
-    await initOrderDetailDb();
+    await initOrderCommandService();
     const pendingRows = await listPendingUhaozuOrderDetailsByUser(uid, orderNos);
     let fetched = 0;
     let updated = 0;
@@ -786,9 +788,7 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
         });
     }
     const todayPaidCounts = allAccounts.length > 0
-        ? (orderOffMode === ORDER_OFF_MODE_ROLLING_24H
-            ? await listRolling24hPaidOrderCountByAccounts(uid, allAccounts)
-            : await listTodayPaidOrderCountByAccounts(uid, allAccounts))
+        ? await listPaidCountByAccounts(uid, allAccounts, { mode: orderOffMode })
         : {};
     const countDetails = allAccounts
         .map((one) => {
@@ -990,7 +990,7 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
     const range = summarizeOrderRange(orderList, { start: 'rentStartTime', end: 'rentEndTime' });
     console.log(`[OrderSync][uuzuhao] user_id=${uid} pulled=${orderList.length} total_count=${Number(pulled.total_count || 0)} page_start=${pulled.page_start || 1} page_size=${pulled.page_size || 0} order_range=${JSON.stringify(range)}`);
 
-    await initOrderDb();
+    await initOrderCommandService();
     let upserted = 0;
     let linked = 0;
     let unlinked = 0;
@@ -1165,7 +1165,7 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
     const range = summarizeOrderRange(orderList, { start: 'startTime', end: 'endTime' });
     console.log(`[OrderSync][uhaozu] user_id=${uid} pulled=${orderList.length} total_count=${Number(pulled.total_count || 0)} pages=${Number(pulled.pages || 0)} order_range=${JSON.stringify(range)}`);
 
-    await initOrderDb();
+    await initOrderCommandService();
     let upserted = 0;
     let linked = 0;
     let unlinked = 0;
@@ -1296,7 +1296,7 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
     console.log(`[OrderSync][zuhaowang] user_id=${uid} pulled=${orderList.length} total_count=${Number(pulled.total_count || 0)} order_range=${JSON.stringify(range)}`);
     const accountIndex = await buildZuhaowangAccountIndex(uid);
 
-    await initOrderDb();
+    await initOrderCommandService();
     let upserted = 0;
     let linked = 0;
     let unlinked = 0;

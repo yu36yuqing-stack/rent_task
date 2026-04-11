@@ -1,5 +1,4 @@
 const { openDatabase } = require('../database/sqlite_client');
-const { initOrderDb } = require('../database/order_db');
 const { initUserGameAccountDb } = require('../database/user_game_account_db');
 const { getActiveUserById } = require('../database/user_db');
 const {
@@ -27,6 +26,11 @@ const {
 const { sendDingdingMessage, resolveDingdingAtOptions } = require('../report/dingding/ding_notify');
 const { deleteBlacklistWithGuard, REASON_ONLINE } = require('../blacklist/blacklist_release_guard');
 const { setGuardSourcesByProbeAndReconcile } = require('../blacklist/blacklist_source_gateway');
+const {
+    listLatestEndedOrderSnapshotByAccounts: listLatestEndedOrderSnapshotByAccountsFromService,
+    listActiveOrderSnapshotByAccounts: listActiveOrderSnapshotByAccountsFromService,
+    listRecentlyEndedAccountsByUser: listRecentlyEndedAccountsByUserFromService
+} = require('../order/service/order_query_service');
 
 const ONLINE_PROBE_WINDOW_SEC = 90;
 const ONLINE_PROBE_INTERVAL_SEC = Math.max(60, Number(process.env.ONLINE_PROBE_INTERVAL_SEC || 600));
@@ -75,59 +79,7 @@ function parseJsonObjectSafe(v) {
 }
 
 async function listLatestEndedOrderSnapshotByUser(userId, accounts = []) {
-    const uid = Number(userId || 0);
-    if (!uid) return {};
-    const uniq = Array.from(new Map((Array.isArray(accounts) ? accounts : [])
-        .map((x) => {
-            if (!x || typeof x !== 'object') return null;
-            const acc = String(x.account || x.game_account || '').trim();
-            const gid = String(x.game_id || '1').trim() || '1';
-            const gname = String(x.game_name || 'WZRY').trim() || 'WZRY';
-            return [`${gid}::${acc}`, { game_account: acc, game_id: gid, game_name: gname }];
-        })
-        .filter(Boolean)).values());
-    if (uniq.length === 0) return {};
-
-    await initOrderDb();
-    const db = openDatabase();
-    try {
-        const tupleSql = uniq.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
-        const tupleSqlOuter = uniq.map(() => `(o.game_id = ? AND o.game_account = ?)`).join(' OR ');
-        const rows = await dbAll(db, `
-            SELECT o.game_id, o.game_name, o.game_account, o.order_no, o.end_time, o.id
-            FROM "order" o
-            JOIN (
-                SELECT game_id, game_account, MAX(datetime(end_time)) AS max_end_at
-                FROM "order"
-                WHERE user_id = ?
-                  AND is_deleted = 0
-                  AND TRIM(COALESCE(end_time, '')) <> ''
-                  AND (${tupleSql})
-                GROUP BY game_id, game_account
-            ) x
-              ON x.game_id = o.game_id
-             AND x.game_account = o.game_account
-             AND datetime(o.end_time) = x.max_end_at
-            WHERE o.user_id = ?
-              AND o.is_deleted = 0
-              AND (${tupleSqlOuter})
-            ORDER BY o.id DESC
-        `, [uid, ...uniq.flatMap((x) => [x.game_id, x.game_account]), uid, ...uniq.flatMap((x) => [x.game_id, x.game_account])]);
-        const out = {};
-        for (const row of rows) {
-            const acc = String((row && row.game_account) || '').trim();
-            const gid = String((row && row.game_id) || '1').trim() || '1';
-            const key = `${gid}::${acc}`;
-            if (!acc || out[key]) continue;
-            out[key] = {
-                order_no: String((row && row.order_no) || '').trim(),
-                end_time: String((row && row.end_time) || '').trim()
-            };
-        }
-        return out;
-    } finally {
-        db.close();
-    }
+    return listLatestEndedOrderSnapshotByAccountsFromService(userId, accounts);
 }
 
 function toDateTimeText(d = new Date()) {
@@ -199,59 +151,7 @@ function isProductRenting(account = {}) {
 }
 
 async function listActiveOrderSnapshotByUser(userId, accounts = []) {
-    const uid = Number(userId || 0);
-    if (!uid) return {};
-    const uniq = Array.from(new Map((Array.isArray(accounts) ? accounts : [])
-        .map((x) => {
-            if (!x || typeof x !== 'object') return null;
-            const acc = String(x.account || x.game_account || '').trim();
-            const gid = String(x.game_id || '1').trim() || '1';
-            const gname = String(x.game_name || 'WZRY').trim() || 'WZRY';
-            return [`${gid}::${acc}`, { game_account: acc, game_id: gid, game_name: gname }];
-        })
-        .filter(Boolean)).values());
-    if (uniq.length === 0) return {};
-
-    await initOrderDb();
-    const db = openDatabase();
-    try {
-        const nowText = toDateTimeText(new Date());
-        const tupleSql = uniq.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
-        const rows = await dbAll(db, `
-            SELECT game_id, game_name, game_account, order_no, order_status, start_time, end_time, id
-            FROM "order"
-            WHERE user_id = ?
-              AND is_deleted = 0
-              AND (${tupleSql})
-              AND (
-                COALESCE(order_status, '') IN ('租赁中', '出租中')
-                OR (
-                  TRIM(COALESCE(start_time, '')) <> ''
-                  AND TRIM(COALESCE(end_time, '')) <> ''
-                  AND start_time <= ?
-                  AND end_time > ?
-                  AND COALESCE(order_status, '') NOT IN ('已退款', '已撤单', '已完成', '部分完成', '已结束', '已取消')
-                )
-              )
-            ORDER BY datetime(end_time) DESC, id DESC
-        `, [uid, ...uniq.flatMap((x) => [x.game_id, x.game_account]), nowText, nowText]);
-        const out = {};
-        for (const row of rows) {
-            const acc = String((row && row.game_account) || '').trim();
-            const gid = String((row && row.game_id) || '1').trim() || '1';
-            const key = `${gid}::${acc}`;
-            if (!acc || out[key]) continue;
-            out[key] = {
-                order_no: String((row && row.order_no) || '').trim(),
-                order_status: String((row && row.order_status) || '').trim(),
-                start_time: String((row && row.start_time) || '').trim(),
-                end_time: String((row && row.end_time) || '').trim()
-            };
-        }
-        return out;
-    } finally {
-        db.close();
-    }
+    return listActiveOrderSnapshotByAccountsFromService(userId, accounts);
 }
 
 async function listProductRentingSignalsByUser(userId, accounts = []) {
@@ -323,40 +223,7 @@ function buildOnlineButNotRentingAlertText(user, badAccounts = []) {
 }
 
 async function listRecentlyEndedAccountsByUser(userId, accounts = [], suppressSec = RECENT_ORDER_END_SUPPRESS_SEC) {
-    const uid = Number(userId || 0);
-    if (!uid) return new Set();
-    const accs = Array.from(new Map((Array.isArray(accounts) ? accounts : [])
-        .map((x) => {
-            if (!x || typeof x !== 'object') return null;
-            const acc = String(x.account || x.game_account || '').trim();
-            const gid = String(x.game_id || '1').trim() || '1';
-            return [`${gid}::${acc}`, { game_account: acc, game_id: gid }];
-        })
-        .filter(Boolean)).values());
-    if (accs.length === 0) return new Set();
-
-    await initOrderDb();
-    const db = openDatabase();
-    try {
-        const now = new Date();
-        const lower = new Date(now.getTime() - Math.max(60, Number(suppressSec || RECENT_ORDER_END_SUPPRESS_SEC)) * 1000);
-        const nowText = toDateTimeText(now);
-        const lowerText = toDateTimeText(lower);
-        const tupleSql = accs.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
-        const rows = await dbAll(db, `
-            SELECT DISTINCT game_id, game_account
-            FROM "order"
-            WHERE user_id = ?
-              AND is_deleted = 0
-              AND TRIM(COALESCE(game_account, '')) <> ''
-              AND (${tupleSql})
-              AND end_time >= ?
-              AND end_time <= ?
-        `, [uid, ...accs.flatMap((x) => [x.game_id, x.game_account]), lowerText, nowText]);
-        return new Set(rows.map((r) => `${String((r && r.game_id) || '1').trim() || '1'}::${String((r && r.game_account) || '').trim()}`).filter(Boolean));
-    } finally {
-        db.close();
-    }
+    return listRecentlyEndedAccountsByUserFromService(userId, accounts, suppressSec);
 }
 
 function buildProbeRows(accounts = []) {
