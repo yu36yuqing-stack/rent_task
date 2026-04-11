@@ -1,4 +1,4 @@
-const { openDatabase } = require('../database/sqlite_client');
+const { openOrderDatabase } = require('../database/sqlite_client');
 const { initOrderDb, listRentingOrderWindowByAccounts } = require('../database/order_db');
 const { upsertBlacklistSource } = require('../database/user_blacklist_source_db');
 const { normalizeGameProfile } = require('../common/game_profile');
@@ -64,7 +64,7 @@ async function queryLatestOrderEndSecByAccount(userId, gameAccount) {
     const acc = key.game_account;
     if (!uid || !acc) return 0;
     await initOrderDb();
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const row = await new Promise((resolve, reject) => {
             db.get(`

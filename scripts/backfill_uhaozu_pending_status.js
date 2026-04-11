@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { openDatabase } = require('../database/sqlite_client');
+const { openOrderDatabase } = require('../database/sqlite_client');
 const { initOrderDb } = require('../database/order_db');
 
 function parseArgs(argv = []) {
@@ -44,7 +44,7 @@ function run(db, sql, params = []) {
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     await initOrderDb();
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const whereUser = Number(args.user_id || 0) > 0 ? 'AND user_id = ?' : '';
         const params = Number(args.user_id || 0) > 0 ? [Number(args.user_id)] : [];

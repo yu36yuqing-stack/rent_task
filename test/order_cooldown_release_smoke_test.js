@@ -8,6 +8,7 @@ const path = require('path');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rent-cooldown-release-'));
 process.env.MAIN_DB_FILE_PATH = path.join(tempDir, 'rent_robot.db');
 process.env.RUNTIME_DB_FILE_PATH = path.join(tempDir, 'rent_robot_runtime.db');
+process.env.ORDER_DB_FILE_PATH = path.join(tempDir, 'rent_robot_order.db');
 
 const { initUserBlacklistDb, listUserBlacklistByUser } = require('../database/user_blacklist_db');
 const { initUserBlacklistSourceDb, upsertBlacklistSource, listBlacklistSourcesByUser } = require('../database/user_blacklist_source_db');

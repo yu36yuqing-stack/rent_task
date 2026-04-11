@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { openDatabase } = require('../database/sqlite_client');
+const { openOrderDatabase } = require('../database/sqlite_client');
 const { getOrderDetailViewByUser } = require('../order/order');
 
 function parseArgs(argv = []) {
@@ -45,7 +45,7 @@ function all(db, sql, params = []) {
 }
 
 async function listMissingOrders({ user_id = 0, limit = 0 } = {}) {
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const params = [];
         let whereUser = '';

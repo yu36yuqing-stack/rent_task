@@ -1,4 +1,4 @@
-const { openDatabase } = require('./sqlite_client');
+const { openOrderDatabase } = require('./sqlite_client');
 const { normalizeGameProfile } = require('../common/game_profile');
 const ORDER_COUNT_TRACE_ENABLED = !['0', 'false', 'no', 'off']
     .includes(String(process.env.ORDER_COUNT_TRACE || 'true').toLowerCase());
@@ -393,7 +393,7 @@ let initOrderDbPromise = null;
 async function initOrderDb() {
     if (initOrderDbPromise) return initOrderDbPromise;
     initOrderDbPromise = (async () => {
-        const db = openDatabase();
+        const db = openOrderDatabase();
         try {
             await ensureOrderTableBase(db);
             await ensureOrderIndexes(db);
@@ -453,7 +453,7 @@ function normalizeOrder(input = {}) {
 async function upsertOrder(input = {}) {
     await initOrderDb();
     const row = normalizeOrder(input);
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const existed = await get(db, `
             SELECT id
@@ -524,7 +524,7 @@ async function getOrderByKey(userId, channel, orderNo) {
     if (!uid) throw new Error('user_id 不合法');
     if (!ch) throw new Error('channel 不能为空');
     if (!no) throw new Error('order_no 不能为空');
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         return await get(db, `
             SELECT *
@@ -546,7 +546,7 @@ async function updateOrderRecAmount(userId, channel, orderNo, recAmount, desc = 
     if (!uid) throw new Error('user_id 不合法');
     if (!ch) throw new Error('channel 不能为空');
     if (!no) throw new Error('order_no 不能为空');
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         await run(db, `
             UPDATE "order"
@@ -570,7 +570,7 @@ async function listOrders(userId, page = 1, pageSize = 50) {
     const ps = Math.min(500, Math.max(1, Number(pageSize || 50)));
     const offset = (p - 1) * ps;
 
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const totalRow = await get(db, `
             SELECT COUNT(*) AS total
@@ -625,7 +625,7 @@ async function listTodayOrderCountByAccounts(userId, gameAccounts = [], dateText
 
     const day = String(dateText || todayDateText()).slice(0, 10);
     const placeholders = uniq.map(() => '?').join(',');
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const rows = await all(db, `
             SELECT game_account, COUNT(*) AS cnt
@@ -662,7 +662,7 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
         `[OrderCount] uid=${uid} now="${new Date().toString()}" tz="${Intl.DateTimeFormat().resolvedOptions().timeZone || ''}" day=${day} window=[${dayStart6}, +1day) accounts=${keys.length}`
     );
     const tupleSql = keys.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const rows = await all(db, `
             SELECT game_id, game_account, COUNT(*) AS cnt
@@ -714,7 +714,7 @@ async function listRolling24hPaidOrderCountByAccounts(userId, gameAccounts = [])
         `[OrderCount24h] uid=${uid} now="${new Date().toString()}" tz="${Intl.DateTimeFormat().resolvedOptions().timeZone || ''}" window=[${startTime}, ${endTime}) accounts=${keys.length}`
     );
     const tupleSql = keys.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const rows = await all(db, `
             SELECT game_id, game_account, COUNT(*) AS cnt
@@ -761,7 +761,7 @@ async function listRentingOrderWindowByAccounts(userId, gameAccounts = []) {
     if (keys.length === 0) return {};
 
     const tupleSql = keys.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const rows = await all(db, `
             SELECT

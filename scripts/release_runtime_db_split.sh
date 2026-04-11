@@ -35,7 +35,7 @@ EOF
 }
 
 echo "[Step 1/4] rsync 新代码到宿主机（排除本地DB和日志）..."
-RSYNC_CMD="rsync -az --delete --exclude '.git' --exclude 'node_modules' --exclude '.DS_Store' --exclude '*.db' --exclude 'log/' --exclude '*.log' -e 'ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new' '${SRC_DIR}' '${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}'"
+RSYNC_CMD="rsync -az --delete --exclude '.git' --exclude 'node_modules' --exclude '.DS_Store' --exclude '*.db' --exclude 'log/' --exclude 'coverage/' --exclude '*.log' -e 'ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new' '${SRC_DIR}' '${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}'"
 run_expect "$RSYNC_CMD"
 echo "[OK] 宿主机代码已更新"
 

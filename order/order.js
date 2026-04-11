@@ -35,7 +35,7 @@ const { listAllOrderPages, getOrderDetailPage, parseUhaozuOrderDetailHtml } = re
 const { getOrderListByEncryptedPayload } = require('../zuhaowang/zuhaowang_api');
 const { listAllUserGameAccountsByUser } = require('../product/product');
 const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('../database/user_db');
-const { openDatabase } = require('../database/sqlite_client');
+const { openOrderDatabase } = require('../database/sqlite_client');
 const { normalizeZuhaowangAuthPayload } = require('../user/user');
 const {
     CHANNEL_UUZUHAO,
@@ -268,7 +268,7 @@ async function listOrdersForUser(userId, options = {}) {
     }
 
     const whereSql = where.join(' AND ');
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const totalRow = await dbGet(db, `
             SELECT COUNT(*) AS total

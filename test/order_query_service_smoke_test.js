@@ -4,12 +4,13 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { openDatabase } = require('../database/sqlite_client');
-
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rent-order-query-'));
 process.env.MAIN_DB_FILE_PATH = path.join(tempDir, 'rent_robot.db');
 process.env.RUNTIME_DB_FILE_PATH = path.join(tempDir, 'rent_robot_runtime.db');
+process.env.ORDER_DB_FILE_PATH = path.join(tempDir, 'rent_robot_order.db');
 process.env.ORDER_COUNT_TRACE = 'false';
+
+const { openOrderDatabase } = require('../database/sqlite_client');
 
 const { upsertOrder } = require('../database/order_db');
 const {
@@ -84,7 +85,7 @@ async function seedOrder(row) {
 }
 
 async function listOrderIndexNames() {
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         return await new Promise((resolve, reject) => {
             db.all(`PRAGMA index_list("order")`, [], (err, rows) => {

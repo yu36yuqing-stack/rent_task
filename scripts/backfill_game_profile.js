@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { openDatabase } = require('../database/sqlite_client');
+const { openDatabase, openOrderDatabase } = require('../database/sqlite_client');
 const { normalizeGameProfile } = require('../common/game_profile');
 
 function all(db, sql, params = []) {
@@ -113,12 +113,14 @@ async function backfillOrder(db) {
 
 async function main() {
     const db = openDatabase();
+    const orderDb = openOrderDatabase();
     try {
         const accountUpdated = await backfillUserGameAccount(db);
-        const orderUpdated = await backfillOrder(db);
+        const orderUpdated = await backfillOrder(orderDb);
         console.log(JSON.stringify({ ok: true, account_updated: accountUpdated, order_updated: orderUpdated }));
     } finally {
         db.close();
+        orderDb.close();
     }
 }
 

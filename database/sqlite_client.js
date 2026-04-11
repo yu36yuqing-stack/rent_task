@@ -15,6 +15,9 @@ const STATS_DB_FILE = process.env.STATS_DB_FILE_PATH
 const PRICE_DB_FILE = process.env.PRICE_DB_FILE_PATH
     ? path.resolve(process.env.PRICE_DB_FILE_PATH)
     : path.join(DB_DIR, 'rent_robot_price.db');
+const ORDER_DB_FILE = process.env.ORDER_DB_FILE_PATH
+    ? path.resolve(process.env.ORDER_DB_FILE_PATH)
+    : path.join(DB_DIR, 'rent_robot_order.db');
 const SQLITE_BUSY_TIMEOUT_MS = Number(process.env.SQLITE_BUSY_TIMEOUT_MS || 5000);
 const SQLITE_JOURNAL_MODE = process.env.SQLITE_JOURNAL_MODE || 'WAL';
 
@@ -58,6 +61,11 @@ function openPriceDatabase() {
     return applyConnectionPragmas(new sqlite3.Database(PRICE_DB_FILE));
 }
 
+function openOrderDatabase() {
+    ensureDbDir(ORDER_DB_FILE);
+    return applyConnectionPragmas(new sqlite3.Database(ORDER_DB_FILE));
+}
+
 function openDatabase() {
     return openMainDatabase();
 }
@@ -69,11 +77,13 @@ module.exports = {
     RUNTIME_DB_FILE,
     STATS_DB_FILE,
     PRICE_DB_FILE,
+    ORDER_DB_FILE,
     SQLITE_BUSY_TIMEOUT_MS,
     SQLITE_JOURNAL_MODE,
     openDatabase,
     openMainDatabase,
     openRuntimeDatabase,
     openStatsDatabase,
-    openPriceDatabase
+    openPriceDatabase,
+    openOrderDatabase
 };

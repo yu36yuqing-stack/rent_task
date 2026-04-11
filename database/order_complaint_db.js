@@ -1,4 +1,4 @@
-const { openDatabase } = require('./sqlite_client');
+const { openOrderDatabase } = require('./sqlite_client');
 
 function nowText() {
     const d = new Date();
@@ -39,7 +39,7 @@ function toDateTimeTextFromMs(v) {
 }
 
 async function initOrderComplaintDb() {
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         await run(db, `
             CREATE TABLE IF NOT EXISTS order_complaint (
@@ -122,7 +122,7 @@ async function upsertOrderComplaint(input = {}, options = {}) {
         desc: String(options.desc || input.desc || '').trim()
     };
 
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const exists = await get(db, `
             SELECT id
@@ -211,7 +211,7 @@ async function getOrderComplaintByOrder(userId, channel, orderNo) {
     if (!ch) throw new Error('channel 不能为空');
     if (!no) throw new Error('order_no 不能为空');
 
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const row = await get(db, `
             SELECT

@@ -9,10 +9,12 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rent-uhaozu-pending-'));
 const mainDbFile = path.join(tempDir, 'rent_robot.db');
 const runtimeDbFile = path.join(tempDir, 'rent_robot_runtime.db');
 const statsDbFile = path.join(tempDir, 'rent_robot_stats.db');
+const orderDbFile = path.join(tempDir, 'rent_robot_order.db');
 
 process.env.MAIN_DB_FILE_PATH = mainDbFile;
 process.env.RUNTIME_DB_FILE_PATH = runtimeDbFile;
 process.env.STATS_DB_FILE_PATH = statsDbFile;
+process.env.ORDER_DB_FILE_PATH = orderDbFile;
 
 const { initOrderDb, upsertOrder } = require('../database/order_db');
 const { mapUhaozuOrderToOrder } = require('../order/order_mapping');

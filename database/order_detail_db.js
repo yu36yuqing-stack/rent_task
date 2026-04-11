@@ -1,4 +1,4 @@
-const { openDatabase } = require('./sqlite_client');
+const { openOrderDatabase } = require('./sqlite_client');
 
 function nowText() {
     const d = new Date();
@@ -67,7 +67,7 @@ function normalizeDetail(input = {}) {
 }
 
 async function initOrderDetailDb() {
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         await run(db, `
             CREATE TABLE IF NOT EXISTS order_detail (
@@ -107,7 +107,7 @@ async function initOrderDetailDb() {
 async function upsertOrderDetail(input = {}) {
     await initOrderDetailDb();
     const row = normalizeDetail(input);
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const existed = await get(db, `
             SELECT id
@@ -168,7 +168,7 @@ async function upsertOrderDetail(input = {}) {
 async function getOrderDetailByOrder(userId, channel, orderNo) {
     await initOrderDetailDb();
     const uid = Number(userId || 0);
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const row = await get(db, `
             SELECT *
@@ -194,7 +194,7 @@ async function listPendingUhaozuOrderDetailsByUser(userId, orderNos = []) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
     const uniq = Array.from(new Set((Array.isArray(orderNos) ? orderNos : []).map((x) => String(x || '').trim()).filter(Boolean)));
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const params = [uid];
         let whereOrder = '';

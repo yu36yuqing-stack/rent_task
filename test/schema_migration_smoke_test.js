@@ -8,8 +8,9 @@ const path = require('path');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rent-schema-migration-'));
 process.env.MAIN_DB_FILE_PATH = path.join(tempDir, 'rent_robot.db');
 process.env.RUNTIME_DB_FILE_PATH = path.join(tempDir, 'rent_robot_runtime.db');
+process.env.ORDER_DB_FILE_PATH = path.join(tempDir, 'rent_robot_order.db');
 
-const { openDatabase } = require('../database/sqlite_client');
+const { openMainDatabase, openOrderDatabase } = require('../database/sqlite_client');
 const { initOrderDb } = require('../database/order_db');
 const { runPendingMigrations, listPendingMigrations } = require('../database/migration_runner');
 const { listAppliedSchemaMigrations } = require('../database/schema_migration_db');
@@ -61,7 +62,7 @@ function assertEqual(actual, expected, msg) {
 }
 
 async function createLegacyUserOrder() {
-    const db = openDatabase();
+    const db = openMainDatabase();
     try {
         await run(db, `
             CREATE TABLE user_order (
@@ -116,15 +117,18 @@ async function main() {
     await createLegacyUserOrder();
 
     await initOrderDb();
-    const db1 = openDatabase();
+    const db1 = openMainDatabase();
     try {
         const legacyExists = await get(db1, `
             SELECT name FROM sqlite_master
             WHERE type='table' AND name='user_order'
         `);
-        const migratedRow = await get(db1, `SELECT COUNT(*) AS total FROM "order" WHERE order_no = 'LEGACY_1'`);
+        const mainOrderTable = await get(db1, `
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='order'
+        `);
         assertTrue(Boolean(legacyExists), '轻量 initOrderDb 不再隐式迁移 legacy 表');
-        assertEqual(Number(migratedRow.total || 0), 0, '轻量 initOrderDb 不会偷偷回填 legacy 订单');
+        assertTrue(!mainOrderTable, '轻量 initOrderDb 不会在主库偷偷建 order 表');
     } finally {
         db1.close();
     }
@@ -133,36 +137,48 @@ async function main() {
     assertTrue(pendingBefore.length > 0, '初始状态存在待执行 migration');
 
     const summary = await runPendingMigrations({ logger: console });
-    assertEqual(summary.pending_before, 7, '首次执行应命中全部 pending migrations');
+    assertEqual(summary.pending_before, 8, '首次执行应命中全部 pending migrations');
     assertEqual(summary.pending_after, 0, '首次执行后不应残留 pending migration');
 
-    const db2 = openDatabase();
+    const db2 = openMainDatabase();
     try {
         const legacyExistsAfter = await get(db2, `
             SELECT name FROM sqlite_master
             WHERE type='table' AND name='user_order'
         `);
-        const migrated = await get(db2, `
+        assertTrue(!legacyExistsAfter, 'migration 执行后 legacy 表被清理');
+        const mainOrderTable = await get(db2, `
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='order'
+        `);
+        assertTrue(!mainOrderTable, '迁移后主库不再保留 order 表');
+    } finally {
+        db2.close();
+    }
+
+    const orderDb = openOrderDatabase();
+    try {
+        assertTrue(fs.existsSync(process.env.ORDER_DB_FILE_PATH), 'migration 会创建独立 order.db 文件');
+        const migrated = await get(orderDb, `
             SELECT game_name, game_id, order_status, ren_way
             FROM "order"
             WHERE user_id = ? AND order_no = ?
             LIMIT 1
         `, [501, 'LEGACY_1']);
-        const indexRows = await all(db2, `PRAGMA index_list("order")`);
-        assertTrue(!legacyExistsAfter, 'migration 执行后 legacy 表被清理');
+        const indexRows = await all(orderDb, `PRAGMA index_list("order")`);
         assertEqual(String(migrated.game_name || ''), 'WZRY', 'migration 会规范化游戏名');
         assertEqual(String(migrated.game_id || ''), '1', 'migration 保留游戏 ID');
         assertEqual(String(migrated.order_status || ''), '租赁中', 'migration 会规范化订单状态');
         assertEqual(String(migrated.ren_way || ''), '时租', 'migration 会补默认租赁方式');
         assertTrue(indexRows.some((row) => String(row.name || '') === 'idx_order_user_account_start'), 'migration 会补充新索引');
     } finally {
-        db2.close();
+        orderDb.close();
     }
 
     const applied = await listAppliedSchemaMigrations();
-    assertEqual(applied.length, 7, 'schema_migration 记录全部已执行 migrations');
+    assertEqual(applied.length, 8, 'schema_migration 记录全部已执行 migrations');
     assertEqual(String(applied[0].version || ''), '20260411_001', '首个 migration 版本正确');
-    assertEqual(String(applied[6].version || ''), '20260411_007', '最后一个 migration 版本正确');
+    assertEqual(String(applied[7].version || ''), '20260412_008', '最后一个 migration 版本正确');
 
     const summarySecond = await runPendingMigrations({ logger: console });
     assertEqual(summarySecond.pending_before, 0, '重复执行 migration 不应重复跑');

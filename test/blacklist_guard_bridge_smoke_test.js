@@ -12,7 +12,13 @@
  *   node test/blacklist_guard_bridge_smoke_test.js
  */
 
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rent-blacklist-guard-bridge-'));
+process.env.MAIN_DB_FILE_PATH = path.join(tempDir, 'rent_robot.db');
+process.env.RUNTIME_DB_FILE_PATH = path.join(tempDir, 'rent_robot_runtime.db');
+process.env.ORDER_DB_FILE_PATH = path.join(tempDir, 'rent_robot_order.db');
 const { openDatabase } = require('../database/sqlite_client');
 const { initUserDb, createUserByAdmin } = require('../database/user_db');
 const {
@@ -250,4 +256,3 @@ main().catch((e) => {
     console.error('[FAIL] blacklist_guard_bridge_smoke_test:', e && e.message ? e.message : e);
     process.exit(1);
 });
-

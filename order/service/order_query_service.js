@@ -1,4 +1,4 @@
-const { openDatabase } = require('../../database/sqlite_client');
+const { openOrderDatabase } = require('../../database/sqlite_client');
 const {
     initOrderDb,
     listTodayPaidOrderCountByAccounts,
@@ -75,7 +75,7 @@ async function listActiveRentingOrdersByUser(userId) {
     const uid = Number(userId || 0);
     if (!uid) return [];
     await initOrderDb();
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const rows = await dbAll(db, `
             SELECT game_account, game_id, game_name, start_time, end_time, order_no, channel
@@ -105,7 +105,7 @@ async function getOrderStatusByOrderNo(userId, orderNo, channel = '') {
     const ch = normalizeOrderPlatform(channel);
     if (!uid || !no) return '';
     await initOrderDb();
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const row = ch
             ? await dbGet(db, `
@@ -139,7 +139,7 @@ async function getOrderEndTimeByOrderNo(userId, orderNo, channel = '') {
     const ch = normalizeOrderPlatform(channel);
     if (!uid || !no) return '';
     await initOrderDb();
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const row = ch
             ? await dbGet(db, `
@@ -172,7 +172,7 @@ async function listLatestEndedOrderSnapshotByAccounts(userId, accounts = []) {
     const uniq = normalizeAccountTuples(accounts);
     if (!uid || uniq.length === 0) return {};
     await initOrderDb();
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const tupleSql = uniq.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
         const tupleSqlOuter = uniq.map(() => `(o.game_id = ? AND o.game_account = ?)`).join(' OR ');
@@ -218,7 +218,7 @@ async function listActiveOrderSnapshotByAccounts(userId, accounts = []) {
     const uniq = normalizeAccountTuples(accounts);
     if (!uid || uniq.length === 0) return {};
     await initOrderDb();
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const nowText = toDateTimeText(new Date());
         const tupleSql = uniq.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
@@ -263,7 +263,7 @@ async function listLinkedOrderAccountsByUser(userId) {
     const uid = Number(userId || 0);
     if (!uid) return [];
     await initOrderDb();
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         return dbAll(db, `
             SELECT DISTINCT user_id, game_account, game_id, game_name, MAX(COALESCE(role_name, '')) AS role_name
@@ -284,7 +284,7 @@ async function listRecentlyEndedAccountsByUser(userId, accounts = [], suppressSe
     const uniq = normalizeAccountTuples(accounts);
     if (!uid || uniq.length === 0) return new Set();
     await initOrderDb();
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         const now = new Date();
         const lower = new Date(now.getTime() - Math.max(60, Number(suppressSec || RECENT_ORDER_END_SUPPRESS_SEC)) * 1000);
@@ -323,7 +323,7 @@ async function queryDailyRowsFromOrders(userId, statDate, gameName, configuredAc
     const endText = toDateTimeText(dayEnd);
     const placeholders = accs.map(() => '?').join(',');
     await initOrderDb();
-    const db = openDatabase();
+    const db = openOrderDatabase();
     try {
         return await dbAll(db, `
             SELECT

@@ -6,7 +6,9 @@ const os = require('os');
 const path = require('path');
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rent-face-verify-'));
-process.env.RENT_DB_DIR = tempDir;
+process.env.MAIN_DB_FILE_PATH = path.join(tempDir, 'rent_robot.db');
+process.env.RUNTIME_DB_FILE_PATH = path.join(tempDir, 'rent_robot_runtime.db');
+process.env.ORDER_DB_FILE_PATH = path.join(tempDir, 'rent_robot_order.db');
 
 const { initUserBlacklistDb, listUserBlacklistByUserWithMeta } = require('../database/user_blacklist_db');
 const { initUserBlacklistSourceDb, listBlacklistSourcesByUserAndAccounts } = require('../database/user_blacklist_source_db');

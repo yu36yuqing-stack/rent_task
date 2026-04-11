@@ -8,6 +8,7 @@ const path = require('path');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rent-product-order-service-'));
 process.env.MAIN_DB_FILE_PATH = path.join(tempDir, 'rent_robot.db');
 process.env.RUNTIME_DB_FILE_PATH = path.join(tempDir, 'rent_robot_runtime.db');
+process.env.ORDER_DB_FILE_PATH = path.join(tempDir, 'rent_robot_order.db');
 
 const { upsertOrder } = require('../database/order_db');
 const { initUserGameAccountDb, listUserGameAccounts } = require('../database/user_game_account_db');

@@ -8,6 +8,7 @@ const path = require('path');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rent-uhaozu-detail-'));
 process.env.MAIN_DB_FILE_PATH = path.join(tempDir, 'rent_robot.db');
 process.env.RUNTIME_DB_FILE_PATH = path.join(tempDir, 'rent_robot_runtime.db');
+process.env.ORDER_DB_FILE_PATH = path.join(tempDir, 'rent_robot_order.db');
 
 const { initOrderDb, upsertOrder, listOrders, updateOrderRecAmount } = require('../database/order_db');
 const { initOrderDetailDb, upsertOrderDetail, getOrderDetailByOrder } = require('../database/order_detail_db');

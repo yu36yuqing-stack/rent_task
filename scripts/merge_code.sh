@@ -12,7 +12,7 @@ SSH_PASS="12345"
 COMMIT_MSG="${MERGE_COMMIT_MSG:-chore: sync from local $(date '+%Y-%m-%d %H:%M:%S')}"
 
 echo "[Step 1/5] rsync 回传宿主机（排除本地DB和运行日志）..."
-RSYNC_CMD="rsync -az --delete --exclude '.git' --exclude 'node_modules' --exclude '.DS_Store' --exclude '*.db' --exclude 'log/' --exclude '*.log' -e 'ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new' '${SRC_DIR}' '${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}'"
+RSYNC_CMD="rsync -az --delete --exclude '.git' --exclude 'node_modules' --exclude '.DS_Store' --exclude '*.db' --exclude 'log/' --exclude 'coverage/' --exclude '*.log' -e 'ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new' '${SRC_DIR}' '${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}'"
 /usr/bin/expect <<EOF
 set timeout -1
 spawn bash -lc "$RSYNC_CMD"
