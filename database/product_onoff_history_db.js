@@ -12,6 +12,10 @@ async function pruneProductOnoffHistory(options = {}) {
     const cutoffText = nowText(new Date(cutoffMs));
     const db = openDatabase();
     try {
+        const cols = await all(db, `PRAGMA table_info("product_onoff_history")`);
+        const colSet = new Set((cols || []).map((x) => String(x && x.name || '').trim()));
+        const hasGameId = colSet.has('game_id');
+        const hasGameName = colSet.has('game_name');
         const tableRow = await all(db, `
             SELECT name
             FROM sqlite_master
@@ -56,7 +60,9 @@ async function pruneProductOnoffHistory(options = {}) {
             await run(db, `
                 INSERT INTO product_onoff_history_prune_tmp
                 (user_id, user_account, action_type, platform, game_account, reason, success, skipped, mode, event_time, create_date, modify_date, is_deleted, desc, game_id, game_name)
-                SELECT user_id, user_account, action_type, platform, game_account, reason, success, skipped, mode, event_time, create_date, modify_date, is_deleted, desc, game_id, game_name
+                SELECT user_id, user_account, action_type, platform, game_account, reason, success, skipped, mode, event_time, create_date, modify_date, is_deleted, desc,
+                       ${hasGameId ? 'game_id' : "'1'"},
+                       ${hasGameName ? 'game_name' : "'WZRY'"}
                 FROM product_onoff_history NOT INDEXED
                 WHERE (
                     COALESCE(event_time, 0) > 0

@@ -149,6 +149,16 @@ function applyActionResultToRows(rows = [], actions = []) {
     }
 }
 
+async function reportPipelineStage(options = {}, stage = '', progressText = '', extra = {}) {
+    const fn = options && typeof options.onStage === 'function' ? options.onStage : null;
+    if (!fn) return;
+    await fn({
+        stage: String(stage || '').trim(),
+        progress_text: String(progressText || '').trim(),
+        ...extra
+    });
+}
+
 async function runFullUserPipeline(user, options = {}) {
     const logger = options.logger || console;
     const actionEnabled = options.actionEnabled === undefined ? true : Boolean(options.actionEnabled);
@@ -169,10 +179,13 @@ async function runFullUserPipeline(user, options = {}) {
     const nonFatalErrors = [];
     try {
         logger.log(`[User] 开始处理 user_id=${uid} account=${userAccount}`);
+        await reportPipelineStage(options, 'sync_accounts', '同步商品账号');
         syncOut = await syncUserAccountsByAuth(uid);
+        await reportPipelineStage(options, 'load_accounts', '加载账号快照');
         rows = await listAllUserGameAccountsByUser(uid);
 
         try {
+            await reportPipelineStage(options, 'reconcile_order_rules', '收敛订单规则');
             const reconcile = await reconcileOrderNOffByUser(user);
             logger.log(`[Order3Off] user_id=${uid} reconcile=${JSON.stringify(reconcile)}`);
         } catch (e) {
@@ -182,6 +195,7 @@ async function runFullUserPipeline(user, options = {}) {
         }
 
         try {
+            await reportPipelineStage(options, 'reconcile_face_verify', '收敛人脸识别规则');
             const faceRet = await reconcilePlatformFaceVerifyBlacklist(uid, rows, logger);
             if (faceRet && Number(faceRet.touched || 0) > 0) {
                 logger.log(`[FaceVerifyBL] user_id=${uid} result=${JSON.stringify(faceRet)}`);
@@ -192,9 +206,11 @@ async function runFullUserPipeline(user, options = {}) {
             logger.warn(`[FaceVerifyBL] 收敛失败 user_id=${uid}: ${msg}`);
         }
 
+        await reportPipelineStage(options, 'load_blacklist', '加载黑名单状态');
         blacklistSet = await loadUserBlacklistSet(uid);
         blacklistReasonMap = await loadUserBlacklistReasonMap(uid);
 
+        await reportPipelineStage(options, 'execute_actions', '执行上下架动作');
         const actionOut = await executeUserActionsIfNeeded({
             user,
             rows,
@@ -207,9 +223,11 @@ async function runFullUserPipeline(user, options = {}) {
         actionResult.planned = Number(actionOut && actionOut.planned || 0);
         applyActionResultToRows(rows, actionResult.actions);
 
+        await reportPipelineStage(options, 'refresh_facts', '刷新订单事实');
         accounts = rows.map((r) => toReportAccountFromUserGameRow(r, blacklistSet, blacklistReasonMap));
         await fillTodayOrderCounts(uid, accounts);
         await fillRentingOrderFacts(uid, accounts);
+        await reportPipelineStage(options, 'probe_and_notify', '探测在线并发送通知');
         const onlineProbe = await probeProdOnlineStatus(user, accounts, { logger, include_rows: true });
         const onlineTagMap = {};
         for (const row of (onlineProbe && Array.isArray(onlineProbe.probe_rows) ? onlineProbe.probe_rows : [])) {
@@ -246,6 +264,7 @@ async function runFullUserPipeline(user, options = {}) {
         }
 
         logger.log(`[User] 处理完成 user_id=${uid} accounts=${accounts.length}`);
+        await reportPipelineStage(options, 'done', '任务完成', { finished: true });
         return {
             ok: true,
             stage: 'done',

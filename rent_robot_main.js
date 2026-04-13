@@ -6,6 +6,15 @@ const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('./dat
 const { startOrderSyncWorkerIfNeeded } = require('./order/order');
 const { startOrderStatsWorkerIfNeeded } = require('./stats/order_stats');
 const { tryAcquireLock: tryAcquireDbLock, releaseLock: releaseDbLock } = require('./database/lock_db');
+const {
+    createRuntimeTask,
+    markRuntimeTaskRunning,
+    markRuntimeTaskFinished,
+    TASK_STATUS_SUCCESS,
+    TASK_STATUS_PARTIAL_FAILED,
+    TASK_STATUS_FAILED,
+    TASK_STATUS_SKIPPED
+} = require('./database/runtime_task_db');
 const { runFullUserPipeline } = require('./pipeline/user_pipeline');
 const { startBlacklistInspectorIfNeeded } = require('./blacklist/blacklist_inspector');
 const { ensureMigrationsReady } = require('./database/migration_runner');
@@ -130,17 +139,61 @@ async function runPipeline(runRecord) {
             const leaseUntil = Number((userLock && userLock.lease_until) || 0);
             const skipMsg = `pipeline_locked user=${uid} lock=${userLockKey} lease_until=${leaseUntil}`;
             console.warn(`[User] 跳过处理 user_id=${uid}，原因=同用户任务执行中 lease_until=${leaseUntil}`);
+            await createRuntimeTask({
+                user_id: uid,
+                task_type: 'product_sync',
+                trigger_source: 'cron',
+                status: TASK_STATUS_SKIPPED,
+                stage: 'lock_skipped',
+                progress_text: '同用户商品任务执行中，跳过本轮',
+                result_json: {
+                    reason: 'pipeline_locked',
+                    lock_key: userLockKey,
+                    lease_until: leaseUntil
+                },
+                desc: skipMsg
+            });
             runRecord.errors.push(skipMsg);
             errors.push({ user_id: uid, account: user.account, errors: [skipMsg] });
             continue;
         }
 
+        const runtimeTask = await createRuntimeTask({
+            user_id: uid,
+            task_type: 'product_sync',
+            trigger_source: 'cron',
+            status: 'pending',
+            stage: 'queued',
+            progress_text: '等待执行商品同步主流程',
+            desc: `cron product sync user=${uid}`
+        });
         try {
-            const out = await runFullUserPipeline(user, {
-                logger: console,
-                actionEnabled: ACTION_ENABLED,
-                readOnly: ACTION_READ_ONLY
+            await markRuntimeTaskRunning(runtimeTask.task_id, {
+                stage: 'pipeline_start',
+                progress_text: '开始执行商品同步主流程'
             });
+            let out = null;
+            try {
+                out = await runFullUserPipeline(user, {
+                    logger: console,
+                    actionEnabled: ACTION_ENABLED,
+                    readOnly: ACTION_READ_ONLY,
+                    onStage: async (stagePatch = {}) => {
+                        await markRuntimeTaskRunning(runtimeTask.task_id, stagePatch);
+                    }
+                });
+            } catch (err) {
+                const msg = String(err && err.message ? err.message : err || 'pipeline_failed');
+                await markRuntimeTaskFinished(runtimeTask.task_id, {
+                    status: TASK_STATUS_FAILED,
+                    stage: 'pipeline_failed',
+                    progress_text: '商品同步失败',
+                    result_json: { ok: false },
+                    error_json: [msg],
+                    desc: `cron product sync exception user=${uid}`
+                });
+                throw err;
+            }
             const actionResult = out && out.action_result && typeof out.action_result === 'object'
                 ? out.action_result
                 : { actions: [], errors: [] };
@@ -160,12 +213,41 @@ async function runPipeline(runRecord) {
                 const pipelineErrs = Array.isArray(out && out.errors) && out.errors.length > 0
                     ? out.errors
                     : ['pipeline_failed'];
+                await markRuntimeTaskFinished(runtimeTask.task_id, {
+                    status: TASK_STATUS_FAILED,
+                    stage: 'pipeline_failed',
+                    progress_text: '商品同步失败',
+                    result_json: {
+                        ok: false,
+                        sync: out && out.sync ? out.sync : null,
+                        accounts_count: Number(out && out.accounts_count || 0)
+                    },
+                    error_json: pipelineErrs,
+                    desc: `cron product sync failed user=${uid}`
+                });
                 errors.push({ user_id: user.id, account: user.account, errors: pipelineErrs });
                 runRecord.errors.push(...pipelineErrs.map((e) => `pipeline_error user=${user.id} ${e}`));
                 continue;
             }
 
             const accCount = Number(out && out.accounts_count || 0);
+            await markRuntimeTaskFinished(runtimeTask.task_id, {
+                status: nonFatal.length > 0 || (Array.isArray(actionResult.errors) && actionResult.errors.length > 0)
+                    ? TASK_STATUS_PARTIAL_FAILED
+                    : TASK_STATUS_SUCCESS,
+                stage: 'done',
+                progress_text: nonFatal.length > 0 ? '商品同步完成，存在部分告警' : '商品同步完成',
+                result_json: {
+                    ok: true,
+                    accounts_count: accCount,
+                    sync: out && out.sync ? out.sync : null,
+                    action_result: actionResult,
+                    notify_result: out && out.notify_result ? out.notify_result : null,
+                    non_fatal_errors: nonFatal
+                },
+                error_json: nonFatal,
+                desc: `cron product sync done user=${uid}`
+            });
             routed.push({ user_id: user.id, account: user.account, accounts: accCount });
             runRecord.actions.push({
                 type: 'notify_user',
@@ -188,7 +270,7 @@ async function runPipeline(runRecord) {
     };
 }
 
-(async () => {
+async function main() {
     if (!checkLock()) {
         console.log('[Exit] 锁存在，结束本次执行');
         return;
@@ -253,4 +335,13 @@ async function runPipeline(runRecord) {
         releaseLock();
         console.log('[Exit] 本次执行结束');
     }
-})();
+}
+
+if (require.main === module) {
+    main();
+}
+
+module.exports = {
+    runPipeline,
+    main
+};

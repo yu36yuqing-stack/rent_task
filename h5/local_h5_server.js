@@ -86,6 +86,17 @@ const {
     getCooldownConfigByUser
 } = require('../order/order_cooldown_config');
 const { tryAcquireLock, releaseLock } = require('../database/lock_db');
+const {
+    createRuntimeTask,
+    getRuntimeTaskByTaskId,
+    findLatestActiveRuntimeTask,
+    attachManualToRuntimeTask,
+    markRuntimeTaskRunning,
+    markRuntimeTaskFinished,
+    TASK_STATUS_SUCCESS,
+    TASK_STATUS_PARTIAL_FAILED,
+    TASK_STATUS_FAILED
+} = require('../database/runtime_task_db');
 const { createAuthBff } = require('./h5_bff/auth_bff');
 const { createOrderBff } = require('./h5_bff/order_bff');
 const {
@@ -852,6 +863,19 @@ async function handleProductSyncNow(req, res) {
         poll_ms: STATS_REFRESH_LOCK_POLL_MS
     });
     if (!lock.acquired) {
+        const activeTask = await findLatestActiveRuntimeTask(uid, 'product_sync');
+        if (activeTask && activeTask.task_id) {
+            await attachManualToRuntimeTask(activeTask.task_id);
+            return json(res, 200, {
+                ok: true,
+                reused: true,
+                task_id: activeTask.task_id,
+                task: activeTask,
+                lock_key: lockKey,
+                lock_waited_ms: Number(lock.waited_ms || 0),
+                message: '当前已有商品同步任务执行中，已复用现有任务'
+            });
+        }
         throw httpError(409, `用户任务执行中，请稍后重试（lock=${lockKey}）`);
     }
     try {
@@ -859,26 +883,86 @@ async function handleProductSyncNow(req, res) {
         if (!fullUser || String(fullUser.status || '').trim() !== 'enabled') {
             throw httpError(401, '用户不存在或已禁用');
         }
-        const out = await runFullUserPipeline(fullUser, {
-            logger: console,
-            actionEnabled: ACTION_ENABLED,
-            readOnly: ACTION_READ_ONLY
+        const runtimeTask = await createRuntimeTask({
+            user_id: uid,
+            task_type: 'product_sync',
+            trigger_source: 'manual',
+            status: 'pending',
+            stage: 'queued',
+            progress_text: '等待执行商品同步',
+            desc: `manual product sync user=${uid}`
         });
+        await markRuntimeTaskRunning(runtimeTask.task_id, {
+            stage: 'pipeline_start',
+            progress_text: '开始执行商品同步'
+        });
+        let out = null;
+        try {
+            out = await runFullUserPipeline(fullUser, {
+                logger: console,
+                actionEnabled: ACTION_ENABLED,
+                readOnly: ACTION_READ_ONLY,
+                onStage: async (stagePatch = {}) => {
+                    await markRuntimeTaskRunning(runtimeTask.task_id, stagePatch);
+                }
+            });
+        } catch (err) {
+            const msg = String(err && err.message ? err.message : err || 'pipeline_failed');
+            await markRuntimeTaskFinished(runtimeTask.task_id, {
+                status: TASK_STATUS_FAILED,
+                stage: 'pipeline_failed',
+                progress_text: '商品同步失败',
+                result_json: { ok: false },
+                error_json: [msg],
+                desc: `manual product sync exception user=${uid}`
+            });
+            throw err;
+        }
         if (!out || !out.ok) {
             const msg = Array.isArray(out && out.errors) && out.errors.length > 0
                 ? String(out.errors[0] || 'pipeline_failed')
                 : 'pipeline_failed';
+            await markRuntimeTaskFinished(runtimeTask.task_id, {
+                status: TASK_STATUS_FAILED,
+                stage: 'pipeline_failed',
+                progress_text: '商品同步失败',
+                result_json: {
+                    ok: false,
+                    sync: out && out.sync ? out.sync : null,
+                    accounts_count: Number(out && out.accounts_count || 0)
+                },
+                error_json: Array.isArray(out && out.errors) ? out.errors : [msg],
+                desc: `manual product sync failed user=${uid}`
+            });
             return json(res, 500, {
                 ok: false,
                 message: msg,
                 data: out || null,
+                task_id: runtimeTask.task_id,
                 lock_key: lockKey,
                 lock_waited_ms: Number(lock.waited_ms || 0)
             });
         }
+        const nonFatal = Array.isArray(out && out.non_fatal_errors) ? out.non_fatal_errors : [];
+        await markRuntimeTaskFinished(runtimeTask.task_id, {
+            status: nonFatal.length > 0 ? TASK_STATUS_PARTIAL_FAILED : TASK_STATUS_SUCCESS,
+            stage: 'done',
+            progress_text: nonFatal.length > 0 ? '商品同步完成，存在部分告警' : '商品同步完成',
+            result_json: {
+                ok: true,
+                sync: out && out.sync ? out.sync : null,
+                accounts_count: Number(out && out.accounts_count || 0),
+                action_result: out && out.action_result ? out.action_result : null,
+                notify_result: out && out.notify_result ? out.notify_result : null,
+                non_fatal_errors: nonFatal
+            },
+            error_json: nonFatal,
+            desc: `manual product sync done user=${uid}`
+        });
         return json(res, 200, {
             ok: true,
             data: out || null,
+            task_id: runtimeTask.task_id,
             lock_key: lockKey,
             lock_waited_ms: Number(lock.waited_ms || 0)
         });
@@ -936,6 +1020,21 @@ async function handleOrderSyncNow(req, res) {
     const owner = `h5/orders/sync user_id=${user.id} pid=${process.pid}`;
     const lock = await tryAcquireLock(ORDER_SYNC_LOCK_KEY, ORDER_SYNC_LOCK_LEASE_SEC, owner);
     if (!lock.acquired) {
+        const activeTask = await findLatestActiveRuntimeTask(Number(user.id || 0), 'order_sync')
+            || await findLatestActiveRuntimeTask(0, 'order_sync');
+        if (activeTask && activeTask.task_id) {
+            await attachManualToRuntimeTask(activeTask.task_id);
+            return json(res, 200, {
+                ok: true,
+                skipped: true,
+                reused: true,
+                reason: 'order_sync_locked',
+                task_id: activeTask.task_id,
+                task: activeTask,
+                lock_key: ORDER_SYNC_LOCK_KEY,
+                lease_until: Number(lock.lease_until || 0)
+            });
+        }
         return json(res, 200, {
             ok: true,
             skipped: true,
@@ -946,21 +1045,70 @@ async function handleOrderSyncNow(req, res) {
     }
 
     try {
-        const out = await syncOrdersByUser(user.id, {
-            user,
-            uuzuhao: { maxPages: 20 },
-            uhaozu: { maxPages: 20 },
-            zuhaowang: { maxPages: 20 }
+        const runtimeTask = await createRuntimeTask({
+            user_id: Number(user.id || 0),
+            task_type: 'order_sync',
+            trigger_source: 'manual',
+            status: 'pending',
+            stage: 'queued',
+            progress_text: '等待执行订单同步',
+            desc: `manual order sync user=${user.id}`
+        });
+        await markRuntimeTaskRunning(runtimeTask.task_id, {
+            stage: 'sync_orders',
+            progress_text: '开始执行订单同步'
+        });
+        let out = null;
+        try {
+            out = await syncOrdersByUser(user.id, {
+                user,
+                uuzuhao: { maxPages: 20 },
+                uhaozu: { maxPages: 20 },
+                zuhaowang: { maxPages: 20 }
+            });
+        } catch (err) {
+            const msg = String(err && err.message ? err.message : err || 'order_sync_failed');
+            await markRuntimeTaskFinished(runtimeTask.task_id, {
+                status: TASK_STATUS_FAILED,
+                stage: 'failed',
+                progress_text: '订单同步失败',
+                result_json: {},
+                error_json: [msg],
+                desc: `manual order sync exception user=${user.id}`
+            });
+            throw err;
+        }
+        await markRuntimeTaskFinished(runtimeTask.task_id, {
+            status: Boolean(out && out.ok) ? TASK_STATUS_SUCCESS : TASK_STATUS_PARTIAL_FAILED,
+            stage: 'done',
+            progress_text: Boolean(out && out.ok) ? '订单同步完成' : '订单同步完成，存在部分失败',
+            result_json: out || {},
+            error_json: Boolean(out && out.ok) ? [] : [JSON.stringify((out && out.platforms) || {})],
+            desc: `manual order sync done user=${user.id}`
         });
         return json(res, 200, {
             ok: true,
             skipped: false,
             lock_key: ORDER_SYNC_LOCK_KEY,
+            task_id: runtimeTask.task_id,
             ...out
         });
     } finally {
         await releaseLock(ORDER_SYNC_LOCK_KEY, `release by ${owner}`);
     }
+}
+
+async function handleRuntimeTask(req, res, urlObj) {
+    const user = await requireAuth(req);
+    const taskId = String(urlObj.searchParams.get('task_id') || '').trim();
+    if (!taskId) return json(res, 400, { ok: false, message: 'task_id 不能为空' });
+    const row = await getRuntimeTaskByTaskId(taskId);
+    if (!row) return json(res, 404, { ok: false, message: '任务不存在' });
+    const rowUserId = Number(row.user_id || 0);
+    if (rowUserId !== 0 && rowUserId !== Number(user.id || 0)) {
+        return json(res, 403, { ok: false, message: '无权查看该任务' });
+    }
+    return json(res, 200, { ok: true, task: row });
 }
 
 async function handleStatsDashboard(req, res, urlObj) {
@@ -2092,6 +2240,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/refresh') return await handleRefresh(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/products') return await handleProducts(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/sync') return await handleProductSyncNow(req, res);
+            if (req.method === 'GET' && urlObj.pathname === '/api/runtime-task') return await handleRuntimeTask(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/orders') return await handleOrders(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/orders/complaint') return await orderBff.handleGetOrderComplaint(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/orders/detail') return await orderBff.handleGetOrderDetail(req, res, urlObj);
@@ -2144,14 +2293,26 @@ async function bootstrap() {
         }
     });
 
-    server.listen(PORT, HOST, () => {
+    await new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(PORT, HOST, () => {
+            server.off('error', reject);
+            // eslint-disable-next-line no-console
+            console.log(`[H5] local server running at http://${HOST}:${PORT}`);
+            resolve();
+        });
+    });
+    return server;
+}
+
+if (require.main === module) {
+    bootstrap().catch((e) => {
         // eslint-disable-next-line no-console
-        console.log(`[H5] local server running at http://${HOST}:${PORT}`);
+        console.error('[H5] boot failed:', e.message);
+        process.exit(1);
     });
 }
 
-bootstrap().catch((e) => {
-    // eslint-disable-next-line no-console
-    console.error('[H5] boot failed:', e.message);
-    process.exit(1);
-});
+module.exports = {
+    bootstrap
+};

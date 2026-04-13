@@ -314,7 +314,7 @@ async function probeProdOnlineStatus(user, accounts = [], options = {}) {
             row.online_tag = '';
             logger.warn(`[ProdStatusGuard] 在线查询失败 user_id=${user && user.id} account=${row.account}: ${e.message}`);
         }
-        await sleep(180);
+        await sleep(50);
     }
 
     const summary = summarizeProbeRows(probeRows);
