@@ -81,6 +81,7 @@ function buildPlatformPrdInfo(platform, row = {}) {
             remark: String(row.remark || ''),
             role_name: String(raw.roleName || ''),
             reason: String(row.reason || '').trim(),
+            off_type: String(raw.offType || '').trim().toUpperCase(),
             sale_status: raw.saleStatus === undefined ? null : Number(raw.saleStatus),
             product_status: raw.productStatus === undefined ? null : Number(raw.productStatus),
             tab_key: String(raw._tabKey || '').trim().toUpperCase()

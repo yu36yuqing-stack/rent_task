@@ -34,6 +34,7 @@
     function shortenDangerReason(reason) {
       const r = String(reason || '').trim();
       if (!r) return '';
+      if (r === '授权失效' || r === '重新授权失败') return '需重新授权';
       if (r.includes('仅卖家下架状态支持直接上架')) return '平台限制上架';
       if (r.includes('检测游戏在线') || (r.includes('检测') && r.includes('在线'))) return '检测在线';
       if (r.includes('游戏在线')) return '游戏在线';

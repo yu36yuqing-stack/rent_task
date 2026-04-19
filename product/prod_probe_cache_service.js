@@ -10,6 +10,9 @@ const {
     queryForbiddenPlay,
     setForbiddenPlay
 } = require('../uuzuhao/uuzuhao_api');
+const {
+    resolveUuzuhaoReauthorizeState
+} = require('./prod_channel_status');
 
 const DEFAULT_PROBE_CACHE_TTL_SEC = Math.max(1, Number(process.env.PROBE_CACHE_TTL_SEC || 60));
 const ONLINE_SUPPORTED_GAME_IDS = new Set(['1', '2']);
@@ -66,6 +69,20 @@ async function resolveAccountGameProfile(userId, gameAccount, fallbackGameName =
         };
     } catch {
         return { game_id: '1', game_name: fallbackGameName };
+    }
+}
+
+async function resolveUuzuhaoAuthAbnormalByUserAndAccount(userId, gameAccount, options = {}) {
+    const uid = Number(userId || 0);
+    const acc = String(gameAccount || '').trim();
+    const gameName = String(options.game_name || 'WZRY').trim() || 'WZRY';
+    if (!uid || !acc) return { hit: false, off_type: '', reason: '', label: '' };
+    try {
+        const row = await getLatestUserGameAccountByUserAndAccount(uid, acc, options.game_id || '', gameName);
+        if (!row) return { hit: false, off_type: '', reason: '', label: '' };
+        return resolveUuzuhaoReauthorizeState(row);
+    } catch {
+        return { hit: false, off_type: '', reason: '', label: '' };
     }
 }
 
@@ -222,6 +239,7 @@ async function setForbiddenPlayWithSnapshot(userId, gameAccount, enabled, option
 module.exports = {
     DEFAULT_PROBE_CACHE_TTL_SEC,
     resolveUuzuhaoAuthByUser,
+    resolveUuzuhaoAuthAbnormalByUserAndAccount,
     queryOnlineStatusCached,
     queryForbiddenStatusCached,
     setForbiddenPlayWithSnapshot

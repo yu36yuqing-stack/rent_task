@@ -20,9 +20,13 @@ const {
 const { tryAcquireLock, releaseLock } = require('../database/lock_db');
 const {
     resolveUuzuhaoAuthByUser,
+    resolveUuzuhaoAuthAbnormalByUserAndAccount,
     queryOnlineStatusCached,
     setForbiddenPlayWithSnapshot
 } = require('./prod_probe_cache_service');
+const {
+    resolveUuzuhaoReauthorizeState
+} = require('./prod_channel_status');
 const { sendDingdingMessage, resolveDingdingAtOptions } = require('../report/dingding/ding_notify');
 const { deleteBlacklistWithGuard, REASON_ONLINE } = require('../blacklist/blacklist_release_guard');
 const { setGuardSourcesByProbeAndReconcile } = require('../blacklist/blacklist_source_gateway');
@@ -288,7 +292,12 @@ async function probeProdOnlineStatus(user, accounts = [], options = {}) {
         return { ok: true, skipped: true, reason: 'out_of_probe_window' };
     }
 
-    const list = (Array.isArray(accounts) ? accounts : []).filter((x) => isProdGuardEnabledByAccount(x));
+    const inputList = (Array.isArray(accounts) ? accounts : []).filter((x) => isProdGuardEnabledByAccount(x));
+    const list = [];
+    for (const one of inputList) {
+        if (resolveUuzuhaoReauthorizeState(one).hit) continue;
+        list.push(one);
+    }
     if (list.length === 0) return { ok: true, skipped: true, reason: 'empty_accounts' };
     let auth = null;
     try {
@@ -386,7 +395,20 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
     if (!isProdGuardEnabledByUser(user)) return { ok: true, skipped: true, reason: 'prod_guard_disabled_by_user_switch', queued: 0 };
     const uid = Number((user && user.id) || 0);
     if (!uid) return { ok: false, skipped: true, reason: 'invalid_user', queued: 0 };
-    const list = (Array.isArray(badAccounts) ? badAccounts : []).filter((x) => isProdGuardEnabledByAccount(x));
+    const rawList = (Array.isArray(badAccounts) ? badAccounts : []).filter((x) => isProdGuardEnabledByAccount(x));
+    const list = [];
+    let skippedAuthAbnormalCount = 0;
+    for (const one of rawList) {
+        const abnormal = await resolveUuzuhaoAuthAbnormalByUserAndAccount(uid, one && (one.account || one.game_account), {
+            game_id: one && one.game_id,
+            game_name: one && one.game_name
+        });
+        if (abnormal.hit) {
+            skippedAuthAbnormalCount += 1;
+            continue;
+        }
+        list.push(one);
+    }
     if (list.length === 0) return { ok: true, skipped: true, reason: 'empty_accounts', queued: 0 };
     let auth = null;
     try {
@@ -485,7 +507,7 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
     if (errors.length > 0) {
         logger.warn(`[ProdStatusGuard] risk_enqueue_partial_failed user_id=${uid} errs=${errors.join(' | ')}`);
     }
-    return { ok: errors.length === 0, skipped: false, queued, activated, reused, errors };
+    return { ok: errors.length === 0, skipped: false, queued, activated, reused, errors, skipped_auth_abnormal_count: skippedAuthAbnormalCount };
 }
 
 async function alertOnlineConflictIfNeeded(user, probeRows = [], options = {}) {
@@ -606,6 +628,23 @@ async function processOneSheepFixTask(task, authCache, userSwitchCache, logger) 
     const gid = String(task.game_id || '1').trim() || '1';
     const gname = String(task.game_name || 'WZRY').trim() || 'WZRY';
     const identity = { account: acc, game_id: gid, game_name: gname };
+    const abnormal = await resolveUuzuhaoAuthAbnormalByUserAndAccount(uid, acc, { game_id: gid, game_name: gname });
+    if (abnormal.hit) {
+        const doneDesc = `skip_by_uuzuhao_auth_abnormal:${String(abnormal.reason || abnormal.off_type || 'unknown').trim()}`;
+        await updateGuardTaskStatus(task.id, {
+            status: TASK_STATUS_DONE,
+            last_error: '',
+            finished_at: toDateTimeText(),
+            desc: doneDesc
+        });
+        if (Number(task.event_id || 0) > 0) {
+            await resolveRiskEventById(Number(task.event_id || 0), {
+                status: 'ignored',
+                desc: doneDesc
+            });
+        }
+        return;
+    }
     const activeOrders = await listActiveOrderSnapshotByUser(uid, [identity]);
     const activeOrder = activeOrders[`${gid}::${acc}`] || null;
     const productRentingSignals = await listProductRentingSignalsByUser(uid, [identity]);

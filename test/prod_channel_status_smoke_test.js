@@ -92,6 +92,22 @@ function testProdChannelStatus() {
     assertEqual(normRestricted.uuzuhao.code, 'restricted', '渠道限制命中 restricted');
     assertEqual(normRestricted.uuzuhao.label, '平台限制上架', '特定平台限制文案映射为平台限制上架');
 
+    const normYyzAuth = buildPlatformStatusNorm(
+        { uuzuhao: '下架' },
+        { uuzuhao: { off_type: 'AUTHORIZE_ERROR', reason: '授权失效' } },
+        {}
+    );
+    assertEqual(normYyzAuth.uuzuhao.code, 'auth_abnormal', '悠悠授权失效命中 auth_abnormal');
+    assertEqual(normYyzAuth.uuzuhao.label, '需重新授权', '悠悠授权失效前端标签应提示需重新授权');
+    assertEqual(normYyzAuth.uuzuhao.reason, '授权失效', '悠悠授权失效 reason 透传');
+
+    const normYyzReauth = buildPlatformStatusNorm(
+        { uuzuhao: '下架' },
+        { uuzuhao: { off_type: 'REAUTHORIZE_ERROR', reason: '重新授权失败' } },
+        {}
+    );
+    assertEqual(normYyzReauth.uuzuhao.label, '需重新授权', '悠悠重新授权失败也应提示需重新授权');
+
     const overall = pickOverallStatusNorm({
         uuzuhao: buildNormalizedStatus('listed'),
         uhaozu: buildNormalizedStatus('auth_abnormal', '账号异常'),
@@ -113,7 +129,7 @@ function testActionEngineOnGate() {
         blacklistAccounts: new Set(),
         platformRestrictSet: new Set(),
         platformStatusNormMap: {
-            A100: {
+            '1::A100': {
                 uuzuhao: { code: 'auth_abnormal' }, // 应阻断 on_y
                 uhaozu: { code: 'listed' }, // 允许 on_u
                 zuhaowang: { code: 'listed' } // 允许 on_z

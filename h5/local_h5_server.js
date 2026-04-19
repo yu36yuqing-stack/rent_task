@@ -48,6 +48,7 @@ const {
 const { createAccessToken, createOpaqueRefreshToken } = require('../user/auth_token');
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
 const {
+    resolveUuzuhaoAuthAbnormalByUserAndAccount,
     queryOnlineStatusCached,
     queryForbiddenStatusCached,
     setForbiddenPlayWithSnapshot
@@ -66,7 +67,8 @@ const {
 const {
     buildPlatformStatusNorm,
     pickOverallStatusNorm,
-    isRestrictedLikeStatus
+    isRestrictedLikeStatus,
+    buildUuzuhaoReauthorizeMessage
 } = require('../product/prod_channel_status');
 const { startProdRiskTaskWorker } = require('../product/prod_status_guard');
 const { resolveDisplayNameByRow } = require('../product/display_name');
@@ -1617,6 +1619,10 @@ async function handleProductOnlineQuery(req, res) {
     const gameAccount = String(body.game_account || '').trim();
     const gameName = String(body.game_name || 'WZRY').trim() || 'WZRY';
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    const authAbnormal = await resolveUuzuhaoAuthAbnormalByUserAndAccount(user.id, gameAccount, { game_name: gameName });
+    if (authAbnormal.hit) {
+        return json(res, 422, { ok: false, message: buildUuzuhaoReauthorizeMessage(authAbnormal) });
+    }
 
     let result;
     try {
@@ -1662,6 +1668,10 @@ async function handleProductForbiddenPlay(req, res) {
     }
 
     const enabled = (enabledRaw === true) || String(enabledRaw).trim().toLowerCase() === 'true';
+    const authAbnormal = await resolveUuzuhaoAuthAbnormalByUserAndAccount(user.id, gameAccount, { game_name: gameName });
+    if (authAbnormal.hit) {
+        return json(res, 422, { ok: false, message: buildUuzuhaoReauthorizeMessage(authAbnormal) });
+    }
     let result;
     try {
         result = await setForbiddenPlayWithSnapshot(user.id, gameAccount, enabled, {
@@ -1697,6 +1707,10 @@ async function handleProductForbiddenQuery(req, res) {
     const gameAccount = String(body.game_account || '').trim();
     const gameName = String(body.game_name || 'WZRY').trim() || 'WZRY';
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    const authAbnormal = await resolveUuzuhaoAuthAbnormalByUserAndAccount(user.id, gameAccount, { game_name: gameName });
+    if (authAbnormal.hit) {
+        return json(res, 422, { ok: false, message: buildUuzuhaoReauthorizeMessage(authAbnormal) });
+    }
 
     let result;
     try {

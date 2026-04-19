@@ -49,6 +49,24 @@ async function main() {
             }
         },
         {
+            account: 'auth_abnormal_acc',
+            youpin: '下架',
+            uhaozu: '下架',
+            zuhaowan: '下架',
+            channel_prd_info: {
+                uuzuhao: {
+                    off_type: 'AUTHORIZE_ERROR',
+                    reason: '授权失效'
+                }
+            },
+            switch: {
+                prod_guard: {
+                    label: '在线风控',
+                    enabled: true
+                }
+            }
+        },
+        {
             account: 'disabled_acc',
             youpin: '下架',
             uhaozu: '下架',

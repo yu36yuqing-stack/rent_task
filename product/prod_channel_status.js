@@ -19,6 +19,57 @@ const NORM_CODE_LEVEL_MAP = {
 };
 
 const PLATFORM_STATUS_KEYS = ['uuzuhao', 'uhaozu', 'zuhaowang'];
+const UUZUHAO_REAUTHORIZE_OFF_TYPE_REASON_MAP = {
+    AUTHORIZE_ERROR: '授权失效',
+    REAUTHORIZE_ERROR: '重新授权失败'
+};
+
+function pickUuzuhaoPrdInfo(input = {}) {
+    if (!input || typeof input !== 'object') return {};
+    if (input.channel_prd_info && typeof input.channel_prd_info === 'object') {
+        return input.channel_prd_info.uuzuhao && typeof input.channel_prd_info.uuzuhao === 'object'
+            ? input.channel_prd_info.uuzuhao
+            : {};
+    }
+    if (input.uuzuhao && typeof input.uuzuhao === 'object') return input.uuzuhao;
+    return input;
+}
+
+function resolveUuzuhaoReauthorizeState(input = {}) {
+    const prd = pickUuzuhaoPrdInfo(input);
+    const offType = String(prd.off_type || prd.offType || '').trim().toUpperCase();
+    if (UUZUHAO_REAUTHORIZE_OFF_TYPE_REASON_MAP[offType]) {
+        return {
+            hit: true,
+            off_type: offType,
+            reason: UUZUHAO_REAUTHORIZE_OFF_TYPE_REASON_MAP[offType],
+            label: '需重新授权'
+        };
+    }
+    const reason = String(prd.reason || '').trim();
+    if (reason === '授权失效' || reason === '重新授权失败') {
+        return {
+            hit: true,
+            off_type: offType,
+            reason,
+            label: '需重新授权'
+        };
+    }
+    return {
+        hit: false,
+        off_type: offType,
+        reason,
+        label: ''
+    };
+}
+
+function buildUuzuhaoReauthorizeMessage(input = {}) {
+    const state = resolveUuzuhaoReauthorizeState(input);
+    if (!state.hit) return '';
+    return state.reason
+        ? `悠悠授权异常（${state.reason}），请先重新授权`
+        : '悠悠授权异常，请先重新授权';
+}
 
 function isUhaozuOnlineDetectReason(reason) {
     const text = String(reason || '').trim();
@@ -119,6 +170,18 @@ function normalizeOnePlatformStatus(platform, channelStatus = {}, channelPrdInfo
         return buildNormalizedStatus(codeByText);
     }
 
+    if (p === 'uuzuhao') {
+        const reauth = resolveUuzuhaoReauthorizeState(prd);
+        if (reauth.hit) {
+            return {
+                code: 'auth_abnormal',
+                label: reauth.label,
+                reason: reauth.reason,
+                level: Number(NORM_CODE_LEVEL_MAP.auth_abnormal || 100)
+            };
+        }
+    }
+
     if (restrictMsg && !recovered) {
         return {
             code: 'restricted',
@@ -168,5 +231,7 @@ module.exports = {
     isOnAllowedByCode,
     isUhaozuOnlineDetectReason,
     isFaceVerifyReason,
-    restrictedLabelByReason
+    restrictedLabelByReason,
+    resolveUuzuhaoReauthorizeState,
+    buildUuzuhaoReauthorizeMessage
 };

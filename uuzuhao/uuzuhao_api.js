@@ -106,7 +106,9 @@ function mapProductToRobotItem(p) {
 
     let reason = '';
     if (status === '下架') {
-        if (p.productStatus === 2100 || p.offType === 'SELLER_BLACK') reason = '系统下架';
+        if (p.offType === 'REAUTHORIZE_ERROR') reason = '重新授权失败';
+        else if (p.offType === 'AUTHORIZE_ERROR') reason = '授权失效';
+        else if (p.productStatus === 2100 || p.offType === 'SELLER_BLACK') reason = '系统下架';
         else if (p.productStatus === 2200 || p.offType === 'CUSTOMER') reason = '客服下架';
         else if (p.productStatus === 2300 || p.offType === 'SELLER') reason = '商家下架';
         else if (p.productOffReasonDesc) reason = p.productOffReasonDesc;
