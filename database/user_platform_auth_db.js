@@ -126,6 +126,11 @@ function normalizeAuthStatus(value) {
     return status;
 }
 
+function normalizeChannelEnabled(value, fallback = true) {
+    if (value === undefined || value === null || value === '') return fallback ? 1 : 0;
+    return Boolean(value) ? 1 : 0;
+}
+
 function parseAuthPayload(payload) {
     if (payload === undefined || payload === null || payload === '') return {};
     if (typeof payload === 'string') {
@@ -387,6 +392,7 @@ function rowToAuth(row = {}, options = {}) {
         auth_type: String(row.auth_type || ''),
         auth_status: String(row.auth_status || ''),
         expire_at: String(row.expire_at || ''),
+        channel_enabled: Number(row.channel_enabled === undefined ? 1 : row.channel_enabled) > 0,
         modify_date: String(row.modify_date || ''),
         is_deleted: Number(row.is_deleted || 0),
         desc: String(row.desc || '')
@@ -408,11 +414,17 @@ async function ensureUserPlatformAuthTableBase(db) {
             auth_payload TEXT NOT NULL,
             auth_status TEXT NOT NULL DEFAULT 'valid',
             expire_at TEXT DEFAULT '',
+            channel_enabled INTEGER NOT NULL DEFAULT 1,
             modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             is_deleted INTEGER NOT NULL DEFAULT 0,
             desc TEXT NOT NULL DEFAULT ''
         )
     `);
+    const cols = await all(db, `PRAGMA table_info("user_platform_auth")`);
+    const hasChannelEnabled = cols.some((row) => String((row && row.name) || '').trim() === 'channel_enabled');
+    if (!hasChannelEnabled) {
+        await run(db, `ALTER TABLE user_platform_auth ADD COLUMN channel_enabled INTEGER NOT NULL DEFAULT 1`);
+    }
 }
 
 async function ensureUserPlatformAuthIndexes(db) {
@@ -462,23 +474,29 @@ async function upsertUserPlatformAuth(input = {}) {
     const db = openDatabase();
     try {
         const row = await get(db, `
-            SELECT id FROM user_platform_auth
+            SELECT id, channel_enabled FROM user_platform_auth
             WHERE user_id = ? AND platform = ? AND is_deleted = 0
             LIMIT 1
         `, [userId, platform]);
+        const channelEnabled = row
+            ? normalizeChannelEnabled(
+                input.channel_enabled === undefined ? row.channel_enabled : input.channel_enabled,
+                Number(row.channel_enabled) > 0
+            )
+            : normalizeChannelEnabled(input.channel_enabled, true);
 
         if (!row) {
             await run(db, `
                 INSERT INTO user_platform_auth
-                (user_id, platform, auth_type, auth_payload, auth_status, expire_at, modify_date, is_deleted, desc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
-            `, [userId, platform, authType, plainPayload, authStatus, expireAt, nowText(), desc]);
+                (user_id, platform, auth_type, auth_payload, auth_status, expire_at, channel_enabled, modify_date, is_deleted, desc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+            `, [userId, platform, authType, plainPayload, authStatus, expireAt, channelEnabled, nowText(), desc]);
         } else {
             await run(db, `
                 UPDATE user_platform_auth
-                SET auth_type = ?, auth_payload = ?, auth_status = ?, expire_at = ?, modify_date = ?, desc = ?
+                SET auth_type = ?, auth_payload = ?, auth_status = ?, expire_at = ?, channel_enabled = ?, modify_date = ?, desc = ?
                 WHERE id = ?
-            `, [authType, plainPayload, authStatus, expireAt, nowText(), desc, row.id]);
+            `, [authType, plainPayload, authStatus, expireAt, channelEnabled, nowText(), desc, row.id]);
         }
 
         const updated = await get(db, `
@@ -513,9 +531,43 @@ async function listUserPlatformAuth(userId, options = {}) {
 async function listValidPlatformsByUser(userId) {
     const rows = await listUserPlatformAuth(userId, { with_payload: false });
     return rows
+        .filter((r) => r.channel_enabled !== false)
         .filter((r) => r.auth_status === 'valid')
         .filter((r) => !isExpired(r.expire_at))
         .map((r) => r.platform);
+}
+
+async function setPlatformChannelEnabled(userId, platform, enabled, desc = '') {
+    await initUserPlatformAuthDb();
+    const uid = Number(userId || 0);
+    const pf = normalizePlatform(platform);
+    const enabledInt = normalizeChannelEnabled(enabled, true);
+    if (!uid) throw new Error('user_id 不合法');
+
+    const db = openDatabase();
+    try {
+        const row = await get(db, `
+            SELECT id
+            FROM user_platform_auth
+            WHERE user_id = ? AND platform = ? AND is_deleted = 0
+            LIMIT 1
+        `, [uid, pf]);
+        if (!row) throw new Error(`user_id=${uid} 缺少 ${pf} 授权`);
+        await run(db, `
+            UPDATE user_platform_auth
+            SET channel_enabled = ?, modify_date = ?, desc = ?
+            WHERE id = ?
+        `, [enabledInt, nowText(), String(desc || '').trim(), Number(row.id)]);
+        const updated = await get(db, `
+            SELECT *
+            FROM user_platform_auth
+            WHERE id = ?
+            LIMIT 1
+        `, [Number(row.id)]);
+        return rowToAuth(updated, { with_payload: false });
+    } finally {
+        db.close();
+    }
 }
 
 async function markPlatformAuthExpired(userId, platform, desc = '') {
@@ -545,12 +597,14 @@ module.exports = {
     upsertUserPlatformAuth,
     listUserPlatformAuth,
     listValidPlatformsByUser,
+    setPlatformChannelEnabled,
     markPlatformAuthExpired,
     _internal: {
         run,
         get,
         all,
         nowText,
+        normalizeChannelEnabled,
         parseStoredPayload,
         migrateAuthPayloadToPlaintext,
         migrateZuhaowangPayloadToYuanbaoOnly,

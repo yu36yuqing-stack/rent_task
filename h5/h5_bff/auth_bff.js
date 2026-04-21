@@ -4,6 +4,7 @@ const {
     listUserPlatformAuth
 } = require('../../database/user_platform_auth_db');
 const { upsertUhaozuAuthFromCurl } = require('../../user/platform_auth_import_service');
+const { togglePlatformChannelByUser } = require('../../user/platform_channel_service');
 
 const CHANNEL_CONFIG = [
     {
@@ -83,13 +84,16 @@ function toChannelView(rows = []) {
         }));
         const authStatus = row ? String(row.auth_status || '') : '';
         const hasAuth = Boolean(row) && authStatus === 'valid';
+        const channelEnabled = !row || row.channel_enabled !== false;
         return {
             platform: c.platform,
             name: c.name,
             mode: c.mode,
             authorized: hasAuth,
+            channel_enabled: channelEnabled,
             auth_status: authStatus || 'none',
             button_text: hasAuth ? '修改授权' : '新增授权',
+            toggle_text: channelEnabled ? '停用渠道' : '开启渠道',
             key_values
         };
     });
@@ -151,6 +155,17 @@ function createAuthBff(deps = {}) {
         return json(res, 200, { ok: true, data: row });
     }
 
+    async function handleTogglePlatformChannel(req, res) {
+        const user = await requireAuth(req);
+        const body = await readJsonBody(req);
+        const out = await togglePlatformChannelByUser(
+            user.id,
+            String(body.platform || '').trim(),
+            Boolean(body.channel_enabled)
+        );
+        return json(res, 200, { ok: true, data: out });
+    }
+
     async function init() {
         await initUserPlatformAuthDb();
     }
@@ -159,7 +174,8 @@ function createAuthBff(deps = {}) {
         init,
         handleGetPlatformAuthList,
         handleUpsertPlatformAuth,
-        handleUpsertPlatformAuthFromCurl
+        handleUpsertPlatformAuthFromCurl,
+        handleTogglePlatformChannel
     };
 }
 

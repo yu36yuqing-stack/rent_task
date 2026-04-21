@@ -252,6 +252,25 @@ async function removePlatformRestrict(userId, gameAccount, platform, desc = '') 
     }
 }
 
+async function removePlatformRestrictByUserAndPlatform(userId, platform, desc = '') {
+    await initUserPlatformRestrictDb();
+    const uid = Number(userId || 0);
+    const pf = normalizePlatform(platform);
+    if (!uid || !pf) return 0;
+
+    const db = openDatabase();
+    try {
+        const r = await run(db, `
+            UPDATE user_platform_restrict
+            SET is_deleted = 1, modify_date = ?, desc = ?
+            WHERE user_id = ? AND platform = ? AND is_deleted = 0
+        `, [nowText(), String(desc || '').trim(), uid, pf]);
+        return Number(r.changes || 0);
+    } finally {
+        db.close();
+    }
+}
+
 async function listPlatformRestrictByUserAndAccounts(userId, gameAccounts = []) {
     await initUserPlatformRestrictDb();
     const uid = Number(userId || 0);
@@ -293,5 +312,6 @@ module.exports = {
     initUserPlatformRestrictDb,
     upsertPlatformRestrict,
     removePlatformRestrict,
+    removePlatformRestrictByUserAndPlatform,
     listPlatformRestrictByUserAndAccounts
 };

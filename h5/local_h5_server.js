@@ -2289,6 +2289,7 @@ async function bootstrap() {
             if (req.method === 'GET' && urlObj.pathname === '/api/auth/platforms') return await authBff.handleGetPlatformAuthList(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/auth/platforms/upsert') return await authBff.handleUpsertPlatformAuth(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/auth/platforms/upsert-from-curl') return await authBff.handleUpsertPlatformAuthFromCurl(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/auth/platforms/toggle-channel') return await authBff.handleTogglePlatformChannel(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/board-cards') return await handleBoardCards(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/board-cards') return await handleBoardCreate(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/board-cards/mobile-slots') return await handleBoardCreateMobileSlot(req, res);

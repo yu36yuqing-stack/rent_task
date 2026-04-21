@@ -449,6 +449,7 @@ function startOrderSyncWorkerIfNeeded(options = {}) {
 
 function isAuthUsable(row = {}) {
     if (!row || typeof row !== 'object') return false;
+    if (row.channel_enabled === false) return false;
     if (String(row.auth_status || '') !== 'valid') return false;
     const exp = String(row.expire_at || '').trim();
     if (!exp) return true;
@@ -574,9 +575,9 @@ async function listAuthorizedOrderPlatforms(userId) {
 function listSuccessfulOrderPlatforms(syncResult = {}) {
     const out = [];
     const p = syncResult && typeof syncResult === 'object' ? syncResult : {};
-    if (p.uuzuhao && !p.uuzuhao.error) out.push(CHANNEL_UUZUHAO);
-    if (p.uhaozu && !p.uhaozu.error) out.push(CHANNEL_UHAOZU);
-    if (p.zuhaowang && !p.zuhaowang.error) out.push(CHANNEL_ZHW);
+    if (p.uuzuhao && !p.uuzuhao.error && !p.uuzuhao.skipped) out.push(CHANNEL_UUZUHAO);
+    if (p.uhaozu && !p.uhaozu.error && !p.uhaozu.skipped) out.push(CHANNEL_UHAOZU);
+    if (p.zuhaowang && !p.zuhaowang.error && !p.zuhaowang.skipped) out.push(CHANNEL_ZHW);
     return out;
 }
 
@@ -1384,7 +1385,9 @@ async function syncOrdersByUser(userId, options = {}) {
             compensateLookbackSec
         )
     };
+    const expectedPlatforms = await listAuthorizedOrderPlatforms(uid);
 
+    if (expectedPlatforms.includes(CHANNEL_UUZUHAO)) {
     try {
         result.platforms.uuzuhao = await syncUuzuhaoOrdersToDb(uid, uuzuhaoOptions);
         console.log(`[OrderSync] user_id=${uid} platform=uuzuhao done ${JSON.stringify({
@@ -1397,7 +1400,11 @@ async function syncOrdersByUser(userId, options = {}) {
         console.error(`[OrderSync] user_id=${uid} platform=uuzuhao error=${result.platforms.uuzuhao.error}`);
         result.ok = false;
     }
+    } else {
+        result.platforms.uuzuhao = { skipped: true, reason: 'channel_disabled_or_auth_missing' };
+    }
 
+    if (expectedPlatforms.includes(CHANNEL_UHAOZU)) {
     try {
         result.platforms.uhaozu = await syncUhaozuOrdersToDb(uid, uhaozuOptions);
         console.log(`[OrderSync] user_id=${uid} platform=uhaozu done ${JSON.stringify({
@@ -1410,7 +1417,11 @@ async function syncOrdersByUser(userId, options = {}) {
         console.error(`[OrderSync] user_id=${uid} platform=uhaozu error=${result.platforms.uhaozu.error}`);
         result.ok = false;
     }
+    } else {
+        result.platforms.uhaozu = { skipped: true, reason: 'channel_disabled_or_auth_missing' };
+    }
 
+    if (expectedPlatforms.includes(CHANNEL_ZHW)) {
     try {
         result.platforms.zuhaowang = await syncZuhaowangOrdersToDb(uid, zuhaowangOptions);
         console.log(`[OrderSync] user_id=${uid} platform=zuhaowang done ${JSON.stringify({
@@ -1423,8 +1434,10 @@ async function syncOrdersByUser(userId, options = {}) {
         console.error(`[OrderSync] user_id=${uid} platform=zuhaowang error=${result.platforms.zuhaowang.error}`);
         result.ok = false;
     }
+    } else {
+        result.platforms.zuhaowang = { skipped: true, reason: 'channel_disabled_or_auth_missing' };
+    }
 
-    const expectedPlatforms = await listAuthorizedOrderPlatforms(uid);
     const successPlatforms = listSuccessfulOrderPlatforms(result.platforms);
     const missingPlatforms = expectedPlatforms.filter((p) => !successPlatforms.includes(p));
     const canReconcileOrder3Off = expectedPlatforms.length > 0 && missingPlatforms.length === 0;

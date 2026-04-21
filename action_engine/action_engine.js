@@ -494,7 +494,8 @@ async function executeUserActionsIfNeeded({
     if (!actionEnabled) return { planned: 0, actions: [], errors: [] };
     if (!user || !user.id) throw new Error('user 缺失或不合法');
 
-    const authRows = await listUserPlatformAuth(user.id, { with_payload: true });
+    const authRows = (await listUserPlatformAuth(user.id, { with_payload: true }))
+        .filter((row) => row.channel_enabled !== false);
     const authMap = buildAuthMap(authRows);
     const { youpinData, uhaozuData, zhwData } = buildPlatformRowsFromUserAccounts(rows);
     const platformStatusNormMap = buildPlatformStatusNormMapByAccount(rows);

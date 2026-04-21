@@ -94,6 +94,7 @@ function buildPlatformPrdInfo(platform, row = {}) {
 
 function isAuthUsable(row = {}) {
     if (!row || typeof row !== 'object') return false;
+    if (row.channel_enabled === false) return false;
     if (String(row.auth_status || '') !== 'valid') return false;
     const exp = String(row.expire_at || '').trim();
     if (exp) {
@@ -156,7 +157,7 @@ function buildPlatformExpectedMap(rows = [], platform = '') {
     return out;
 }
 
-async function reconcileProductSyncAnomalies(userId, existingRows = [], pulledByPlatform = {}, errors = []) {
+async function reconcileProductSyncAnomalies(userId, existingRows = [], pulledByPlatform = {}, errors = [], enabledPlatforms = []) {
     const uid = Number(userId || 0);
     if (!uid) return [];
 
@@ -167,7 +168,14 @@ async function reconcileProductSyncAnomalies(userId, existingRows = [], pulledBy
             .filter((v) => v === PLATFORM_YYZ || v === PLATFORM_UHZ || v === PLATFORM_ZHW)
     );
 
+    const enabledSet = new Set((Array.isArray(enabledPlatforms) ? enabledPlatforms : []).map((x) => String(x || '').trim()).filter(Boolean));
     for (const platform of [PLATFORM_YYZ, PLATFORM_UHZ, PLATFORM_ZHW]) {
+        if (enabledSet.size > 0 && !enabledSet.has(platform)) {
+            await resolveOpenProductSyncAnomaly(uid, platform, {
+                desc: `resolved by disabled platform=${platform}`
+            });
+            continue;
+        }
         if (errorPlatforms.has(platform)) continue;
 
         const expectedMap = buildPlatformExpectedMap(existingRows, platform);
@@ -373,7 +381,20 @@ async function syncUserAccountsByAuth(userId) {
         .filter(isAuthUsable)
         .filter((r) => r && r.auth_payload && typeof r.auth_payload === 'object');
     if (validAuthRows.length === 0) {
-        throw new Error('当前用户没有可用的平台授权，请先 upsert 平台授权');
+        return {
+            ok: true,
+            skipped: true,
+            reason: 'no_enabled_platform_auth',
+            user_id: uid,
+            platforms: [],
+            pulled: {},
+            upserted: 0,
+            mirrored_by_orders: { mirrored: 0, skipped: 0 },
+            cleaned: 0,
+            anomalies: [],
+            order_cooldown_release: cooldownRelease,
+            errors: []
+        };
     }
     const validPlatforms = validAuthRows.map((r) => String(r.platform || '')).filter(Boolean);
 
@@ -432,7 +453,7 @@ async function syncUserAccountsByAuth(userId) {
 
     const mirroredByOrders = await ensureLinkedGameAccountsByOrders(uid);
     const currentRows = await listAllUserGameAccountsByUser(uid);
-    const anomalies = await reconcileProductSyncAnomalies(uid, currentRows, pulledRowsByPlatform, errors);
+    const anomalies = await reconcileProductSyncAnomalies(uid, currentRows, pulledRowsByPlatform, errors, validPlatforms);
 
     return {
         ok: errors.length === 0,

@@ -679,6 +679,37 @@ async function clearPlatformStatusForUser(userId, platform) {
     }
 }
 
+async function clearPlatformDataForUser(userId, platform) {
+    await initUserGameAccountDb();
+    const uid = Number(userId || 0);
+    const key = String(platform || '').trim();
+    if (!uid) throw new Error('user_id 不合法');
+    if (!PLATFORM_KEYS.has(key)) throw new Error(`platform 不支持: ${platform}`);
+
+    const db = openDatabase();
+    try {
+        const rows = await all(db, `SELECT id, channel_status, channel_prd_info FROM user_game_account WHERE user_id = ? AND is_deleted = 0`, [uid]);
+        for (const row of rows) {
+            let status = {};
+            let prdInfo = {};
+            try { status = JSON.parse(String(row.channel_status || '{}')) || {}; } catch { status = {}; }
+            try { prdInfo = JSON.parse(String(row.channel_prd_info || '{}')) || {}; } catch { prdInfo = {}; }
+            const hasStatus = key in status;
+            const hasPrdInfo = key in prdInfo;
+            if (!hasStatus && !hasPrdInfo) continue;
+            if (hasStatus) delete status[key];
+            if (hasPrdInfo) delete prdInfo[key];
+            await run(db, `
+                UPDATE user_game_account
+                SET channel_status = ?, channel_prd_info = ?, modify_date = ?
+                WHERE id = ?
+            `, [JSON.stringify(status), JSON.stringify(prdInfo), nowText(), Number(row.id)]);
+        }
+    } finally {
+        db.close();
+    }
+}
+
 async function softDeleteEmptyAccountsByUser(userId) {
     await initUserGameAccountDb();
     const uid = Number(userId || 0);
@@ -1230,6 +1261,7 @@ module.exports = {
     initUserGameAccountDb,
     upsertUserGameAccount,
     clearPlatformStatusForUser,
+    clearPlatformDataForUser,
     softDeleteEmptyAccountsByUser,
     listUserGameAccounts,
     listOwnersByGameAccounts,

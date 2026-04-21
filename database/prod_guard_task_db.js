@@ -338,6 +338,27 @@ async function updateGuardTaskStatus(taskId, patch = {}) {
     }
 }
 
+async function finishAliveGuardTasksByUser(userId, desc = '', options = {}) {
+    await initProdGuardTaskDb();
+    const uid = Number(userId || 0);
+    if (!uid) return 0;
+    const now = nowText();
+    const nextStatus = String(options.status || TASK_STATUS_DONE).trim() || TASK_STATUS_DONE;
+    const db = openDatabase();
+    try {
+        const ret = await run(db, `
+            UPDATE prod_guard_task
+            SET status = ?, finished_at = ?, modify_date = ?, desc = ?
+            WHERE user_id = ?
+              AND is_deleted = 0
+              AND status IN (?, ?)
+        `, [nextStatus, now, now, String(desc || '').trim(), uid, TASK_STATUS_PENDING, TASK_STATUS_WATCHING]);
+        return Number(ret.changes || 0);
+    } finally {
+        db.close();
+    }
+}
+
 async function listGuardTasksByUser(userId, options = {}) {
     await initProdGuardTaskDb();
     const uid = Number(userId || 0);
@@ -418,5 +439,6 @@ module.exports = {
     listDueGuardTasks,
     getGuardTaskByEventId,
     updateGuardTaskStatus,
+    finishAliveGuardTasksByUser,
     listGuardTasksByUser
 };

@@ -380,7 +380,7 @@ async function notifyUserByPayload(user, payload) {
     let authorizedPlatforms = ['uuzuhao', 'uhaozu', 'zuhaowang'];
     try {
         const authRows = await listUserPlatformAuth(Number((user && user.id) || 0), { with_payload: false });
-        const validRows = authRows.filter((r) => String(r.auth_status || '') === 'valid');
+        const validRows = authRows.filter((r) => r.channel_enabled !== false && String(r.auth_status || '') === 'valid');
         authorizedPlatforms = normalizeAuthorizedPlatforms(validRows.map((r) => String(r.platform || '')));
     } catch (_) {
         authorizedPlatforms = ['uuzuhao', 'uhaozu', 'zuhaowang'];

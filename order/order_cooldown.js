@@ -44,6 +44,7 @@ function normalizeOrderPlatform(platform) {
 
 function isAuthUsable(row = {}) {
     if (!row || typeof row !== 'object') return false;
+    if (row.channel_enabled === false) return false;
     if (String(row.auth_status || '') !== 'valid') return false;
     const exp = String(row.expire_at || '').trim();
     if (!exp) return true;

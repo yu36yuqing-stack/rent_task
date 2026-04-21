@@ -967,6 +967,16 @@
         if (state.token) headers.Authorization = `Bearer ${state.token}`;
         const fullPath = `${API_BASE}${path}`;
         const fetchOptions = Object.assign({}, options, { headers });
+        const contentType = String(headers['Content-Type'] || headers['content-type'] || '').toLowerCase();
+        if (contentType.includes('application/json')
+          && fetchOptions.body
+          && typeof fetchOptions.body === 'object'
+          && !(fetchOptions.body instanceof FormData)
+          && !(fetchOptions.body instanceof URLSearchParams)
+          && !ArrayBuffer.isView(fetchOptions.body)
+          && !(fetchOptions.body instanceof ArrayBuffer)) {
+          fetchOptions.body = JSON.stringify(fetchOptions.body);
+        }
         let res = await fetch(fullPath, fetchOptions);
         if (res.status === 401 && !triedRefresh && path !== '/api/login' && path !== '/api/refresh') {
           try {
@@ -978,7 +988,18 @@
           }
           const retryHeaders = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
           if (state.token) retryHeaders.Authorization = `Bearer ${state.token}`;
-          res = await fetch(fullPath, Object.assign({}, options, { headers: retryHeaders }));
+          const retryOptions = Object.assign({}, options, { headers: retryHeaders });
+          const retryContentType = String(retryHeaders['Content-Type'] || retryHeaders['content-type'] || '').toLowerCase();
+          if (retryContentType.includes('application/json')
+            && retryOptions.body
+            && typeof retryOptions.body === 'object'
+            && !(retryOptions.body instanceof FormData)
+            && !(retryOptions.body instanceof URLSearchParams)
+            && !ArrayBuffer.isView(retryOptions.body)
+            && !(retryOptions.body instanceof ArrayBuffer)) {
+            retryOptions.body = JSON.stringify(retryOptions.body);
+          }
+          res = await fetch(fullPath, retryOptions);
         }
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.ok === false) {
@@ -1216,8 +1237,10 @@
         const mode = String((c && c.mode) || '').trim() || '-';
         const platform = String((c && c.platform) || '').trim() || '';
         const authorized = Boolean(c && c.authorized);
-        const statusText = authorized ? '已授权' : '未授权';
+        const channelEnabled = !(c && c.channel_enabled === false);
+        const statusText = !channelEnabled ? '已停用' : (authorized ? '已授权' : '未授权');
         const actionText = String((c && c.button_text) || (authorized ? '修改授权' : '新增授权'));
+        const toggleText = String((c && c.toggle_text) || (channelEnabled ? '停用渠道' : '开启渠道'));
         const keyValues = Array.isArray(c && c.key_values) ? c.key_values : [];
         const keyHtml = keyValues.map((kv) => {
           const key = String((kv && kv.key) || '').trim();
@@ -1227,15 +1250,16 @@
         return `
           <div class="auth-channel-card">
             <div class="auth-channel-head">
-              <div>
+              <div class="auth-channel-head-main">
                 <p class="auth-channel-name">${name}</p>
                 <p class="auth-channel-mode">${mode}</p>
               </div>
-              <span class="auth-status ${authorized ? 'ok' : 'empty'}">${statusText}</span>
+              <span class="chip auth-status ${authorized ? 'ok' : 'empty'}">${statusText}</span>
             </div>
             <div class="auth-kv-list">${keyHtml}</div>
             <div class="auth-op-row">
-              <button class="btn btn-ghost auth-op-btn" data-op="auth-edit" data-platform="${platform}">${actionText}</button>
+              <button class="btn btn-ghost btn-card-action auth-op-btn" data-op="auth-edit" data-platform="${platform}">${actionText}</button>
+              <button class="btn btn-ghost btn-card-action auth-op-btn" data-op="auth-toggle" data-platform="${platform}" data-enabled="${channelEnabled ? '1' : '0'}">${toggleText}</button>
             </div>
           </div>
         `;
@@ -2010,13 +2034,35 @@
     });
     if (els.authChannelList) {
       els.authChannelList.addEventListener('click', (e) => {
-        const btn = e.target && e.target.closest ? e.target.closest('[data-op="auth-edit"]') : null;
+        const btn = e.target && e.target.closest ? e.target.closest('[data-op]') : null;
         if (!btn) return;
+        const op = String(btn.getAttribute('data-op') || '').trim();
         const platform = String(btn.getAttribute('data-platform') || '').trim();
         if (!platform) return;
         const channels = (state.authManage && Array.isArray(state.authManage.channels))
           ? state.authManage.channels
           : [];
+        if (op === 'auth-toggle') {
+          const enabled = String(btn.getAttribute('data-enabled') || '').trim() === '1';
+          const nextEnabled = !enabled;
+          const actionLabel = nextEnabled ? '开启渠道' : '停用渠道';
+          const confirmed = nextEnabled || window.confirm(`确认${actionLabel}？`);
+          if (!confirmed) return;
+          request('/api/auth/platforms/toggle-channel', {
+            method: 'POST',
+            body: {
+              platform,
+              channel_enabled: nextEnabled
+            }
+          }).then(() => loadAuthManage()).then(() => {
+            renderAuthView();
+            showToast(nextEnabled ? '渠道已开启' : '渠道已停用');
+          }).catch((err) => {
+            alert(err.message || `${actionLabel}失败`);
+          });
+          return;
+        }
+        if (op !== 'auth-edit') return;
         if (platform === 'uuzuhao') {
           const channel = channels.find((c) => String((c && c.platform) || '').trim() === 'uuzuhao') || { platform: 'uuzuhao', authorized: false };
           openAuthUuzuhaoSheet(channel);
