@@ -1409,48 +1409,57 @@
 
     #profileView.profile-view {
       display: grid;
-      gap: 12px;
+      gap: 10px;
     }
 
     #profileView .profile-card {
       border-radius: 14px;
-      padding: 12px;
+      padding: 10px 10px 9px;
       display: grid;
-      gap: 10px;
-      border: 1px solid #d9e4ef;
+      gap: 8px;
+      border: 1px solid var(--line);
       background: #ffffff;
+      box-shadow: 0 4px 12px rgba(24, 40, 63, 0.06);
     }
 
     #profileView .profile-head-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 8px;
+      gap: 6px;
+      margin-bottom: 2px;
+    }
+
+    #profileView .auth-title {
+      font-size: 15px;
+      color: #1a2f46;
+      line-height: 1.2;
     }
 
     #profileView .profile-threshold-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 8px;
+      gap: 6px;
     }
 
     #profileView .profile-threshold-row > label {
       margin: 0;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
-      color: #3e546d;
+      color: #75869a;
       white-space: nowrap;
     }
 
     #profileView .profile-threshold-input-wrap {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      border: 1px solid #d3dbe5;
+      gap: 5px;
+      border: 1px solid #dce6f0;
       border-radius: 10px;
-      padding: 6px 8px;
-      background: #ffffff;
+      min-height: 30px;
+      padding: 4px 8px;
+      background: #fafcff;
       box-sizing: border-box;
     }
 
@@ -1459,11 +1468,12 @@
       border: none;
       outline: none;
       padding: 0;
-      font-size: 14px;
+      font-size: 12px;
       font-weight: 600;
       text-align: center;
+      line-height: 1.1;
       background: transparent;
-      color: #1f3148;
+      color: #2a3a52;
     }
 
     #profileView .profile-threshold-input-wrap:focus-within {
@@ -1472,8 +1482,8 @@
     }
 
     #profileView .profile-threshold-unit {
-      font-size: 12px;
-      color: #607a94;
+      font-size: 11px;
+      color: #75869a;
       line-height: 1;
       white-space: nowrap;
     }
@@ -1498,13 +1508,30 @@
       margin-top: 0;
     }
 
+    #profileView .profile-field label {
+      margin-bottom: 5px;
+      font-size: 11px;
+      color: #75869a;
+    }
+
+    #profileView .profile-field input {
+      border-color: #dce6f0;
+      border-radius: 10px;
+      min-height: 30px;
+      padding: 4px 10px;
+      font-size: 12px;
+      line-height: 1.1;
+      background: #fafcff;
+      color: #2a3a52;
+    }
+
     #profileView .profile-select {
       width: 100%;
-      border: 1px solid #d3dbe5;
-      border-radius: 12px;
-      padding: 11px 12px;
-      font-size: 14px;
-      background: #fbfdff;
+      border: 1px solid #dce6f0;
+      border-radius: 10px;
+      padding: 9px 10px;
+      font-size: 13px;
+      background: #fafcff;
       outline: none;
       transition: border-color .2s ease, box-shadow .2s ease;
       appearance: none;
@@ -1519,19 +1546,46 @@
       display: flex;
       justify-content: flex-end;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
+      margin-top: 1px;
     }
 
     #profileView .profile-mode-inline {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 8px;
+      gap: 6px;
     }
 
     #profileView .profile-mode-inline .mode-option-row {
-      min-height: 34px;
-      padding: 7px 8px;
+      min-height: 32px;
+      padding: 6px 8px;
       justify-content: center;
+    }
+
+    #profileView .mode-options {
+      gap: 6px;
+    }
+
+    #profileView .mode-option-row {
+      border-color: #dce6f0;
+      border-radius: 10px;
+      background: #fafcff;
+      padding: 7px 9px;
+      min-height: 34px;
+    }
+
+    #profileView .mode-name {
+      font-size: 12px;
+      color: #2f4862;
+    }
+
+    #profileView .mode-tip-inline {
+      font-size: 11px;
+      color: #75869a;
+    }
+
+    #profileView .profile-action-btn {
+      min-width: 88px;
     }
 
     #pricingView.orders-view {

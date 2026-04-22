@@ -324,7 +324,8 @@
         query_status: '',
         query_text: ''
       },
-      moreOpsSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false },
+      moreOpsSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '' },
+      accountOrderOffSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, threshold: '', mode: ORDER_OFF_MODE_NATURAL_DAY, global_threshold: 3, global_mode: ORDER_OFF_MODE_NATURAL_DAY, loading: false, result_text: '', result_type: '' },
       activeActionSheet: '',
       purchaseSheet: {
         open: false,
@@ -572,11 +573,23 @@
       moreOpsSheet: document.getElementById('moreOpsSheet'),
       moreOpsSheetTitle: document.getElementById('moreOpsSheetTitle'),
       moreOpsForbiddenBtn: document.getElementById('moreOpsForbiddenBtn'),
+      moreOpsOrderOffBtn: document.getElementById('moreOpsOrderOffBtn'),
       moreOpsProdGuardBtn: document.getElementById('moreOpsProdGuardBtn'),
       moreOpsMaintenanceBtn: document.getElementById('moreOpsMaintenanceBtn'),
       moreOpsPurchaseBtn: document.getElementById('moreOpsPurchaseBtn'),
       moreOpsCostBtn: document.getElementById('moreOpsCostBtn'),
       moreOpsCloseBtn: document.getElementById('moreOpsCloseBtn'),
+      accountOrderOffSheet: document.getElementById('accountOrderOffSheet'),
+      accountOrderOffSheetTitle: document.getElementById('accountOrderOffSheetTitle'),
+      accountOrderOffSheetResult: document.getElementById('accountOrderOffSheetResult'),
+      accountOrderOffFollowGlobal: document.getElementById('accountOrderOffFollowGlobal'),
+      accountOrderOffFollowTip: document.getElementById('accountOrderOffFollowTip'),
+      accountOrderOffCustom: document.getElementById('accountOrderOffCustom'),
+      accountOrderOffThresholdInput: document.getElementById('accountOrderOffThresholdInput'),
+      accountOrderOffModeNatural: document.getElementById('accountOrderOffModeNatural'),
+      accountOrderOffModeRolling: document.getElementById('accountOrderOffModeRolling'),
+      accountOrderOffSaveBtn: document.getElementById('accountOrderOffSaveBtn'),
+      accountOrderOffCancelBtn: document.getElementById('accountOrderOffCancelBtn'),
       purchaseSheet: document.getElementById('purchaseSheet'),
       purchaseSheetTitle: document.getElementById('purchaseSheetTitle'),
       purchaseSheetResult: document.getElementById('purchaseSheetResult'),
@@ -1326,6 +1339,7 @@
         if (showProfile) renderProfileViewSafe();
         renderDrawer();
         renderMoreOpsSheet();
+        if (typeof renderAccountOrderOffSheet === 'function') renderAccountOrderOffSheet();
         renderForbiddenSheet();
         renderPurchaseSheet();
         renderAuthUuzuhaoSheet();
@@ -1519,7 +1533,8 @@
         query_status: '',
         query_text: ''
       };
-      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '' };
+      state.accountOrderOffSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, threshold: '', mode: ORDER_OFF_MODE_NATURAL_DAY, global_threshold: 3, global_mode: ORDER_OFF_MODE_NATURAL_DAY, loading: false, result_text: '', result_type: '' };
       state.activeActionSheet = '';
       state.pricing = {
         loading: false,
@@ -1916,6 +1931,13 @@
       closeMoreOpsSheet();
       openForbiddenSheet(item);
     });
+    if (els.moreOpsOrderOffBtn) {
+      els.moreOpsOrderOffBtn.addEventListener('click', () => {
+        const item = findCurrentProductItem();
+        if (!item) return;
+        openAccountOrderOffSheet(item);
+      });
+    }
     if (els.moreOpsProdGuardBtn) {
       els.moreOpsProdGuardBtn.addEventListener('click', () => {
         const item = findCurrentProductItem();
@@ -1948,6 +1970,31 @@
     els.moreOpsSheet.addEventListener('click', (e) => {
       if (e.target === els.moreOpsSheet) closeMoreOpsSheet();
     });
+    if (els.accountOrderOffFollowGlobal) {
+      els.accountOrderOffFollowGlobal.addEventListener('click', () => setAccountOrderOffSheetFollowGlobal(true));
+    }
+    if (els.accountOrderOffCustom) {
+      els.accountOrderOffCustom.addEventListener('click', () => setAccountOrderOffSheetFollowGlobal(false));
+    }
+    if (els.accountOrderOffModeNatural) {
+      els.accountOrderOffModeNatural.addEventListener('click', () => setAccountOrderOffSheetMode(ORDER_OFF_MODE_NATURAL_DAY));
+    }
+    if (els.accountOrderOffModeRolling) {
+      els.accountOrderOffModeRolling.addEventListener('click', () => setAccountOrderOffSheetMode(ORDER_OFF_MODE_ROLLING_24H));
+    }
+    if (els.accountOrderOffSaveBtn) {
+      els.accountOrderOffSaveBtn.addEventListener('click', () => {
+        void submitAccountOrderOffConfig();
+      });
+    }
+    if (els.accountOrderOffCancelBtn) {
+      els.accountOrderOffCancelBtn.addEventListener('click', () => closeAccountOrderOffSheet());
+    }
+    if (els.accountOrderOffSheet) {
+      els.accountOrderOffSheet.addEventListener('click', (e) => {
+        if (e.target === els.accountOrderOffSheet) closeAccountOrderOffSheet();
+      });
+    }
     els.purchaseSaveBtn.addEventListener('click', () => submitPurchaseConfig());
     els.purchaseCancelBtn.addEventListener('click', () => closePurchaseSheet());
     els.purchaseSheet.addEventListener('click', (e) => {
@@ -2107,6 +2154,7 @@
         state.pullRefresh.loading ||
         state.drawerOpen ||
         (state.moreOpsSheet && state.moreOpsSheet.open) ||
+        (state.accountOrderOffSheet && state.accountOrderOffSheet.open) ||
         (state.forbiddenSheet && state.forbiddenSheet.open) ||
         (state.purchaseSheet && state.purchaseSheet.open) ||
         (state.costSheet && state.costSheet.open) ||

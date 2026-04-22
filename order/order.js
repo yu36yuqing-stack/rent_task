@@ -37,6 +37,7 @@ const { listAllUserGameAccountsByUser } = require('../product/product');
 const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('../database/user_db');
 const { openOrderDatabase } = require('../database/sqlite_client');
 const { normalizeZuhaowangAuthPayload } = require('../user/user');
+const { normalizeAccountSwitch } = require('../database/user_game_account_db');
 const {
     CHANNEL_UUZUHAO,
     UUZUHAO_ORDER_FIELD_MAPPING,
@@ -104,6 +105,27 @@ async function getOrderOffConfigByUser(userId) {
     return {
         threshold: normalizeOrderOffThreshold(rawThreshold, ORDER_3_OFF_THRESHOLD),
         mode: normalizeOrderOffMode(rawMode, ORDER_OFF_MODE_NATURAL_DAY)
+    };
+}
+
+function resolveOrderOffConfigByAccount(accountSwitchRaw, globalCfg = {}) {
+    const fallbackThreshold = normalizeOrderOffThreshold(globalCfg.threshold, ORDER_3_OFF_THRESHOLD);
+    const fallbackMode = normalizeOrderOffMode(globalCfg.mode, ORDER_OFF_MODE_NATURAL_DAY);
+    const accountSwitch = normalizeAccountSwitch(accountSwitchRaw);
+    const accountCfg = accountSwitch.order_n_off && typeof accountSwitch.order_n_off === 'object'
+        ? accountSwitch.order_n_off
+        : null;
+    if (!accountCfg) {
+        return {
+            threshold: fallbackThreshold,
+            mode: fallbackMode,
+            source: 'global'
+        };
+    }
+    return {
+        threshold: normalizeOrderOffThreshold(accountCfg.threshold, fallbackThreshold),
+        mode: normalizeOrderOffMode(accountCfg.mode, fallbackMode),
+        source: 'account'
     };
 }
 
@@ -775,6 +797,7 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     const rows = await listAllUserGameAccountsByUser(uid);
     const accountToRemark = new Map();
     const allAccounts = [];
+    const accountConfigMap = new Map();
     for (const row of rows) {
         const acc = String(row.game_account || '').trim();
         if (!acc) continue;
@@ -782,44 +805,67 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
         const key = `${gid}::${acc}`;
         const remark = String(row.account_remark || '').trim();
         if (!accountToRemark.has(key)) accountToRemark.set(key, remark);
+        accountConfigMap.set(key, resolveOrderOffConfigByAccount(row.switch, orderOffCfg));
         allAccounts.push({
             game_account: acc,
             game_id: gid,
             game_name: String(row.game_name || 'WZRY').trim() || 'WZRY'
         });
     }
-    const todayPaidCounts = allAccounts.length > 0
-        ? await listPaidCountByAccounts(uid, allAccounts, { mode: orderOffMode })
-        : {};
+    const modeSet = new Set();
+    for (const cfg of accountConfigMap.values()) {
+        modeSet.add(normalizeOrderOffMode(cfg.mode, ORDER_OFF_MODE_NATURAL_DAY));
+    }
+    const countMaps = {};
+    for (const mode of modeSet) {
+        countMaps[mode] = allAccounts.length > 0
+            ? await listPaidCountByAccounts(uid, allAccounts, { mode })
+            : {};
+    }
     const countDetails = allAccounts
         .map((one) => {
             const key = `${one.game_id}::${one.game_account}`;
+            const cfg = accountConfigMap.get(key);
+            const modeKey = normalizeOrderOffMode(cfg.mode, ORDER_OFF_MODE_NATURAL_DAY);
             return {
                 game_account: one.game_account,
                 game_id: one.game_id,
                 game_name: one.game_name,
-                count: Number(todayPaidCounts[key] || 0)
+                count: Number((((countMaps[modeKey] || {})[key]) || 0)),
+                threshold: normalizeOrderOffThreshold(cfg.threshold, orderOffThreshold),
+                mode: modeKey,
+                config_source: String(cfg.source || 'global')
             };
         })
         .sort((a, b) => b.count - a.count || `${a.game_id}::${a.game_account}`.localeCompare(`${b.game_id}::${b.game_account}`));
 
     const targetSet = new Set();
+    const reasonByTarget = new Map();
     if (order3OffEnabled) {
         for (const one of allAccounts) {
             const key = `${one.game_id}::${one.game_account}`;
-            const c = Number(todayPaidCounts[key] || 0);
-            if (c >= orderOffThreshold) targetSet.add(key);
+            const cfg = accountConfigMap.get(key);
+            const modeKey = normalizeOrderOffMode(cfg.mode, ORDER_OFF_MODE_NATURAL_DAY);
+            const threshold = normalizeOrderOffThreshold(cfg.threshold, orderOffThreshold);
+            const c = Number((((countMaps[modeKey] || {})[key]) || 0));
+            if (c >= threshold) {
+                targetSet.add(key);
+                reasonByTarget.set(key, buildOrderOffReasonByThreshold(threshold));
+            }
         }
     }
 
     const blockRecoverRule = await loadOrder3OffBlockRecoverRule(uid);
     const current = await listUserBlacklistByUserWithMeta(uid);
-    const currentSet = new Set(
-        current
-            .filter((x) => isOrderOffReason(x.reason))
-            .map((x) => `${String(x.game_id || '1').trim() || '1'}::${String(x.game_account || '').trim()}`)
-            .filter(Boolean)
-    );
+    const currentReasonMap = new Map();
+    const currentSet = new Set();
+    for (const x of current) {
+        if (!isOrderOffReason(x.reason)) continue;
+        const key = `${String(x.game_id || '1').trim() || '1'}::${String(x.game_account || '').trim()}`;
+        if (!key) continue;
+        currentSet.add(key);
+        if (!currentReasonMap.has(key)) currentReasonMap.set(key, String(x.reason || '').trim());
+    }
 
     const toAdd = [];
     const toDelete = [];
@@ -836,7 +882,7 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
         toDelete.push(acc);
     }
 
-    console.log(`[Order3Off] user_id=${uid} enabled=${order3OffEnabled} total_accounts=${allAccounts.length} threshold=${orderOffThreshold} mode=${orderOffMode}`);
+    console.log(`[Order3Off] user_id=${uid} enabled=${order3OffEnabled} total_accounts=${allAccounts.length} global_threshold=${orderOffThreshold} global_mode=${orderOffMode}`);
     console.log(`[Order3Off] count_details=${JSON.stringify(countDetails)}`);
     console.log(`[Order3Off] current=${JSON.stringify(Array.from(currentSet))} target=${JSON.stringify(Array.from(targetSet))}`);
     console.log(`[Order3Off] to_add=${JSON.stringify(toAdd)} to_delete=${JSON.stringify(toDelete)} blocked_delete=${JSON.stringify(toDeleteBlocked)}`);
@@ -846,15 +892,18 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     for (const acc of toAdd) {
         const [gameId, gameAccount] = String(acc).split('::');
         const one = allAccounts.find((x) => `${x.game_id}::${x.game_account}` === acc) || { game_id: gameId, game_account: gameAccount, game_name: 'WZRY' };
+        const cfg = accountConfigMap.get(acc);
+        const hitReason = String(reasonByTarget.get(acc) || buildOrderOffReasonByThreshold(cfg.threshold || orderOffThreshold)).trim();
         await upsertSourceAndReconcile(uid, one, 'order_n_off', {
             active: true,
-            reason: orderOffReason,
+            reason: hitReason,
             detail: {
                 game_account: gameAccount,
                 game_id: gameId,
                 remark: accountToRemark.get(acc) || '',
-                threshold: orderOffThreshold,
-                mode: orderOffMode
+                threshold: normalizeOrderOffThreshold(cfg.threshold, orderOffThreshold),
+                mode: normalizeOrderOffMode(cfg.mode, orderOffMode),
+                config_source: String(cfg.source || 'global')
             }
         }, {
             source: ORDER_3_OFF_SOURCE,
@@ -865,14 +914,21 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     }
     for (const acc of toDelete) {
         const [gameId, gameAccount] = String(acc).split('::');
+        const cfg = accountConfigMap.get(acc) || {
+            threshold: orderOffThreshold,
+            mode: orderOffMode,
+            source: 'global'
+        };
+        const clearReason = String(currentReasonMap.get(acc) || buildOrderOffReasonByThreshold(cfg.threshold || orderOffThreshold)).trim();
         await upsertSourceAndReconcile(uid, { game_id: gameId, game_name: 'WZRY', game_account: gameAccount }, 'order_n_off', {
             active: false,
-            reason: orderOffReason,
+            reason: clearReason,
             detail: {
                 game_account: gameAccount,
                 game_id: gameId,
-                threshold: orderOffThreshold,
-                mode: orderOffMode
+                threshold: normalizeOrderOffThreshold(cfg.threshold, orderOffThreshold),
+                mode: normalizeOrderOffMode(cfg.mode, orderOffMode),
+                config_source: String(cfg.source || 'global')
             }
         }, {
             source: ORDER_3_OFF_SOURCE,

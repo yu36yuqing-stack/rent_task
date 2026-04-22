@@ -12,7 +12,7 @@ SSH_PASS="12345"
 COMMIT_MSG="${MERGE_COMMIT_MSG:-chore: sync from local $(date '+%Y-%m-%d %H:%M:%S')}"
 
 echo "[Step 1/5] rsync 回传宿主机（排除本地DB和运行日志）..."
-RSYNC_CMD="rsync -az --delete --exclude '.git' --exclude 'node_modules' --exclude '.DS_Store' --exclude '*.db' --exclude 'log/' --exclude 'coverage/' --exclude '*.log' -e 'ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new' '${SRC_DIR}' '${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}'"
+RSYNC_CMD="rsync -az --delete --exclude '.git' --exclude 'node_modules' --exclude '.DS_Store' --exclude '*.db' --exclude 'database/rent_robot_runtime.db*' --exclude 'log/' --exclude 'coverage/' --exclude '*.log' -e 'ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new' '${SRC_DIR}' '${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}'"
 /usr/bin/expect <<EOF
 set timeout -1
 spawn bash -lc "$RSYNC_CMD"
@@ -30,7 +30,7 @@ EOF
 echo "[OK] 回传完成"
 
 echo "[Step 2/5] 宿主机提交并推送 GitHub..."
-REMOTE_GIT_CMD="cd '${REMOTE_DIR}' && git add -A -- . ':(exclude)database/*.db' ':(exclude)database/*.db-journal' ':(exclude)database/*.db-wal' ':(exclude)database/*.db-shm' ':(exclude)*.log' && if git diff --cached --quiet; then echo '\\[INFO\\] no changes to commit'; else git commit -m '${COMMIT_MSG}'; fi && git push origin ${REMOTE_BRANCH}"
+REMOTE_GIT_CMD="cd '${REMOTE_DIR}' && git add -A -- . ':(exclude)database/*.db' ':(exclude)database/*.db-journal' ':(exclude)database/*.db-wal' ':(exclude)database/*.db-shm' ':(exclude)database/rent_robot_runtime.db*' ':(exclude)*.log' && if git diff --cached --quiet; then echo '\\[INFO\\] no changes to commit'; else git commit -m '${COMMIT_MSG}'; fi && git push origin ${REMOTE_BRANCH}"
 /usr/bin/expect <<EOF
 set timeout -1
 spawn ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new ${REMOTE_USER}@${REMOTE_HOST} "${REMOTE_GIT_CMD}"

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Rent Task H5</title>
-  <link rel="stylesheet" href="/css/app.css?v=20260329b">
+  <link rel="stylesheet" href="/css/app.css?v=20260421a">
 </head>
 <body>
   <div class="wrap">
@@ -235,7 +235,7 @@
           <input id="profileAtMobiles" placeholder="例如 11 位手机号，多个用逗号分隔">
         </div>
         <div class="profile-actions">
-          <button id="profileNotifySaveBtn" class="btn btn-ghost">保存通知设置</button>
+          <button id="profileNotifySaveBtn" class="btn btn-ghost btn-card-action profile-action-btn">保存通知设置</button>
         </div>
       </div>
 
@@ -265,7 +265,7 @@
           </div>
         </div>
         <div class="profile-actions">
-          <button id="profileOrderOffSaveBtn" class="btn btn-ghost">保存X单下架参数</button>
+          <button id="profileOrderOffSaveBtn" class="btn btn-ghost btn-card-action profile-action-btn">保存X单下架参数</button>
         </div>
       </div>
 
@@ -281,7 +281,7 @@
           </div>
         </div>
         <div class="profile-actions">
-          <button id="profileCooldownSaveBtn" class="btn btn-ghost">保存冷却期参数</button>
+          <button id="profileCooldownSaveBtn" class="btn btn-ghost btn-card-action profile-action-btn">保存冷却期参数</button>
         </div>
       </div>
     </section>
@@ -372,6 +372,7 @@
       </div>
       <div class="sheet-actions">
         <button id="moreOpsForbiddenBtn" class="sheet-btn warn">处理禁玩</button>
+        <button id="moreOpsOrderOffBtn" class="sheet-btn">X单下架</button>
         <button id="moreOpsProdGuardBtn" class="sheet-btn">关闭在线风控</button>
         <button id="moreOpsMaintenanceBtn" class="sheet-btn">开启维护</button>
         <button id="moreOpsPurchaseBtn" class="sheet-btn">维护采购</button>
@@ -497,6 +498,52 @@
       <div class="sheet-actions">
         <button id="orderOffThresholdSaveBtn" class="sheet-btn">保存</button>
         <button id="orderOffThresholdCancelBtn" class="sheet-btn">关闭弹窗</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="accountOrderOffSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon">阈</span>
+          <div id="accountOrderOffSheetTitle" class="sheet-title">商品级X单下架配置</div>
+        </div>
+        <div id="accountOrderOffSheetResult" class="sheet-result"></div>
+      </div>
+      <div class="field" style="margin-top:0;">
+        <label>生效方式</label>
+        <div class="mode-options">
+          <button id="accountOrderOffFollowGlobal" type="button" class="mode-option-row active" data-source="global">
+            <span class="mode-name">跟随全局</span>
+            <span id="accountOrderOffFollowTip" class="mode-tip-inline">默认使用全局配置</span>
+          </button>
+          <button id="accountOrderOffCustom" type="button" class="mode-option-row" data-source="account">
+            <span class="mode-name">单独设置</span>
+            <span class="mode-tip-inline">为当前商品覆盖全局阈值</span>
+          </button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="accountOrderOffThresholdInput">X单下架阈值（1~10）</label>
+        <input id="accountOrderOffThresholdInput" type="number" step="1" min="1" max="10" inputmode="numeric" placeholder="请输入 1~10">
+      </div>
+      <div class="field">
+        <label>下架统计模式</label>
+        <div class="mode-options">
+          <button id="accountOrderOffModeNatural" type="button" class="mode-option-row active" data-mode="natural_day">
+            <span class="mode-name">自然日</span>
+            <span class="mode-tip-inline">每天 06:00 ~ 次日 06:00</span>
+          </button>
+          <button id="accountOrderOffModeRolling" type="button" class="mode-option-row" data-mode="rolling_24h">
+            <span class="mode-name">滑动窗口</span>
+            <span class="mode-tip-inline">当前时刻往前 24 小时</span>
+          </button>
+        </div>
+      </div>
+      <div class="sheet-actions">
+        <button id="accountOrderOffSaveBtn" class="sheet-btn">保存</button>
+        <button id="accountOrderOffCancelBtn" class="sheet-btn">关闭弹窗</button>
       </div>
     </div>
   </div>
@@ -696,9 +743,9 @@
       <span>加载中...</span>
     </div>
   </div>
-  <script defer src="/js/app_core.js?v=20260405b"></script>
+  <script defer src="/js/app_core.js?v=20260422a"></script>
   <script defer src="/js/menu_user.js?v=20260303a"></script>
-  <script defer src="/js/menu_products.js?v=20260329b"></script>
+  <script defer src="/js/menu_products.js?v=20260422a"></script>
   <script defer src="/js/menu_orders.js?v=20260303a"></script>
   <script defer src="/js/menu_risk.js?v=20260303a"></script>
   <script defer src="/js/menu_stats.js?v=20260329b"></script>

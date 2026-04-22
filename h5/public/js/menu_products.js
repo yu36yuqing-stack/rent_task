@@ -82,6 +82,14 @@
       return String(reasonText || '').trim() === '维护中';
     }
 
+    function buildOrderOffSummaryText(source, threshold, mode) {
+      const t = Number(threshold || 0);
+      const safeThreshold = Number.isFinite(t) && t > 0 ? Math.floor(t) : 3;
+      const safeMode = normalizeOrderOffMode(mode, ORDER_OFF_MODE_NATURAL_DAY);
+      const shortMode = safeMode === ORDER_OFF_MODE_ROLLING_24H ? '滑动' : '自然';
+      return `${source === 'account' ? '商品级' : '全局'} · ${safeThreshold}单 / ${shortMode}`;
+    }
+
     function productIdentityKey(input, fallbackGameId = '1') {
       if (!input || typeof input !== 'object') {
         const acc = String(input || '').trim();
@@ -500,8 +508,13 @@
       const maintenanceEnabled = Boolean(state.moreOpsSheet.maintenance_enabled);
       const prodGuardLoading = Boolean(state.moreOpsSheet.prod_guard_loading);
       const prodGuardEnabled = state.moreOpsSheet.prod_guard_enabled === undefined ? true : Boolean(state.moreOpsSheet.prod_guard_enabled);
+      const orderOffSummary = String(state.moreOpsSheet.order_off_summary || '').trim() || 'X单下架';
       els.moreOpsSheetTitle.textContent = `更多操作 · ${name || '当前账号'}`;
       els.moreOpsForbiddenBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+      if (els.moreOpsOrderOffBtn) {
+        els.moreOpsOrderOffBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+        els.moreOpsOrderOffBtn.textContent = orderOffSummary;
+      }
       if (els.moreOpsProdGuardBtn) {
         els.moreOpsProdGuardBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
         els.moreOpsProdGuardBtn.textContent = prodGuardLoading
@@ -522,9 +535,62 @@
       els.moreOpsForbiddenBtn.textContent = handling ? '处理中...' : '处理禁玩';
     }
 
+    function renderAccountOrderOffSheet() {
+      const opened = Boolean(state.accountOrderOffSheet && state.accountOrderOffSheet.open);
+      if (!els.accountOrderOffSheet) return;
+      els.accountOrderOffSheet.classList.toggle('hidden', !opened);
+      if (!opened) return;
+      const sheet = state.accountOrderOffSheet || {};
+      const name = String(sheet.role_name || sheet.account || '').trim();
+      const loading = Boolean(sheet.loading);
+      const followGlobal = Boolean(sheet.follow_global);
+      const mode = normalizeOrderOffMode(sheet.mode, ORDER_OFF_MODE_NATURAL_DAY);
+      const globalMode = normalizeOrderOffMode(sheet.global_mode, ORDER_OFF_MODE_NATURAL_DAY);
+      const globalThreshold = Number(sheet.global_threshold || 3) || 3;
+      if (els.accountOrderOffSheetTitle) {
+        els.accountOrderOffSheetTitle.textContent = `X单下架配置 · ${name || '当前账号'}`;
+      }
+      if (els.accountOrderOffSheetResult) {
+        const resultText = String(sheet.result_text || '').trim();
+        const resultType = String(sheet.result_type || '').trim();
+        els.accountOrderOffSheetResult.className = `sheet-result ${resultType}`;
+        els.accountOrderOffSheetResult.textContent = resultText;
+      }
+      if (els.accountOrderOffFollowTip) {
+        els.accountOrderOffFollowTip.textContent = `${globalThreshold}单 / ${orderOffModeLabel(globalMode)}`;
+      }
+      if (els.accountOrderOffFollowGlobal) {
+        els.accountOrderOffFollowGlobal.classList.toggle('active', followGlobal);
+        els.accountOrderOffFollowGlobal.disabled = loading;
+      }
+      if (els.accountOrderOffCustom) {
+        els.accountOrderOffCustom.classList.toggle('active', !followGlobal);
+        els.accountOrderOffCustom.disabled = loading;
+      }
+      if (els.accountOrderOffThresholdInput) {
+        els.accountOrderOffThresholdInput.value = String(sheet.threshold || '');
+        els.accountOrderOffThresholdInput.disabled = loading || followGlobal;
+      }
+      if (els.accountOrderOffModeNatural) {
+        els.accountOrderOffModeNatural.classList.toggle('active', mode === ORDER_OFF_MODE_NATURAL_DAY);
+        els.accountOrderOffModeNatural.disabled = loading || followGlobal;
+      }
+      if (els.accountOrderOffModeRolling) {
+        els.accountOrderOffModeRolling.classList.toggle('active', mode === ORDER_OFF_MODE_ROLLING_24H);
+        els.accountOrderOffModeRolling.disabled = loading || followGlobal;
+      }
+      if (els.accountOrderOffSaveBtn) {
+        els.accountOrderOffSaveBtn.disabled = loading;
+      }
+      if (els.accountOrderOffCancelBtn) {
+        els.accountOrderOffCancelBtn.disabled = loading;
+      }
+    }
+
     function closeActionSheets() {
       state.activeActionSheet = '';
-      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '' };
+      state.accountOrderOffSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, threshold: '', mode: ORDER_OFF_MODE_NATURAL_DAY, global_threshold: 3, global_mode: ORDER_OFF_MODE_NATURAL_DAY, loading: false, result_text: '', result_type: '' };
       state.forbiddenSheet = {
         open: false,
         account: '',
@@ -539,13 +605,14 @@
         query_text: ''
       };
       renderMoreOpsSheet();
+      renderAccountOrderOffSheet();
       renderForbiddenSheet();
     }
 
     function openForbiddenSheet(item) {
       const account = String(item && item.game_account || '').trim();
       if (!account) return;
-      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '' };
       state.activeActionSheet = 'forbidden';
       renderMoreOpsSheet();
       state.forbiddenSheet = {
@@ -610,7 +677,8 @@
         maintenance_enabled: Boolean(item && item.blacklisted && isMaintenanceReason(item.blacklist_reason)),
         maintenance_loading: false,
         prod_guard_enabled: item && item.prod_guard_enabled === undefined ? true : Boolean(item && item.prod_guard_enabled),
-        prod_guard_loading: false
+        prod_guard_loading: false,
+        order_off_summary: buildOrderOffSummaryText(item && item.order_off_config_source, item && item.order_off_threshold, item && item.order_off_mode)
       };
       renderForbiddenSheet();
       renderMoreOpsSheet();
@@ -618,8 +686,116 @@
 
     function closeMoreOpsSheet() {
       if (state.activeActionSheet === 'more') state.activeActionSheet = '';
-      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '' };
       renderMoreOpsSheet();
+    }
+
+    function openAccountOrderOffSheet(item) {
+      const account = String(item && item.game_account || '').trim();
+      if (!account) return;
+      const globalThreshold = Number(state.userRules.order_off_threshold || 3) || 3;
+      const globalMode = normalizeOrderOffMode(state.userRules.order_off_mode, ORDER_OFF_MODE_NATURAL_DAY);
+      const source = String(item && item.order_off_config_source || 'global').trim() || 'global';
+      const followGlobal = source !== 'account';
+      state.accountOrderOffSheet = {
+        open: true,
+        account,
+        game_id: String(item && item.game_id || '1').trim() || '1',
+        game_name: String(item && item.game_name || 'WZRY').trim() || 'WZRY',
+        role_name: String(item && (item.role_name || item.game_account) || '').trim(),
+        follow_global: followGlobal,
+        threshold: String(item && item.order_off_threshold || globalThreshold),
+        mode: normalizeOrderOffMode(item && item.order_off_mode, globalMode),
+        global_threshold: globalThreshold,
+        global_mode: globalMode,
+        loading: false,
+        result_text: '',
+        result_type: ''
+      };
+      closeMoreOpsSheet();
+      renderAccountOrderOffSheet();
+    }
+
+    function closeAccountOrderOffSheet() {
+      state.accountOrderOffSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, threshold: '', mode: ORDER_OFF_MODE_NATURAL_DAY, global_threshold: 3, global_mode: ORDER_OFF_MODE_NATURAL_DAY, loading: false, result_text: '', result_type: '' };
+      renderAccountOrderOffSheet();
+    }
+
+    function setAccountOrderOffSheetFollowGlobal(followGlobal) {
+      state.accountOrderOffSheet.follow_global = Boolean(followGlobal);
+      state.accountOrderOffSheet.result_text = '';
+      state.accountOrderOffSheet.result_type = '';
+      if (state.accountOrderOffSheet.follow_global) {
+        state.accountOrderOffSheet.threshold = String(state.accountOrderOffSheet.global_threshold || 3);
+        state.accountOrderOffSheet.mode = normalizeOrderOffMode(state.accountOrderOffSheet.global_mode, ORDER_OFF_MODE_NATURAL_DAY);
+      }
+      renderAccountOrderOffSheet();
+    }
+
+    function setAccountOrderOffSheetMode(mode) {
+      state.accountOrderOffSheet.mode = normalizeOrderOffMode(mode, ORDER_OFF_MODE_NATURAL_DAY);
+      renderAccountOrderOffSheet();
+    }
+
+    async function submitAccountOrderOffConfig() {
+      const sheet = state.accountOrderOffSheet || {};
+      const account = String(sheet.account || '').trim();
+      const gameId = String(sheet.game_id || '1').trim() || '1';
+      const gameName = String(sheet.game_name || 'WZRY').trim() || 'WZRY';
+      if (!account) return;
+      const followGlobal = Boolean(sheet.follow_global);
+      const rawThreshold = String((els.accountOrderOffThresholdInput && els.accountOrderOffThresholdInput.value) || '').trim();
+      const threshold = Math.max(1, Math.min(10, Math.floor(Number(rawThreshold || sheet.threshold || 0))));
+      if (!followGlobal && (!rawThreshold || !Number.isFinite(Number(rawThreshold)) || threshold < 1 || threshold > 10)) {
+        state.accountOrderOffSheet.result_text = '请输入 1~10 的整数';
+        state.accountOrderOffSheet.result_type = 'err';
+        renderAccountOrderOffSheet();
+        return;
+      }
+      state.accountOrderOffSheet.loading = true;
+      state.accountOrderOffSheet.result_text = '';
+      state.accountOrderOffSheet.result_type = '';
+      renderAccountOrderOffSheet();
+      try {
+        const out = await request('/api/products/account-order-off-config', {
+          method: 'POST',
+          body: {
+            game_account: account,
+            game_id: gameId,
+            game_name: gameName,
+            follow_global: followGlobal,
+            threshold: followGlobal ? undefined : threshold,
+            mode: followGlobal ? undefined : normalizeOrderOffMode(sheet.mode, ORDER_OFF_MODE_NATURAL_DAY)
+          }
+        });
+        const data = out && out.data ? out.data : {};
+        const nextSource = String(data.config_source || (followGlobal ? 'global' : 'account')).trim() || 'global';
+        const nextThreshold = Number(data.threshold || state.userRules.order_off_threshold || 3) || 3;
+        const nextMode = normalizeOrderOffMode(data.mode, state.userRules.order_off_mode || ORDER_OFF_MODE_NATURAL_DAY);
+        const item = findProductItemByIdentity(gameId, account);
+        if (item) {
+          item.switch = data.switch || item.switch || {};
+          item.order_off_threshold = nextThreshold;
+          item.order_off_mode = nextMode;
+          item.order_off_mode_label = String(data.mode_label || orderOffModeLabel(nextMode)).trim() || orderOffModeLabel(nextMode);
+          item.order_off_config_source = nextSource;
+        }
+        state.accountOrderOffSheet.follow_global = nextSource !== 'account';
+        state.accountOrderOffSheet.threshold = String(nextThreshold);
+        state.accountOrderOffSheet.mode = nextMode;
+        state.accountOrderOffSheet.result_text = '保存成功';
+        state.accountOrderOffSheet.result_type = 'ok';
+        renderAccountOrderOffSheet();
+        showToast(nextSource === 'account' ? `已设置商品级：${nextThreshold}单下架` : '已改为跟随全局');
+        closeAccountOrderOffSheet();
+      } catch (e) {
+        state.accountOrderOffSheet.result_text = e.message || '保存失败';
+        state.accountOrderOffSheet.result_type = 'err';
+        renderAccountOrderOffSheet();
+      } finally {
+        state.accountOrderOffSheet.loading = false;
+        renderAccountOrderOffSheet();
+      }
     }
 
     function renderPurchaseSheet() {

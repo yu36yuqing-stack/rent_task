@@ -302,12 +302,28 @@ function parseJsonObject(raw) {
     }
 }
 
+function normalizeOrderOffSwitchConfig(raw) {
+    const cfg = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
+    if (!cfg) return null;
+    const thresholdRaw = Number(cfg.threshold);
+    if (!Number.isFinite(thresholdRaw)) return null;
+    const threshold = Math.max(1, Math.min(10, Math.floor(thresholdRaw)));
+    const modeText = String(cfg.mode || '').trim().toLowerCase();
+    const mode = modeText === 'rolling_24h' ? 'rolling_24h' : 'natural_day';
+    return { threshold, mode };
+}
+
 function normalizeAccountSwitch(raw) {
     const out = raw && typeof raw === 'object' && !Array.isArray(raw)
         ? raw
         : parseJsonObject(raw);
     const next = {};
     for (const [key, value] of Object.entries(out)) {
+        if (key === 'order_n_off') {
+            const cfg = normalizeOrderOffSwitchConfig(value);
+            if (cfg) next[key] = cfg;
+            continue;
+        }
         const cfg = value && typeof value === 'object' && !Array.isArray(value) ? value : null;
         if (!cfg) continue;
         const label = String(cfg.label || '').trim();
@@ -321,9 +337,24 @@ function normalizeAccountSwitch(raw) {
 }
 
 function mergeAccountSwitch(baseRaw, patchRaw) {
-    const base = normalizeAccountSwitch(baseRaw);
-    const patch = normalizeAccountSwitch(patchRaw);
-    return { ...base, ...patch };
+    const merged = { ...normalizeAccountSwitch(baseRaw) };
+    const patch = patchRaw && typeof patchRaw === 'object' && !Array.isArray(patchRaw)
+        ? patchRaw
+        : parseJsonObject(patchRaw);
+    for (const [key, value] of Object.entries(patch)) {
+        if (value === null) {
+            delete merged[key];
+            continue;
+        }
+        if (key === 'order_n_off') {
+            const cfg = normalizeOrderOffSwitchConfig(value);
+            if (cfg) merged[key] = cfg;
+            continue;
+        }
+        const normalized = normalizeAccountSwitch({ [key]: value });
+        if (normalized[key]) merged[key] = normalized[key];
+    }
+    return merged;
 }
 
 function isAliveUniqueConstraintError(err) {
@@ -1206,7 +1237,9 @@ async function updateUserGameAccountSwitchByUserAndAccount(userId, gameAccount, 
     const acc = String(gameAccount || '').trim();
     if (!uid) throw new Error('user_id 不合法');
     if (!acc) throw new Error('game_account 不能为空');
-    const nextPatch = normalizeAccountSwitch(patchSwitch);
+    const nextPatch = patchSwitch && typeof patchSwitch === 'object' && !Array.isArray(patchSwitch)
+        ? patchSwitch
+        : parseJsonObject(patchSwitch);
     const db = openDatabase();
     try {
         const row = await get(db, `

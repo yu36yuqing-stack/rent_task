@@ -8,7 +8,8 @@ const { initUserDb, verifyUserLogin, getActiveUserById, updateUserNotifyConfigBy
 const {
     initUserGameAccountDb,
     listUserGameAccounts,
-    updateUserGameAccountSwitchByUserAndAccount
+    updateUserGameAccountSwitchByUserAndAccount,
+    normalizeAccountSwitch: normalizeAccountSwitchDb
 } = require('../database/user_game_account_db');
 const {
     initAccountCostRecordDb
@@ -426,17 +427,7 @@ function isRentingByChannelStatus(channelStatus) {
 }
 
 function normalizeAccountSwitch(raw) {
-    const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-    const out = {};
-    for (const [key, value] of Object.entries(src)) {
-        const cfg = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-        const label = String(cfg.label || '').trim();
-        out[key] = {
-            label: label || key,
-            enabled: cfg.enabled === undefined ? true : Boolean(cfg.enabled)
-        };
-    }
-    return out;
+    return normalizeAccountSwitchDb(raw);
 }
 
 function resolveProdGuardSwitch(raw) {
@@ -447,6 +438,25 @@ function resolveProdGuardSwitch(raw) {
     return {
         label: String(cfg.label || '在线风控').trim() || '在线风控',
         enabled: cfg.enabled === undefined ? true : Boolean(cfg.enabled)
+    };
+}
+
+function resolveAccountOrderOffConfig(raw, fallbackRule = {}) {
+    const sw = normalizeAccountSwitch(raw);
+    const cfg = sw.order_n_off && typeof sw.order_n_off === 'object' ? sw.order_n_off : null;
+    const fallbackThreshold = normalizeOrderOffThreshold(fallbackRule.threshold, 3);
+    const fallbackMode = normalizeOrderOffMode(fallbackRule.mode, ORDER_OFF_MODE_NATURAL_DAY);
+    if (!cfg) {
+        return {
+            threshold: fallbackThreshold,
+            mode: fallbackMode,
+            source: 'global'
+        };
+    }
+    return {
+        threshold: normalizeOrderOffThreshold(cfg.threshold, fallbackThreshold),
+        mode: normalizeOrderOffMode(cfg.mode, fallbackMode),
+        source: 'account'
     };
 }
 
@@ -762,6 +772,7 @@ async function handleProducts(req, res, urlObj) {
             : {};
         const accountSwitch = normalizeAccountSwitch(x.switch);
         const prodGuardSwitch = resolveProdGuardSwitch(accountSwitch);
+        const accountOrderOff = resolveAccountOrderOffConfig(accountSwitch, orderOffRule);
         const onlineLabelRaw = String(onlineSnapshot.label || '').trim();
         const onlineTag = prodGuardSwitch.enabled && (onlineLabelRaw === '在线' || onlineLabelRaw === '离线')
             ? onlineLabelRaw
@@ -790,6 +801,10 @@ async function handleProducts(req, res, urlObj) {
             forbidden_query_time: String(forbiddenSnapshot.query_time || '').trim(),
             switch: accountSwitch,
             prod_guard_enabled: Boolean(prodGuardSwitch.enabled),
+            order_off_threshold: Number(accountOrderOff.threshold || orderOffRule.threshold || 3),
+            order_off_mode: String(accountOrderOff.mode || orderOffRule.mode || ORDER_OFF_MODE_NATURAL_DAY),
+            order_off_mode_label: orderOffModeLabel(accountOrderOff.mode || orderOffRule.mode || ORDER_OFF_MODE_NATURAL_DAY),
+            order_off_config_source: String(accountOrderOff.source || 'global'),
             blacklisted: Boolean(bl),
             blacklist_reason: bl ? bl.reason : '',
             blacklist_create_date: bl ? bl.create_date : '',
@@ -1876,6 +1891,54 @@ async function handleProductAccountSwitchToggle(req, res) {
     });
 }
 
+async function handleProductAccountOrderOffConfigSave(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const gameAccount = String(body.game_account || '').trim();
+    const normalizedGame = normalizeGameProfile(body.game_id, body.game_name, { preserveUnknown: true });
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    const followGlobal = body.follow_global === true || String(body.follow_global || '').trim().toLowerCase() === 'true';
+    let patchSwitch = { order_n_off: null };
+    if (!followGlobal) {
+        const rawThreshold = Number(body.threshold);
+        if (!Number.isFinite(rawThreshold) || rawThreshold < 1 || rawThreshold > 10 || !Number.isInteger(rawThreshold)) {
+            return json(res, 400, { ok: false, message: 'threshold 必须是 1~10 的整数' });
+        }
+        const threshold = normalizeOrderOffThreshold(rawThreshold, 0);
+        const modeText = String(body.mode || '').trim().toLowerCase();
+        if (modeText !== ORDER_OFF_MODE_NATURAL_DAY && modeText !== ORDER_OFF_MODE_ROLLING_24H) {
+            return json(res, 400, { ok: false, message: 'mode 不支持' });
+        }
+        patchSwitch = {
+            order_n_off: {
+                threshold,
+                mode: modeText
+            }
+        };
+    }
+    const nextSwitch = await updateUserGameAccountSwitchByUserAndAccount(
+        user.id,
+        gameAccount,
+        patchSwitch,
+        'save account order off config by h5',
+        normalizedGame.game_id,
+        normalizedGame.game_name
+    );
+    const globalRule = await getOrderOffRuleByUser(user.id);
+    const effective = resolveAccountOrderOffConfig(nextSwitch, globalRule);
+    return json(res, 200, {
+        ok: true,
+        data: {
+            game_account: gameAccount,
+            switch: nextSwitch,
+            threshold: Number(effective.threshold || globalRule.threshold || 3),
+            mode: String(effective.mode || globalRule.mode || ORDER_OFF_MODE_NATURAL_DAY),
+            mode_label: orderOffModeLabel(effective.mode || globalRule.mode || ORDER_OFF_MODE_NATURAL_DAY),
+            config_source: String(effective.source || 'global')
+        }
+    });
+}
+
 async function handleRiskCenterList(req, res, urlObj) {
     const user = await requireAuth(req);
     const page = normalizePage(urlObj.searchParams.get('page'), 1);
@@ -2282,6 +2345,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/products/account-cost/create') return await handleProductAccountCostCreate(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/account-cost/delete') return await handleProductAccountCostDelete(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/account-switch/toggle') return await handleProductAccountSwitchToggle(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/products/account-order-off-config') return await handleProductAccountOrderOffConfigSave(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/risk-center/events') return await handleRiskCenterList(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/add') return await handleBlacklistAdd(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/remove') return await handleBlacklistRemove(req, res);
