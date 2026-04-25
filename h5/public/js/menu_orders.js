@@ -128,9 +128,11 @@
     function normalizeOrderGameName(gameName, gameId) {
       const n = String(gameName || '').trim();
       const lower = n.toLowerCase();
+      if (n === 'CSGO' || lower === 'csgo' || n === 'CS:GO' || lower === 'cs2' || n.includes('反恐精英')) return 'CSGO';
       if (n.includes('CFM') || n.includes('枪战王者') || n.includes('穿越火线') || lower === 'cfm') return 'CFM';
       if (n === '和平精英' || n.toUpperCase() === 'HPJY') return '和平精英';
       const gid = String(gameId || '').trim();
+      if (gid === '4') return 'CSGO';
       if (gid === '3') return 'CFM';
       if (gid === '2') return '和平精英';
       return 'WZRY';
@@ -138,6 +140,11 @@
 
     function buildOrderGameAvatarHtml(item) {
       const normalized = normalizeOrderGameName(item && item.game_name, item && item.game_id);
+      if (normalized === 'CSGO') {
+        return `<span class="game-avatar game-avatar-csgo" title="CSGO" aria-label="CSGO">
+          <img src="/assets/game_icons/csgo.png?v=20260425-soldier" alt="CSGO" loading="lazy" decoding="async">
+        </span>`;
+      }
       if (normalized === 'CFM') {
         return `<span class="game-avatar game-avatar-cfm" title="CFM枪战王者" aria-label="CFM枪战王者">
           <img src="/assets/game_icons/cfm.png" alt="CFM枪战王者" loading="lazy" decoding="async">
@@ -506,7 +513,8 @@
       const games = [
         { k: 'WZRY', t: '王者荣耀', icon: '/assets/game_icons/wzry.webp' },
         { k: '和平精英', t: '和平精英', icon: '/assets/game_icons/hpjy.png' },
-        { k: 'CFM', t: 'CFM枪战王者', icon: '/assets/game_icons/cfm.png' }
+        { k: 'CFM', t: 'CFM枪战王者', icon: '/assets/game_icons/cfm.png' },
+        { k: 'CSGO', t: 'CSGO', icon: '/assets/game_icons/csgo.png?v=20260425-soldier' }
       ];
       const tabs = [
         { k: 'all', t: '全部' },

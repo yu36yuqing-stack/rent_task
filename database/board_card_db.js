@@ -85,6 +85,7 @@ function normalizeRemark(remark) {
 function normalizeGameName(gameName) {
     const text = String(gameName || '').trim();
     if (!text) return 'WZRY';
+    if (text.toUpperCase() === 'CSGO' || text === 'CS:GO' || text.toUpperCase() === 'CS2' || text.includes('反恐精英')) return 'CSGO';
     if (text.includes('CFM') || text.includes('枪战王者') || text.includes('穿越火线')) return 'CFM';
     if (text === '和平精英' || text.toUpperCase() === 'HPJY') return '和平精英';
     if (text === '王者荣耀' || text.toUpperCase() === 'WZRY') return 'WZRY';

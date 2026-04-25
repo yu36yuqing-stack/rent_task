@@ -1,6 +1,7 @@
 function normalizePricingGameName(gameName) {
   const text = String(gameName || '').trim();
   const upper = text.toUpperCase();
+  if (upper === 'CSGO' || text === 'CS:GO' || upper === 'CS2' || text.includes('反恐精英')) return 'CSGO';
   if (text === '和平精英' || upper === 'HPJY') return '和平精英';
   if (text.includes('CFM') || text.includes('枪战王者') || text.includes('穿越火线') || upper === 'CFM') return 'CFM';
   return 'WZRY';
@@ -8,6 +9,11 @@ function normalizePricingGameName(gameName) {
 
 function buildPricingGameAvatarHtml(gameName) {
   const normalized = normalizePricingGameName(gameName);
+  if (normalized === 'CSGO') {
+    return `<span class="game-avatar game-avatar-csgo" title="CSGO" aria-label="CSGO">
+      <img src="/assets/game_icons/csgo.png?v=20260425-soldier" alt="CSGO" loading="lazy" decoding="async">
+    </span>`;
+  }
   if (normalized === '和平精英') {
     return `<span class="game-avatar game-avatar-hpjy" title="和平精英" aria-label="和平精英">
       <img src="/assets/game_icons/hpjy.png" alt="和平精英" loading="lazy" decoding="async">
@@ -48,7 +54,8 @@ function pricingGameOptions() {
   return [
     { game_name: 'WZRY', label: '王者荣耀' },
     { game_name: '和平精英', label: '和平精英' },
-    { game_name: 'CFM', label: 'CFM枪战王者' }
+    { game_name: 'CFM', label: 'CFM枪战王者' },
+    { game_name: 'CSGO', label: 'CSGO' }
   ];
 }
 

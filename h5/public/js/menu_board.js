@@ -10,6 +10,7 @@ function escapeBoardHtml(text) {
 function normalizeBoardGameName(gameName) {
   const text = String(gameName || '').trim();
   const upper = text.toUpperCase();
+  if (upper === 'CSGO' || text === 'CS:GO' || upper === 'CS2' || text.includes('反恐精英')) return 'CSGO';
   if (text.includes('CFM') || text.includes('枪战王者') || text.includes('穿越火线') || upper === 'CFM') return 'CFM';
   if (text === '和平精英' || upper === 'HPJY') return '和平精英';
   return 'WZRY';
@@ -17,6 +18,11 @@ function normalizeBoardGameName(gameName) {
 
 function buildBoardGameAvatarHtml(gameName) {
   const normalized = normalizeBoardGameName(gameName);
+  if (normalized === 'CSGO') {
+    return `<span class="game-avatar game-avatar-csgo" title="CSGO" aria-label="CSGO">
+      <img src="/assets/game_icons/csgo.png?v=20260425-soldier" alt="CSGO" loading="lazy" decoding="async">
+    </span>`;
+  }
   if (normalized === 'CFM') {
     return `<span class="game-avatar game-avatar-cfm" title="CFM枪战王者" aria-label="CFM枪战王者">
       <img src="/assets/game_icons/cfm.png" alt="CFM枪战王者" loading="lazy" decoding="async">

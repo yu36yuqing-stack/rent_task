@@ -16,6 +16,12 @@ const GAME_PROFILES = [
         canonical_name: 'CFM',
         ids: ['3', 'A2804', '1104512706'],
         names: ['CFM', 'cfm', '枪战王者', 'CFM枪战王者', '穿越火线', '穿越火线手游', '手游版CF']
+    },
+    {
+        canonical_id: '4',
+        canonical_name: 'CSGO',
+        ids: ['4'],
+        names: ['CSGO', 'csgo', 'CS:GO', 'cs:go', 'CS2', 'cs2', '反恐精英', '反恐精英2', 'Counter-Strike 2', 'counter-strike 2']
     }
 ];
 
