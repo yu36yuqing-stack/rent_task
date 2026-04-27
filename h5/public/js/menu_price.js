@@ -20,8 +20,8 @@ function buildPricingGameAvatarHtml(gameName) {
     </span>`;
   }
   if (normalized === 'CFM') {
-    return `<span class="game-avatar game-avatar-cfm" title="CFM枪战王者" aria-label="CFM枪战王者">
-      <img src="/assets/game_icons/cfm.png" alt="CFM枪战王者" loading="lazy" decoding="async">
+    return `<span class="game-avatar game-avatar-cfm" title="CFM" aria-label="CFM">
+      <img src="/assets/game_icons/cfm.png" alt="CFM" loading="lazy" decoding="async">
     </span>`;
   }
   return `<span class="game-avatar game-avatar-wzry" title="王者荣耀" aria-label="王者荣耀">
@@ -54,7 +54,7 @@ function pricingGameOptions() {
   return [
     { game_name: 'WZRY', label: '王者荣耀' },
     { game_name: '和平精英', label: '和平精英' },
-    { game_name: 'CFM', label: 'CFM枪战王者' },
+    { game_name: 'CFM', label: 'CFM' },
     { game_name: 'CSGO', label: 'CSGO' }
   ];
 }

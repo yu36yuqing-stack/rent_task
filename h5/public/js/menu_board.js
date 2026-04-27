@@ -24,8 +24,8 @@ function buildBoardGameAvatarHtml(gameName) {
     </span>`;
   }
   if (normalized === 'CFM') {
-    return `<span class="game-avatar game-avatar-cfm" title="CFM枪战王者" aria-label="CFM枪战王者">
-      <img src="/assets/game_icons/cfm.png" alt="CFM枪战王者" loading="lazy" decoding="async">
+    return `<span class="game-avatar game-avatar-cfm" title="CFM" aria-label="CFM">
+      <img src="/assets/game_icons/cfm.png" alt="CFM" loading="lazy" decoding="async">
     </span>`;
   }
   if (normalized === '和平精英') {

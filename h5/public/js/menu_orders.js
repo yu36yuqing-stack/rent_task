@@ -146,8 +146,8 @@
         </span>`;
       }
       if (normalized === 'CFM') {
-        return `<span class="game-avatar game-avatar-cfm" title="CFM枪战王者" aria-label="CFM枪战王者">
-          <img src="/assets/game_icons/cfm.png" alt="CFM枪战王者" loading="lazy" decoding="async">
+        return `<span class="game-avatar game-avatar-cfm" title="CFM" aria-label="CFM">
+          <img src="/assets/game_icons/cfm.png" alt="CFM" loading="lazy" decoding="async">
         </span>`;
       }
       if (normalized === '和平精英') {
@@ -514,7 +514,7 @@
         { k: '全部', t: '全部', icon: '' },
         { k: 'WZRY', t: '王者荣耀', icon: '/assets/game_icons/wzry.webp' },
         { k: '和平精英', t: '和平精英', icon: '/assets/game_icons/hpjy.png' },
-        { k: 'CFM', t: 'CFM枪战王者', icon: '/assets/game_icons/cfm.png' },
+        { k: 'CFM', t: 'CFM', icon: '/assets/game_icons/cfm.png' },
         { k: 'CSGO', t: 'CSGO', icon: '/assets/game_icons/csgo.png?v=20260425-soldier' }
       ];
       const tabs = [
