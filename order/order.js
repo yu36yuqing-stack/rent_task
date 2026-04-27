@@ -232,7 +232,8 @@ function normalizeOrderListOptions(options = {}) {
     const statusFilter = (statusFilterRaw === 'progress' || statusFilterRaw === 'refund' || statusFilterRaw === 'done' || statusFilterRaw === 'all')
         ? statusFilterRaw
         : 'all';
-    const gameName = normalizeGameProfile('', String(options.game_name || options.gameName || 'WZRY').trim() || 'WZRY', {
+    const gameNameRaw = String(options.game_name || options.gameName || 'WZRY').trim() || 'WZRY';
+    const gameName = gameNameRaw === '全部' || gameNameRaw.toLowerCase() === 'all' ? '全部' : normalizeGameProfile('', gameNameRaw, {
         preserveUnknown: true
     }).game_name;
     return { page, pageSize, quickFilter, statusFilter, gameName };
@@ -273,13 +274,16 @@ async function listOrdersForUser(userId, options = {}) {
     const where = [
         'user_id = ?',
         'is_deleted = 0',
-        "COALESCE(game_name, '') = ?",
         "TRIM(COALESCE(start_time, '')) <> ''",
         "TRIM(COALESCE(end_time, '')) <> ''",
         'start_time < ?',
         'end_time >= ?'
     ];
-    const params = [uid, cfg.gameName, rangeEnd, rangeStart];
+    const params = [uid, rangeEnd, rangeStart];
+    if (cfg.gameName !== '全部') {
+        where.splice(2, 0, "COALESCE(game_name, '') = ?");
+        params.splice(1, 0, cfg.gameName);
+    }
 
     if (cfg.statusFilter === 'progress') {
         where.push("COALESCE(order_status, '') IN ('租赁中', '出租中')");
@@ -305,27 +309,32 @@ async function listOrdersForUser(userId, options = {}) {
                     WHEN COALESCE(order_status, '') IN ('已完成', '部分完成', '已撤单', '已退款', '投诉/撤单')
                      AND COALESCE(rec_amount, 0) <= 0
                     THEN 1 ELSE 0 END
-              ) AS done_zero_cnt
+              ) AS done_zero_cnt,
+              SUM(CASE
+                    WHEN COALESCE(order_status, '') IN ('租赁中', '出租中')
+                    THEN COALESCE(order_amount, 0)
+                    ELSE 0 END
+              ) AS progress_order_amount_sum
             FROM "order"
             WHERE user_id = ?
               AND is_deleted = 0
-              AND COALESCE(game_name, '') = ?
+              ${cfg.gameName === '全部' ? '' : 'AND COALESCE(game_name, \'\') = ?'}
               AND TRIM(COALESCE(start_time, '')) <> ''
               AND TRIM(COALESCE(end_time, '')) <> ''
               AND start_time < ?
               AND end_time >= ?
-        `, [uid, cfg.gameName, rangeEnd, rangeStart]);
+        `, cfg.gameName === '全部' ? [uid, rangeEnd, rangeStart] : [uid, cfg.gameName, rangeEnd, rangeStart]);
         const todayRow = await dbGet(db, `
             SELECT COUNT(*) AS today_total
             FROM "order"
             WHERE user_id = ?
               AND is_deleted = 0
-              AND COALESCE(game_name, '') = ?
+              ${cfg.gameName === '全部' ? '' : 'AND COALESCE(game_name, \'\') = ?'}
               AND TRIM(COALESCE(start_time, '')) <> ''
               AND TRIM(COALESCE(end_time, '')) <> ''
               AND start_time < ?
               AND end_time >= ?
-        `, [uid, cfg.gameName, todayEnd, todayStart]);
+        `, cfg.gameName === '全部' ? [uid, todayEnd, todayStart] : [uid, cfg.gameName, todayEnd, todayStart]);
         const offset = (cfg.page - 1) * cfg.pageSize;
         const listRaw = await dbAll(db, `
             SELECT
@@ -364,6 +373,9 @@ async function listOrdersForUser(userId, options = {}) {
                 progress: Number((countsRow && countsRow.progress_cnt) || 0),
                 done: Number((countsRow && countsRow.done_cnt) || 0),
                 done_zero: Number((countsRow && countsRow.done_zero_cnt) || 0),
+                progress_order_amount_sum: cfg.statusFilter === 'progress'
+                    ? Number((countsRow && countsRow.progress_order_amount_sum) || 0)
+                    : 0,
                 today_total: Number((todayRow && todayRow.today_total) || 0)
             },
             list

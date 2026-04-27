@@ -95,7 +95,7 @@
       rememberLogin: initialAuth.remember,
       user: initialAuth.user,
       filter: 'all',
-      product_game_name: 'WZRY',
+      product_game_name: '全部',
       productsSyncing: false,
       page: 1,
       pageSize: 20,
@@ -119,12 +119,12 @@
       orders: {
         status_filter: 'all',
         quick_filter: 'today',
-        game_name: 'WZRY',
+        game_name: '全部',
         page: 1,
         pageSize: 20,
         total: 0,
         syncing: false,
-        stats: { progress: 0, done: 0 },
+        stats: { progress: 0, done: 0, progress_order_amount_sum: 0 },
         list: [],
         complaint_detail: {
           open: false,
@@ -1055,7 +1055,7 @@
     }
 
     async function loadList() {
-      const gameName = String(state.product_game_name || 'WZRY').trim() || 'WZRY';
+      const gameName = String(state.product_game_name || '全部').trim() || '全部';
       const data = await request(`/api/products?page=${state.page}&page_size=${state.pageSize}&filter=${state.filter}&game_name=${encodeURIComponent(gameName)}`);
       state.list = Array.isArray(data.list) ? data.list : [];
       state.total = Number(data.total || 0);
@@ -1075,13 +1075,13 @@
 
     async function loadOrders() {
       const o = state.orders || {};
-      const data = await request(`/api/orders?page=${o.page}&page_size=${o.pageSize}&status_filter=${o.status_filter}&quick_filter=${o.quick_filter}&game_name=${encodeURIComponent(o.game_name || 'WZRY')}`);
+      const data = await request(`/api/orders?page=${o.page}&page_size=${o.pageSize}&status_filter=${o.status_filter}&quick_filter=${o.quick_filter}&game_name=${encodeURIComponent(o.game_name || '全部')}`);
       state.orders.total = Number(data.total || 0);
       state.orders.list = Array.isArray(data.list) ? data.list : [];
-      state.orders.stats = data.stats || { progress: 0, done: 0, done_zero: 0, today_total: 0 };
+      state.orders.stats = data.stats || { progress: 0, done: 0, done_zero: 0, today_total: 0, progress_order_amount_sum: 0 };
       state.orders.page = Number(data.page || o.page || 1);
       state.orders.pageSize = Number(data.page_size || o.pageSize || 20);
-      state.orders.game_name = String(data.game_name || o.game_name || 'WZRY').trim() || 'WZRY';
+      state.orders.game_name = String(data.game_name || o.game_name || '全部').trim() || '全部';
     }
 
     async function loadStatsBoard(options = {}) {
@@ -1513,7 +1513,7 @@
       state.productsSyncing = false;
       state.total = 0;
       state.page = 1;
-      state.product_game_name = 'WZRY';
+      state.product_game_name = '全部';
       state.currentMenu = 'products';
       state.drawerExpandedGroups = { pricing: false };
       state.drawerOpen = false;

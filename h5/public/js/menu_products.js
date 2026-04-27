@@ -1194,21 +1194,22 @@
     function renderFilters() {
       if (els.productGameTabs) {
         const games = [
+          { k: '全部', t: '全部', icon: '' },
           { k: 'WZRY', t: '王者荣耀', icon: '/assets/game_icons/wzry.webp' },
           { k: '和平精英', t: '和平精英', icon: '/assets/game_icons/hpjy.png' },
           { k: 'CFM', t: 'CFM枪战王者', icon: '/assets/game_icons/cfm.png' },
           { k: 'CSGO', t: 'CSGO', icon: '/assets/game_icons/csgo.png?v=20260425-soldier' }
         ];
         els.productGameTabs.innerHTML = games.map((x) => `
-          <button class="stats-game-tab ${String(state.product_game_name || 'WZRY') === x.k ? 'active' : ''}" data-product-game="${x.k}" type="button">
-            <span class="game-avatar"><img src="${x.icon}" alt="${x.t}" loading="lazy" decoding="async"></span>
+          <button class="stats-game-tab ${String(state.product_game_name || '全部') === x.k ? 'active' : ''}" data-product-game="${x.k}" type="button">
+            ${x.icon ? `<span class="game-avatar"><img src="${x.icon}" alt="${x.t}" loading="lazy" decoding="async"></span>` : ''}
             <span class="stats-game-tab-text">${x.t}</span>
           </button>
         `).join('');
         Array.from(els.productGameTabs.querySelectorAll('[data-product-game]')).forEach((n) => {
           n.addEventListener('click', async () => {
-            const k = String(n.getAttribute('data-product-game') || 'WZRY').trim();
-            if (k === String(state.product_game_name || 'WZRY')) return;
+            const k = String(n.getAttribute('data-product-game') || '全部').trim();
+            if (k === String(state.product_game_name || '全部')) return;
             state.product_game_name = k;
             state.page = 1;
             await loadList();

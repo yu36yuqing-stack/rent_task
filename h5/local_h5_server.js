@@ -592,7 +592,9 @@ async function handleProducts(req, res, urlObj) {
     const user = await requireAuth(req);
     const page = normalizePage(urlObj.searchParams.get('page'), 1);
     const pageSize = Math.min(200, normalizePage(urlObj.searchParams.get('page_size'), 20));
-    const gameName = String(urlObj.searchParams.get('game_name') || 'WZRY').trim() || 'WZRY';
+    const gameNameRaw = String(urlObj.searchParams.get('game_name') || '全部').trim() || '全部';
+    const isAllGame = gameNameRaw === '全部' || gameNameRaw.toLowerCase() === 'all';
+    const gameName = isAllGame ? '全部' : gameNameRaw;
     const filterRaw = String(urlObj.searchParams.get('filter') || 'all').trim().toLowerCase();
     const filter = (filterRaw === 'restricted' || filterRaw === 'renting' || filterRaw === 'all')
         ? filterRaw
@@ -651,12 +653,16 @@ async function handleProducts(req, res, urlObj) {
 
     const orderOffRule = await getOrderOffRuleByUser(user.id);
     const allRows = await listAllAccountsByUser(user.id);
-    const scopedRows = allRows.list.filter((x) => String((x && x.game_name) || '').trim() === gameName);
+    const scopedRows = isAllGame
+        ? allRows.list
+        : allRows.list.filter((x) => String((x && x.game_name) || '').trim() === gameName);
     const syncAnomalyRows = await listOpenProductSyncAnomaliesByUser(user.id);
     const scopedSyncAnomalies = syncAnomalyRows
         .map((row) => {
             const missingAccounts = Array.isArray(row && row.missing_accounts) ? row.missing_accounts : [];
-            const scopedMissing = missingAccounts.filter((item) => String((item && item.game_name) || '').trim() === gameName);
+            const scopedMissing = isAllGame
+                ? missingAccounts
+                : missingAccounts.filter((item) => String((item && item.game_name) || '').trim() === gameName);
             if (scopedMissing.length === 0) return null;
             return {
                 platform: String((row && row.platform) || '').trim(),
@@ -994,7 +1000,8 @@ async function handleOrders(req, res, urlObj) {
     const pageSize = Math.min(100, normalizePage(urlObj.searchParams.get('page_size'), 20));
     const quickFilter = String(urlObj.searchParams.get('quick_filter') || 'today').trim().toLowerCase();
     const statusFilter = String(urlObj.searchParams.get('status_filter') || 'all').trim().toLowerCase();
-    const gameName = String(urlObj.searchParams.get('game_name') || 'WZRY').trim() || 'WZRY';
+    const gameNameRaw = String(urlObj.searchParams.get('game_name') || '全部').trim() || '全部';
+    const gameName = gameNameRaw === '全部' || gameNameRaw.toLowerCase() === 'all' ? '全部' : gameNameRaw;
     const data = await listOrdersForUser(user.id, {
         page,
         page_size: pageSize,

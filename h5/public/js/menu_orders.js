@@ -511,6 +511,7 @@
         o.countdown_timer_id = 0;
       }
       const games = [
+        { k: '全部', t: '全部', icon: '' },
         { k: 'WZRY', t: '王者荣耀', icon: '/assets/game_icons/wzry.webp' },
         { k: '和平精英', t: '和平精英', icon: '/assets/game_icons/hpjy.png' },
         { k: 'CFM', t: 'CFM枪战王者', icon: '/assets/game_icons/cfm.png' },
@@ -524,17 +525,14 @@
       ];
       const quick = [
         { k: 'today', t: '当日' },
-        { k: 'yesterday', t: '昨日' },
         { k: 'last24h', t: '近24小时' },
-        { k: 'week', t: '本周' },
         { k: 'last7', t: '近7天' },
-        { k: 'month', t: '本月' },
         { k: 'last30', t: '近30天' }
       ];
       if (els.orderGameTabs) {
         els.orderGameTabs.innerHTML = games.map((x) => `
-          <button class="stats-game-tab ${String(o.game_name || 'WZRY') === x.k ? 'active' : ''}" data-order-game="${x.k}" type="button">
-            <span class="game-avatar"><img src="${x.icon}" alt="${x.t}" loading="lazy" decoding="async"></span>
+          <button class="stats-game-tab ${String(o.game_name || '全部') === x.k ? 'active' : ''}" data-order-game="${x.k}" type="button">
+            ${x.icon ? `<span class="game-avatar"><img src="${x.icon}" alt="${x.t}" loading="lazy" decoding="async"></span>` : ''}
             <span class="stats-game-tab-text">${x.t}</span>
           </button>
         `).join('');
@@ -549,7 +547,10 @@
         els.orderSyncNowBtn.disabled = Boolean(o.syncing);
         els.orderSyncNowBtn.textContent = o.syncing ? '同步中...' : '同步订单';
       }
-      els.orderGameHint.textContent = `汇总：${Number(o.total || 0)}（0收-${Number((o.stats && o.stats.done_zero) || 0)}）`;
+      const progressAmountText = o.status_filter === 'progress'
+        ? ` · 预计订单金额 ¥${Number((o.stats && o.stats.progress_order_amount_sum) || 0).toFixed(2)}`
+        : '';
+      els.orderGameHint.textContent = `汇总：${Number(o.total || 0)}（0收-${Number((o.stats && o.stats.done_zero) || 0)}）${progressAmountText}`;
 
       if (!Array.isArray(o.list) || o.list.length === 0) {
         els.orderListContainer.innerHTML = '<div class="panel"><div style="color:#6d7a8a;font-size:13px;">暂无订单数据</div></div>';
@@ -617,8 +618,8 @@
       if (els.orderGameTabs) {
         Array.from(els.orderGameTabs.querySelectorAll('[data-order-game]')).forEach((n) => {
           n.addEventListener('click', async () => {
-            const k = String(n.getAttribute('data-order-game') || 'WZRY').trim();
-            if (k === String(o.game_name || 'WZRY')) return;
+            const k = String(n.getAttribute('data-order-game') || '全部').trim();
+            if (k === String(o.game_name || '全部')) return;
             state.orders.game_name = k;
             state.orders.page = 1;
             await loadOrders();
