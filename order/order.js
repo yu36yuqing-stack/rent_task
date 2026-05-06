@@ -61,6 +61,9 @@ const ORDER_OFF_MODE_ROLLING_24H = 'rolling_24h';
 const ORDER_COMPENSATE_INTERVAL_MIN = 180;
 const ORDER_COMPENSATE_WINDOW_SEC = 90;
 const ORDER_COMPENSATE_LOOKBACK_SEC = 30 * 3600;
+const ORDER_ZHW_DAILY_COMPENSATION_CHANNEL = 'zuhaowang-daily-compensation';
+const ORDER_ZHW_DAILY_COMPENSATION_AFTER_HOUR = 4;
+const ORDER_ZHW_DAILY_COMPENSATION_LOOKBACK_SEC = 8 * 24 * 3600;
 
 function normalizeOrderOffThreshold(v, fallback = ORDER_3_OFF_THRESHOLD) {
     const n = Number(v);
@@ -427,6 +430,27 @@ function shouldTriggerOrderSyncNow(options = {}) {
     const intervalSec = intervalMin * 60;
     const offset = totalSec % intervalSec;
     return offset <= windowSec || (intervalSec - offset) <= windowSec;
+}
+
+function toLocalDateKey(input) {
+    const d = input instanceof Date ? input : new Date(Number(input || 0) * 1000);
+    if (Number.isNaN(d.getTime())) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function shouldTriggerZuhaowangDailyCompensationNow(options = {}) {
+    const now = options.now instanceof Date ? options.now : new Date();
+    const force = Boolean(options.force);
+    const afterHour = Math.max(0, Math.min(23, Number(options.after_hour ?? ORDER_ZHW_DAILY_COMPENSATION_AFTER_HOUR)));
+    const lastSyncTs = Number(options.last_sync_ts || 0);
+    const todayKey = toLocalDateKey(now);
+    const lastKey = lastSyncTs > 0 ? toLocalDateKey(lastSyncTs) : '';
+    if (force) return todayKey !== '' && lastKey !== todayKey;
+
+    const totalSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+    if (totalSec < afterHour * 3600) return false;
+    return todayKey !== '' && lastKey !== todayKey;
 }
 
 function startOrderSyncWorkerIfNeeded(options = {}) {
@@ -1410,6 +1434,7 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
 async function syncOrdersByUser(userId, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
+    const expectedPlatforms = await listAuthorizedOrderPlatforms(uid);
     const result = {
         user_id: uid,
         started_at: new Date().toISOString(),
@@ -1429,6 +1454,22 @@ async function syncOrdersByUser(userId, options = {}) {
         : 0;
     if (compensateLookbackSec > 0) {
         console.log(`[OrderSync] user_id=${uid} compensate_window_hit=true lookback_sec=${compensateLookbackSec}`);
+    }
+    let zhwDailyCompensationHit = false;
+    let zhwDailyLastSyncTs = 0;
+    let zhwDailyLookbackSec = 0;
+    if (expectedPlatforms.includes(CHANNEL_ZHW)) {
+        zhwDailyLastSyncTs = await getLastSyncTimestamp(uid, ORDER_ZHW_DAILY_COMPENSATION_CHANNEL);
+        zhwDailyCompensationHit = shouldTriggerZuhaowangDailyCompensationNow({
+            now,
+            last_sync_ts: zhwDailyLastSyncTs,
+            after_hour: Number(options.zuhaowang_daily_compensation_after_hour ?? ORDER_ZHW_DAILY_COMPENSATION_AFTER_HOUR),
+            force: Boolean(options.zuhaowang_daily_compensation_force)
+        });
+        if (zhwDailyCompensationHit) {
+            zhwDailyLookbackSec = Math.max(0, Number(options.zuhaowang_daily_compensation_lookback_sec || ORDER_ZHW_DAILY_COMPENSATION_LOOKBACK_SEC));
+            console.log(`[OrderSync][zuhaowang][daily_compensation] user_id=${uid} hit=true lookback_sec=${zhwDailyLookbackSec} last_daily_ts=${zhwDailyLastSyncTs}`);
+        }
     }
 
     const uuzuhaoOptions = {
@@ -1450,10 +1491,10 @@ async function syncOrdersByUser(userId, options = {}) {
         ...(options.zuhaowang || {}),
         compensation_lookback_sec: Math.max(
             Number((options.zuhaowang || {}).compensation_lookback_sec || 0),
-            compensateLookbackSec
+            compensateLookbackSec,
+            zhwDailyLookbackSec
         )
     };
-    const expectedPlatforms = await listAuthorizedOrderPlatforms(uid);
 
     if (expectedPlatforms.includes(CHANNEL_UUZUHAO)) {
     try {
@@ -1492,10 +1533,19 @@ async function syncOrdersByUser(userId, options = {}) {
     if (expectedPlatforms.includes(CHANNEL_ZHW)) {
     try {
         result.platforms.zuhaowang = await syncZuhaowangOrdersToDb(uid, zuhaowangOptions);
+        if (zhwDailyCompensationHit) {
+            await setLastSyncTimestamp(uid, ORDER_ZHW_DAILY_COMPENSATION_CHANNEL, Math.floor(now.getTime() / 1000), 'zuhaowang daily 8d order compensation');
+            result.platforms.zuhaowang.daily_compensation = {
+                hit: true,
+                lookback_sec: zhwDailyLookbackSec,
+                last_sync_ts: zhwDailyLastSyncTs
+            };
+        }
         console.log(`[OrderSync] user_id=${uid} platform=zuhaowang done ${JSON.stringify({
             pulled: result.platforms.zuhaowang.pulled,
             upserted: result.platforms.zuhaowang.upserted,
-            total_count: result.platforms.zuhaowang.total_count
+            total_count: result.platforms.zuhaowang.total_count,
+            daily_compensation: Boolean(result.platforms.zuhaowang.daily_compensation && result.platforms.zuhaowang.daily_compensation.hit)
         })}`);
     } catch (e) {
         result.platforms.zuhaowang = { error: String(e.message || e) };
@@ -1599,6 +1649,7 @@ async function syncOrdersForAllUsers(options = {}) {
 
 module.exports = {
     shouldTriggerOrderSyncNow,
+    shouldTriggerZuhaowangDailyCompensationNow,
     startOrderSyncWorkerIfNeeded,
     reconcileOrder3OffBlacklistByUser,
     syncUuzuhaoOrdersToDb,

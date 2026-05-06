@@ -20,7 +20,10 @@ const {
     attachManualToRuntimeTask,
     TASK_STATUS_SUCCESS
 } = require('../database/runtime_task_db');
-const { shouldTriggerOrderSyncNow } = require('../order/order');
+const {
+    shouldTriggerOrderSyncNow,
+    shouldTriggerZuhaowangDailyCompensationNow
+} = require('../order/order');
 
 function fail(msg) {
     console.error(`[FAIL] ${msg}`);
@@ -86,6 +89,23 @@ async function main() {
     });
     assertEqual(inWindowHit, true, '无错峰时 00:00:10 命中订单窗口');
     assertEqual(outWindowMiss, false, '无错峰时 00:02:30 不命中订单窗口');
+
+    assertEqual(shouldTriggerZuhaowangDailyCompensationNow({
+        now: new Date('2026-04-13T03:59:59'),
+        last_sync_ts: 0
+    }), false, '租号王日补偿 04:00 前不触发');
+    assertEqual(shouldTriggerZuhaowangDailyCompensationNow({
+        now: new Date('2026-04-13T04:00:00'),
+        last_sync_ts: 0
+    }), true, '租号王日补偿 04:00 后当天未跑应触发');
+    assertEqual(shouldTriggerZuhaowangDailyCompensationNow({
+        now: new Date('2026-04-13T12:00:00'),
+        last_sync_ts: Math.floor(new Date('2026-04-13T04:00:00').getTime() / 1000)
+    }), false, '租号王日补偿当天已跑不重复触发');
+    assertEqual(shouldTriggerZuhaowangDailyCompensationNow({
+        now: new Date('2026-04-14T04:00:00'),
+        last_sync_ts: Math.floor(new Date('2026-04-13T04:00:00').getTime() / 1000)
+    }), true, '租号王日补偿跨天后重新触发');
 
     console.log(`[RuntimeTaskSmoke] ok temp_dir=${tempDir}`);
 }
