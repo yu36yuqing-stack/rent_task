@@ -28,6 +28,14 @@ function toDateTimeText(input = new Date()) {
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+function nowMs() {
+    return Date.now();
+}
+
+function elapsedMs(startMs) {
+    return Math.max(0, nowMs() - Number(startMs || 0));
+}
+
 function detectFaceVerifyPlatforms(row = {}) {
     const prd = row && typeof row.channel_prd_info === 'object' ? row.channel_prd_info : {};
     const checks = [
@@ -165,8 +173,32 @@ async function runFullUserPipeline(user, options = {}) {
     const readOnly = options.readOnly === undefined ? false : Boolean(options.readOnly);
     const uid = Number(user && user.id || 0);
     const userAccount = String(user && user.account || '').trim();
+    const pipelineStartedAt = nowMs();
+    const pipelineTiming = {
+        total_ms: 0,
+        sync_accounts_ms: 0,
+        load_accounts_ms: 0,
+        reconcile_order_rules_ms: 0,
+        reconcile_face_verify_ms: 0,
+        load_blacklist_ms: 0,
+        execute_actions_ms: 0,
+        refresh_facts_ms: 0,
+        probe_and_notify_ms: 0
+    };
+    const finishTiming = () => {
+        pipelineTiming.total_ms = elapsedMs(pipelineStartedAt);
+        return pipelineTiming;
+    };
+    const measure = async (key, fn) => {
+        const startedAt = nowMs();
+        try {
+            return await fn();
+        } finally {
+            pipelineTiming[key] = Math.max(0, Number(pipelineTiming[key] || 0)) + elapsedMs(startedAt);
+        }
+    };
     if (!uid) {
-        return { ok: false, errors: ['invalid_user'], stage: 'validate' };
+        return { ok: false, errors: ['invalid_user'], stage: 'validate', pipeline_timing: finishTiming() };
     }
 
     let rows = [];
@@ -180,76 +212,88 @@ async function runFullUserPipeline(user, options = {}) {
     try {
         logger.log(`[User] 开始处理 user_id=${uid} account=${userAccount}`);
         await reportPipelineStage(options, 'sync_accounts', '同步商品账号');
-        syncOut = await syncUserAccountsByAuth(uid);
+        syncOut = await measure('sync_accounts_ms', () => syncUserAccountsByAuth(uid));
         await reportPipelineStage(options, 'load_accounts', '加载账号快照');
-        rows = await listAllUserGameAccountsByUser(uid);
+        rows = await measure('load_accounts_ms', () => listAllUserGameAccountsByUser(uid));
 
-        try {
-            await reportPipelineStage(options, 'reconcile_order_rules', '收敛订单规则');
-            const reconcile = await reconcileOrderNOffByUser(user);
-            logger.log(`[Order3Off] user_id=${uid} reconcile=${JSON.stringify(reconcile)}`);
-        } catch (e) {
-            const msg = String(e && e.message ? e.message : e || 'reconcile_failed');
-            nonFatalErrors.push(`order3off_reconcile_failed:${msg}`);
-            logger.warn(`[Order3Off] 收敛失败 user_id=${uid}: ${msg}`);
-        }
-
-        try {
-            await reportPipelineStage(options, 'reconcile_face_verify', '收敛人脸识别规则');
-            const faceRet = await reconcilePlatformFaceVerifyBlacklist(uid, rows, logger);
-            if (faceRet && Number(faceRet.touched || 0) > 0) {
-                logger.log(`[FaceVerifyBL] user_id=${uid} result=${JSON.stringify(faceRet)}`);
+        await measure('reconcile_order_rules_ms', async () => {
+            try {
+                await reportPipelineStage(options, 'reconcile_order_rules', '收敛订单规则');
+                const reconcile = await reconcileOrderNOffByUser(user);
+                logger.log(`[Order3Off] user_id=${uid} reconcile=${JSON.stringify(reconcile)}`);
+            } catch (e) {
+                const msg = String(e && e.message ? e.message : e || 'reconcile_failed');
+                nonFatalErrors.push(`order3off_reconcile_failed:${msg}`);
+                logger.warn(`[Order3Off] 收敛失败 user_id=${uid}: ${msg}`);
             }
-        } catch (e) {
-            const msg = String(e && e.message ? e.message : e || 'face_verify_reconcile_failed');
-            nonFatalErrors.push(`face_verify_reconcile_failed:${msg}`);
-            logger.warn(`[FaceVerifyBL] 收敛失败 user_id=${uid}: ${msg}`);
-        }
+        });
+
+        await measure('reconcile_face_verify_ms', async () => {
+            try {
+                await reportPipelineStage(options, 'reconcile_face_verify', '收敛人脸识别规则');
+                const faceRet = await reconcilePlatformFaceVerifyBlacklist(uid, rows, logger);
+                if (faceRet && Number(faceRet.touched || 0) > 0) {
+                    logger.log(`[FaceVerifyBL] user_id=${uid} result=${JSON.stringify(faceRet)}`);
+                }
+            } catch (e) {
+                const msg = String(e && e.message ? e.message : e || 'face_verify_reconcile_failed');
+                nonFatalErrors.push(`face_verify_reconcile_failed:${msg}`);
+                logger.warn(`[FaceVerifyBL] 收敛失败 user_id=${uid}: ${msg}`);
+            }
+        });
 
         await reportPipelineStage(options, 'load_blacklist', '加载黑名单状态');
-        blacklistSet = await loadUserBlacklistSet(uid);
-        blacklistReasonMap = await loadUserBlacklistReasonMap(uid);
+        await measure('load_blacklist_ms', async () => {
+            blacklistSet = await loadUserBlacklistSet(uid);
+            blacklistReasonMap = await loadUserBlacklistReasonMap(uid);
+        });
 
         await reportPipelineStage(options, 'execute_actions', '执行上下架动作');
-        const actionOut = await executeUserActionsIfNeeded({
-            user,
-            rows,
-            blacklistSet,
-            actionEnabled,
-            readOnly
+        await measure('execute_actions_ms', async () => {
+            const actionOut = await executeUserActionsIfNeeded({
+                user,
+                rows,
+                blacklistSet,
+                actionEnabled,
+                readOnly
+            });
+            actionResult.actions = Array.isArray(actionOut && actionOut.actions) ? actionOut.actions : [];
+            actionResult.errors = Array.isArray(actionOut && actionOut.errors) ? actionOut.errors : [];
+            actionResult.planned = Number(actionOut && actionOut.planned || 0);
+            applyActionResultToRows(rows, actionResult.actions);
         });
-        actionResult.actions = Array.isArray(actionOut && actionOut.actions) ? actionOut.actions : [];
-        actionResult.errors = Array.isArray(actionOut && actionOut.errors) ? actionOut.errors : [];
-        actionResult.planned = Number(actionOut && actionOut.planned || 0);
-        applyActionResultToRows(rows, actionResult.actions);
 
         await reportPipelineStage(options, 'refresh_facts', '刷新订单事实');
-        accounts = rows.map((r) => toReportAccountFromUserGameRow(r, blacklistSet, blacklistReasonMap));
-        await fillTodayOrderCounts(uid, accounts);
-        await fillRentingOrderFacts(uid, accounts);
+        await measure('refresh_facts_ms', async () => {
+            accounts = rows.map((r) => toReportAccountFromUserGameRow(r, blacklistSet, blacklistReasonMap));
+            await fillTodayOrderCounts(uid, accounts);
+            await fillRentingOrderFacts(uid, accounts);
+        });
         await reportPipelineStage(options, 'probe_and_notify', '探测在线并发送通知');
-        const onlineProbe = await probeProdOnlineStatus(user, accounts, { logger, include_rows: true });
-        const onlineTagMap = {};
-        for (const row of (onlineProbe && Array.isArray(onlineProbe.probe_rows) ? onlineProbe.probe_rows : [])) {
-            const acc = String((row && row.account) || '').trim();
-            if (!acc) continue;
-            onlineTagMap[acc] = String((row && row.online_tag) || '').trim().toUpperCase();
-        }
-        for (const one of accounts) {
-            const acc = String((one && one.account) || '').trim();
-            one.online_tag = String(onlineTagMap[acc] || '').trim();
-        }
-        triggerProdStatusGuard(user, accounts, { logger, snapshot: onlineProbe });
-        const recentActions = await buildRecentActionsForUser(uid, { limit: 8 });
-        const syncAnomalies = await listUserSyncAnomaliesForReport(uid);
-        const payload = buildPayloadForOneUser(accounts, {
-            report_owner: String(user.name || user.account || '').trim(),
-            recentActions,
-            master_total: rows.length,
-            sync_anomalies: syncAnomalies
+        await measure('probe_and_notify_ms', async () => {
+            const onlineProbe = await probeProdOnlineStatus(user, accounts, { logger, include_rows: true });
+            const onlineTagMap = {};
+            for (const row of (onlineProbe && Array.isArray(onlineProbe.probe_rows) ? onlineProbe.probe_rows : [])) {
+                const acc = String((row && row.account) || '').trim();
+                if (!acc) continue;
+                onlineTagMap[acc] = String((row && row.online_tag) || '').trim().toUpperCase();
+            }
+            for (const one of accounts) {
+                const acc = String((one && one.account) || '').trim();
+                one.online_tag = String(onlineTagMap[acc] || '').trim();
+            }
+            triggerProdStatusGuard(user, accounts, { logger, snapshot: onlineProbe });
+            const recentActions = await buildRecentActionsForUser(uid, { limit: 8 });
+            const syncAnomalies = await listUserSyncAnomaliesForReport(uid);
+            const payload = buildPayloadForOneUser(accounts, {
+                report_owner: String(user.name || user.account || '').trim(),
+                recentActions,
+                master_total: rows.length,
+                sync_anomalies: syncAnomalies
+            });
+            notifyResult = await notifyUserByPayload(user, payload);
         });
 
-        notifyResult = await notifyUserByPayload(user, payload);
         if (!notifyResult.ok) {
             const errs = Array.isArray(notifyResult.errors) ? notifyResult.errors : [notifyResult.reason || 'notify_failed'];
             return {
@@ -259,7 +303,8 @@ async function runFullUserPipeline(user, options = {}) {
                 accounts_count: accounts.length,
                 action_result: actionResult,
                 errors: errs,
-                non_fatal_errors: nonFatalErrors
+                non_fatal_errors: nonFatalErrors,
+                pipeline_timing: finishTiming()
             };
         }
 
@@ -272,7 +317,8 @@ async function runFullUserPipeline(user, options = {}) {
             accounts_count: accounts.length,
             action_result: actionResult,
             notify_result: notifyResult,
-            non_fatal_errors: nonFatalErrors
+            non_fatal_errors: nonFatalErrors,
+            pipeline_timing: finishTiming()
         };
     } catch (e) {
         const msg = `sync_failed: ${String(e && e.message ? e.message : e || 'pipeline_failed')}`;
@@ -284,7 +330,8 @@ async function runFullUserPipeline(user, options = {}) {
             accounts_count: accounts.length,
             action_result: actionResult,
             errors: [msg],
-            non_fatal_errors: nonFatalErrors
+            non_fatal_errors: nonFatalErrors,
+            pipeline_timing: finishTiming()
         };
     }
 }

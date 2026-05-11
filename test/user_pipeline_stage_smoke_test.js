@@ -77,6 +77,10 @@ async function main() {
     );
 
     assert.strictEqual(out.ok, true, 'pipeline 应成功');
+    assert.ok(out.pipeline_timing && typeof out.pipeline_timing === 'object', '应返回 pipeline_timing');
+    assert.ok(Number(out.pipeline_timing.total_ms) >= 0, 'pipeline_timing.total_ms 应为非负数');
+    assert.ok(Number(out.pipeline_timing.sync_accounts_ms) >= 0, '应记录 sync_accounts_ms');
+    assert.ok(Number(out.pipeline_timing.probe_and_notify_ms) >= 0, '应记录 probe_and_notify_ms');
     assert.deepStrictEqual(stages, [
         'sync_accounts',
         'load_accounts',

@@ -22,6 +22,14 @@ const PLATFORM_UHZ = 'uhaozu';
 const PLATFORM_YYZ = 'uuzuhao';
 const ORDER_MIRROR_RECOVER_MAX_AGE_MS = 3 * 24 * 3600 * 1000;
 
+function nowMs() {
+    return Date.now();
+}
+
+function elapsedMs(startMs) {
+    return Math.max(0, nowMs() - Number(startMs || 0));
+}
+
 function keyOf(gameId, gameAccount) {
     return `${String(gameId || '1')}::${String(gameAccount || '')}`;
 }
@@ -364,23 +372,42 @@ async function pullPlatformDataByAuth(platform, authPayload = {}) {
 async function syncUserAccountsByAuth(userId) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
+    const totalStartedAt = nowMs();
+    const timing = {
+        total_ms: 0,
+        cooldown_release_ms: 0,
+        auth_load_ms: 0,
+        platform_pull_total_ms: 0,
+        merge_ms: 0,
+        upsert_ms: 0,
+        mirror_orders_ms: 0,
+        load_current_rows_ms: 0,
+        anomaly_reconcile_ms: 0
+    };
+    const platformTiming = {};
 
     // 先释放已到期的“冷却期下架”黑名单，再进入本轮商品状态拉取，
     // 保证后续上架判断读取到的是最新黑名单状态。
     let cooldownRelease = { skipped: true, reason: 'not_run' };
+    const cooldownStartedAt = nowMs();
     try {
         cooldownRelease = await releaseOrderCooldownBlacklistByUser(uid);
         console.log(`[CooldownRelease] user_id=${uid} result=${JSON.stringify(cooldownRelease)}`);
     } catch (e) {
         cooldownRelease = { error: String(e && e.message ? e.message : e) };
         console.warn(`[CooldownRelease] user_id=${uid} failed=${cooldownRelease.error}`);
+    } finally {
+        timing.cooldown_release_ms = elapsedMs(cooldownStartedAt);
     }
 
+    const authStartedAt = nowMs();
     const rows = await listUserPlatformAuth(uid, { with_payload: true });
+    timing.auth_load_ms = elapsedMs(authStartedAt);
     const validAuthRows = rows
         .filter(isAuthUsable)
         .filter((r) => r && r.auth_payload && typeof r.auth_payload === 'object');
     if (validAuthRows.length === 0) {
+        timing.total_ms = elapsedMs(totalStartedAt);
         return {
             ok: true,
             skipped: true,
@@ -393,6 +420,8 @@ async function syncUserAccountsByAuth(userId) {
             cleaned: 0,
             anomalies: [],
             order_cooldown_release: cooldownRelease,
+            timing,
+            platform_timing: platformTiming,
             errors: []
         };
     }
@@ -403,37 +432,84 @@ async function syncUserAccountsByAuth(userId) {
     const pulled = {};
     const pulledRowsByPlatform = {};
 
-    for (const row of validAuthRows) {
+    const platformPullStartedAt = nowMs();
+    const platformResults = await Promise.allSettled(validAuthRows.map(async (row) => {
         const platform = String(row.platform || '');
         const authPayload = row.auth_payload || {};
+        const startedAt = nowMs();
         try {
             const pulledRows = await pullPlatformDataByAuth(platform, authPayload);
-            pulled[platform] = pulledRows.length;
-            pulledRowsByPlatform[platform] = pulledRows;
-            for (const item of pulledRows) {
-                const k = keyOf(item.game_id, item.game_account);
-                const cur = merged.get(k) || {
-                    game_account: item.game_account,
-                    game_id: String(item.game_id || '1'),
-                    game_name: item.game_name,
-                    channel_status: {},
-                    channel_prd_info: {},
-                    account_remark: ''
-                };
-                cur.channel_status[platform] = item.status;
-                cur.channel_prd_info[platform] = item.prd_info || {};
-                if (platform === PLATFORM_YYZ) {
-                    const remark = String(item.account_remark || '').trim();
-                    if (remark) cur.account_remark = remark;
-                }
-                merged.set(k, cur);
-            }
+            return {
+                platform,
+                ok: true,
+                rows: pulledRows,
+                duration_ms: elapsedMs(startedAt)
+            };
         } catch (e) {
-            errors.push(`${platform}: ${e.message}`);
+            return {
+                platform,
+                ok: false,
+                rows: [],
+                duration_ms: elapsedMs(startedAt),
+                error: String(e && e.message ? e.message : e)
+            };
+        }
+    }));
+    timing.platform_pull_total_ms = elapsedMs(platformPullStartedAt);
+
+    const mergeStartedAt = nowMs();
+    for (const result of platformResults) {
+        const ret = result.status === 'fulfilled'
+            ? result.value
+            : {
+                platform: '',
+                ok: false,
+                rows: [],
+                duration_ms: 0,
+                error: String(result.reason && result.reason.message ? result.reason.message : result.reason)
+            };
+        const platform = String(ret.platform || '');
+        if (!platform) {
+            errors.push(ret.error || 'unknown_platform_pull_failed');
+            continue;
+        }
+        const pulledRows = Array.isArray(ret.rows) ? ret.rows : [];
+        platformTiming[platform] = {
+            ok: Boolean(ret.ok),
+            duration_ms: Math.max(0, Number(ret.duration_ms || 0)),
+            pulled: pulledRows.length,
+            error: ret.ok ? '' : String(ret.error || '')
+        };
+        if (!ret.ok) {
+            pulledRowsByPlatform[platform] = [];
+            errors.push(`${platform}: ${ret.error || 'pull_failed'}`);
+            continue;
+        }
+        pulled[platform] = pulledRows.length;
+        pulledRowsByPlatform[platform] = pulledRows;
+        for (const item of pulledRows) {
+            const k = keyOf(item.game_id, item.game_account);
+            const cur = merged.get(k) || {
+                game_account: item.game_account,
+                game_id: String(item.game_id || '1'),
+                game_name: item.game_name,
+                channel_status: {},
+                channel_prd_info: {},
+                account_remark: ''
+            };
+            cur.channel_status[platform] = item.status;
+            cur.channel_prd_info[platform] = item.prd_info || {};
+            if (platform === PLATFORM_YYZ) {
+                const remark = String(item.account_remark || '').trim();
+                if (remark) cur.account_remark = remark;
+            }
+            merged.set(k, cur);
         }
     }
+    timing.merge_ms = elapsedMs(mergeStartedAt);
 
     let upserted = 0;
+    const upsertStartedAt = nowMs();
     for (const item of merged.values()) {
         if (await isUserGameAccountManuallyDeleted(uid, item.game_id, item.game_account)) {
             continue;
@@ -450,10 +526,18 @@ async function syncUserAccountsByAuth(userId) {
         });
         upserted += 1;
     }
+    timing.upsert_ms = elapsedMs(upsertStartedAt);
 
+    const mirrorStartedAt = nowMs();
     const mirroredByOrders = await ensureLinkedGameAccountsByOrders(uid);
+    timing.mirror_orders_ms = elapsedMs(mirrorStartedAt);
+    const loadCurrentRowsStartedAt = nowMs();
     const currentRows = await listAllUserGameAccountsByUser(uid);
+    timing.load_current_rows_ms = elapsedMs(loadCurrentRowsStartedAt);
+    const anomalyStartedAt = nowMs();
     const anomalies = await reconcileProductSyncAnomalies(uid, currentRows, pulledRowsByPlatform, errors, validPlatforms);
+    timing.anomaly_reconcile_ms = elapsedMs(anomalyStartedAt);
+    timing.total_ms = elapsedMs(totalStartedAt);
 
     return {
         ok: errors.length === 0,
@@ -465,6 +549,8 @@ async function syncUserAccountsByAuth(userId) {
         cleaned: 0,
         anomalies,
         order_cooldown_release: cooldownRelease,
+        timing,
+        platform_timing: platformTiming,
         errors
     };
 }

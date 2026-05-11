@@ -172,6 +172,8 @@ async function main() {
     const productSync = await syncUserAccountsByAuth(uid);
     assertTrue(productSync.ok && productSync.skipped, '全部渠道停用后商品同步应 skipped');
     assertEqual(String(productSync.reason || ''), 'no_enabled_platform_auth', '全部渠道停用后应返回 no_enabled_platform_auth');
+    assertTrue(productSync.timing && Number(productSync.timing.total_ms) >= 0, '商品同步 skipped 也应返回 timing');
+    assertTrue(productSync.platform_timing && typeof productSync.platform_timing === 'object', '商品同步应返回 platform_timing');
 
     const orderSync = await syncOrdersByUser(uid);
     assertTrue(orderSync.ok, '订单同步不应因停用渠道报错');
