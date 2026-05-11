@@ -22,23 +22,66 @@ const pipelineMod = require('../pipeline/user_pipeline');
 const orderMod = require('../order/order');
 const originals = {
     runFullUserPipeline: pipelineMod.runFullUserPipeline,
+    runUserPipelineSyncAccounts: pipelineMod.runUserPipelineSyncAccounts,
+    runUserPipelineAfterSync: pipelineMod.runUserPipelineAfterSync,
     syncOrdersByUser: orderMod.syncOrdersByUser
 };
 
-pipelineMod.runFullUserPipeline = async (_user, options = {}) => {
+pipelineMod.runUserPipelineSyncAccounts = async (_user, options = {}) => {
     if (options && typeof options.onStage === 'function') {
         await options.onStage({ stage: 'sync_accounts', progress_text: '同步商品账号' });
+    }
+    return {
+        ok: true,
+        stage: 'sync_accounts_done',
+        sync: { ok: true },
+        accounts_count: 2,
+        pipeline_started_at_ms: Date.now(),
+        pipeline_timing: {
+            total_ms: 1,
+            sync_accounts_ms: 1,
+            load_accounts_ms: 0,
+            reconcile_order_rules_ms: 0,
+            reconcile_face_verify_ms: 0,
+            load_blacklist_ms: 0,
+            execute_actions_ms: 0,
+            refresh_facts_ms: 0,
+            probe_and_notify_ms: 0
+        }
+    };
+};
+pipelineMod.runUserPipelineAfterSync = async (_user, syncOut, options = {}) => {
+    await sleep(50);
+    if (options && typeof options.onStage === 'function') {
+        await options.onStage({ stage: 'load_accounts', progress_text: '加载账号快照' });
         await options.onStage({ stage: 'done', progress_text: '任务完成', finished: true });
     }
     return {
         ok: true,
-        sync: { ok: true },
+        stage: 'done',
+        sync: syncOut,
         accounts_count: 2,
         action_result: { actions: [], errors: [], planned: 0 },
         notify_result: { ok: true },
-        non_fatal_errors: ['warn:stub']
+        non_fatal_errors: ['warn:stub'],
+        pipeline_timing: {
+            total_ms: 60,
+            sync_accounts_ms: 1,
+            load_accounts_ms: 1,
+            reconcile_order_rules_ms: 0,
+            reconcile_face_verify_ms: 0,
+            load_blacklist_ms: 0,
+            execute_actions_ms: 0,
+            refresh_facts_ms: 0,
+            probe_and_notify_ms: 0
+        }
     };
 };
+pipelineMod.runFullUserPipeline = async (_user, options = {}) => pipelineMod.runUserPipelineAfterSync(
+    _user,
+    { ok: true },
+    options
+);
 orderMod.syncOrdersByUser = async () => ({
     ok: false,
     platforms: { uhaozu: { ok: false, error: 'stub_partial' } }
@@ -65,6 +108,16 @@ async function waitForPing(baseUrl, headers = {}, timeoutMs = 10000) {
         await sleep(200);
     }
     throw new Error('waitForPing timeout');
+}
+
+async function waitForTaskDone(taskId, timeoutMs = 5000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const row = await getRuntimeTaskByTaskId(taskId);
+        if (row && !['pending', 'running'].includes(String(row.status || '').trim())) return row;
+        await sleep(50);
+    }
+    throw new Error(`waitForTaskDone timeout task_id=${taskId}`);
 }
 
 async function main() {
@@ -115,8 +168,10 @@ async function main() {
         const productJson = await productRes.json();
         assert.strictEqual(productRes.status, 200, '商品同步应返回 200');
         assert.ok(productJson.ok, '商品同步应成功');
+        assert.strictEqual(productJson.phase, 'background_running', '商品同步应先进入后台处理');
+        assert.strictEqual(productJson.background_running, true, '商品同步应标记后台运行中');
         assert.ok(productJson.task_id, '商品同步应返回 task_id');
-        const productTaskRow = await getRuntimeTaskByTaskId(productJson.task_id);
+        const productTaskRow = await waitForTaskDone(productJson.task_id);
         assert.strictEqual(productTaskRow.status, 'partial_failed', '商品同步应落 partial_failed');
         assert.strictEqual(productTaskRow.stage, 'done', '商品同步任务应完成');
 
@@ -143,6 +198,8 @@ async function main() {
         console.log(`[PASS] h5_runtime_task_success_smoke_test temp_dir=${tempDir}`);
     } finally {
         pipelineMod.runFullUserPipeline = originals.runFullUserPipeline;
+        pipelineMod.runUserPipelineSyncAccounts = originals.runUserPipelineSyncAccounts;
+        pipelineMod.runUserPipelineAfterSync = originals.runUserPipelineAfterSync;
         orderMod.syncOrdersByUser = originals.syncOrdersByUser;
         delete require.cache[require.resolve('../h5/local_h5_server')];
         try { await new Promise((resolve) => server.close(resolve)); } catch {}

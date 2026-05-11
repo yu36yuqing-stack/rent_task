@@ -54,7 +54,11 @@ const {
     queryForbiddenStatusCached,
     setForbiddenPlayWithSnapshot
 } = require('../product/prod_probe_cache_service');
-const { runFullUserPipeline } = require('../pipeline/user_pipeline');
+const {
+    runFullUserPipeline,
+    runUserPipelineSyncAccounts,
+    runUserPipelineAfterSync
+} = require('../pipeline/user_pipeline');
 const {
     initProdRiskEventDb,
     listRiskEventsByUser,
@@ -88,7 +92,7 @@ const {
     normalizeCooldownReleaseDelayMin,
     getCooldownConfigByUser
 } = require('../order/order_cooldown_config');
-const { tryAcquireLock, releaseLock } = require('../database/lock_db');
+const { tryAcquireLock, releaseLock, touchLock } = require('../database/lock_db');
 const {
     createRuntimeTask,
     getRuntimeTaskByTaskId,
@@ -147,7 +151,7 @@ const ORDER_SYNC_LOCK_LEASE_SEC = Math.max(60, Number(process.env.ORDER_SYNC_LOC
 const STATS_REFRESH_LOCK_WAIT_MS = Math.max(0, Number(process.env.STATS_REFRESH_LOCK_WAIT_MS || 120000));
 const STATS_REFRESH_LOCK_POLL_MS = Math.max(200, Number(process.env.STATS_REFRESH_LOCK_POLL_MS || 800));
 const USER_PIPELINE_LOCK_KEY_PREFIX = String(process.env.USER_PIPELINE_LOCK_KEY_PREFIX || 'pipeline_user');
-const USER_PIPELINE_LOCK_LEASE_SEC = Math.max(60, Number(process.env.USER_PIPELINE_LOCK_LEASE_SEC || 900));
+const USER_PIPELINE_LOCK_LEASE_SEC = Math.max(60, Number(process.env.USER_PIPELINE_LOCK_LEASE_SEC || 180));
 const USER_PIPELINE_LOCK_WAIT_MS = Math.max(0, Number(process.env.USER_PIPELINE_LOCK_WAIT_MS || 5000));
 const COOLDOWN_BLACKLIST_REASON = '冷却期下架';
 const MAINTENANCE_BLACKLIST_REASON = '维护中';
@@ -872,6 +876,105 @@ async function handleProducts(req, res, urlObj) {
     });
 }
 
+function buildProductPipelineResult(out = null, nonFatal = []) {
+    return {
+        ok: Boolean(out && out.ok),
+        sync: out && out.sync ? out.sync : null,
+        accounts_count: Number(out && out.accounts_count || 0),
+        action_result: out && out.action_result ? out.action_result : null,
+        notify_result: out && out.notify_result ? out.notify_result : null,
+        non_fatal_errors: Array.isArray(nonFatal) ? nonFatal : [],
+        pipeline_timing: out && out.pipeline_timing ? out.pipeline_timing : null
+    };
+}
+
+async function continueProductPipelineInBackground(args = {}) {
+    const fullUser = args.fullUser || null;
+    const syncOut = args.syncOut || null;
+    const runtimeTask = args.runtimeTask || {};
+    const lockKey = String(args.lockKey || '').trim();
+    const lockOwner = String(args.lockOwner || '').trim();
+    const pipelineStartedAt = Number(args.pipelineStartedAt || Date.now());
+    const pipelineTiming = args.pipelineTiming && typeof args.pipelineTiming === 'object' ? args.pipelineTiming : null;
+    const uid = Number(fullUser && fullUser.id || 0);
+    const taskId = String(runtimeTask.task_id || '').trim();
+    const touchPipelineLock = async () => {
+        if (!lockKey || !lockOwner) return;
+        try {
+            const touched = await touchLock(lockKey, USER_PIPELINE_LOCK_LEASE_SEC, lockOwner);
+            if (!touched) {
+                console.warn(`[H5] product pipeline lock touch missed user_id=${uid} task_id=${taskId} lock=${lockKey}`);
+            }
+        } catch (e) {
+            console.warn(`[H5] product pipeline lock touch failed user_id=${uid} task_id=${taskId}: ${e.message}`);
+        }
+    };
+
+    try {
+        await touchPipelineLock();
+        const out = await runUserPipelineAfterSync(fullUser, syncOut, {
+            logger: console,
+            actionEnabled: ACTION_ENABLED,
+            readOnly: ACTION_READ_ONLY,
+            pipelineStartedAt,
+            pipelineTiming,
+            onStage: async (stagePatch = {}) => {
+                await touchPipelineLock();
+                await markRuntimeTaskRunning(taskId, stagePatch);
+            }
+        });
+        if (!out || !out.ok) {
+            const msg = Array.isArray(out && out.errors) && out.errors.length > 0
+                ? String(out.errors[0] || 'pipeline_failed')
+                : 'pipeline_failed';
+            await markRuntimeTaskFinished(taskId, {
+                status: TASK_STATUS_FAILED,
+                stage: 'pipeline_failed',
+                progress_text: '商品同步后续处理失败',
+                result_json: {
+                    ok: false,
+                    sync: out && out.sync ? out.sync : syncOut,
+                    accounts_count: Number(out && out.accounts_count || 0),
+                    pipeline_timing: out && out.pipeline_timing ? out.pipeline_timing : pipelineTiming
+                },
+                error_json: Array.isArray(out && out.errors) ? out.errors : [msg],
+                desc: `manual product sync background failed user=${uid}`
+            });
+            return;
+        }
+        const nonFatal = Array.isArray(out && out.non_fatal_errors) ? out.non_fatal_errors : [];
+        await markRuntimeTaskFinished(taskId, {
+            status: nonFatal.length > 0 ? TASK_STATUS_PARTIAL_FAILED : TASK_STATUS_SUCCESS,
+            stage: 'done',
+            progress_text: nonFatal.length > 0 ? '商品同步完成，存在部分告警' : '商品同步完成',
+            result_json: buildProductPipelineResult(out, nonFatal),
+            error_json: nonFatal,
+            desc: `manual product sync background done user=${uid}`
+        });
+    } catch (err) {
+        const msg = String(err && err.message ? err.message : err || 'pipeline_failed');
+        try {
+            await markRuntimeTaskFinished(taskId, {
+                status: TASK_STATUS_FAILED,
+                stage: 'pipeline_failed',
+                progress_text: '商品同步后续处理异常',
+                result_json: { ok: false, sync: syncOut, pipeline_timing: pipelineTiming },
+                error_json: [msg],
+                desc: `manual product sync background exception user=${uid}`
+            });
+        } catch (finishErr) {
+            console.error(`[H5] product pipeline finish failed user_id=${uid} task_id=${taskId}: ${finishErr.message}`);
+        }
+        console.error(`[H5] product pipeline background failed user_id=${uid} task_id=${taskId}: ${msg}`);
+    } finally {
+        if (lockKey) {
+            try { await releaseLock(lockKey, `release by ${lockOwner}`); } catch (e) {
+                console.warn(`[H5] product pipeline lock release failed user_id=${uid} task_id=${taskId}: ${e.message}`);
+            }
+        }
+    }
+}
+
 async function handleProductSyncNow(req, res) {
     const user = await requireAuth(req);
     const uid = Number(user && user.id || 0);
@@ -901,6 +1004,7 @@ async function handleProductSyncNow(req, res) {
         }
         throw httpError(409, `用户任务执行中，请稍后重试（lock=${lockKey}）`);
     }
+    let releaseInFinally = true;
     try {
         const fullUser = await getActiveUserById(uid);
         if (!fullUser || String(fullUser.status || '').trim() !== 'enabled') {
@@ -919,13 +1023,14 @@ async function handleProductSyncNow(req, res) {
             stage: 'pipeline_start',
             progress_text: '开始执行商品同步'
         });
-        let out = null;
+        let syncPhase = null;
         try {
-            out = await runFullUserPipeline(fullUser, {
+            syncPhase = await runUserPipelineSyncAccounts(fullUser, {
                 logger: console,
                 actionEnabled: ACTION_ENABLED,
                 readOnly: ACTION_READ_ONLY,
                 onStage: async (stagePatch = {}) => {
+                    await touchLock(lockKey, USER_PIPELINE_LOCK_LEASE_SEC, lockOwner);
                     await markRuntimeTaskRunning(runtimeTask.task_id, stagePatch);
                 }
             });
@@ -941,9 +1046,9 @@ async function handleProductSyncNow(req, res) {
             });
             throw err;
         }
-        if (!out || !out.ok) {
-            const msg = Array.isArray(out && out.errors) && out.errors.length > 0
-                ? String(out.errors[0] || 'pipeline_failed')
+        if (!syncPhase || !syncPhase.ok) {
+            const msg = Array.isArray(syncPhase && syncPhase.errors) && syncPhase.errors.length > 0
+                ? String(syncPhase.errors[0] || 'pipeline_failed')
                 : 'pipeline_failed';
             await markRuntimeTaskFinished(runtimeTask.task_id, {
                 status: TASK_STATUS_FAILED,
@@ -951,46 +1056,62 @@ async function handleProductSyncNow(req, res) {
                 progress_text: '商品同步失败',
                 result_json: {
                     ok: false,
-                    sync: out && out.sync ? out.sync : null,
-                    accounts_count: Number(out && out.accounts_count || 0)
+                    sync: syncPhase && syncPhase.sync ? syncPhase.sync : null,
+                    accounts_count: Number(syncPhase && syncPhase.accounts_count || 0),
+                    pipeline_timing: syncPhase && syncPhase.pipeline_timing ? syncPhase.pipeline_timing : null
                 },
-                error_json: Array.isArray(out && out.errors) ? out.errors : [msg],
+                error_json: Array.isArray(syncPhase && syncPhase.errors) ? syncPhase.errors : [msg],
                 desc: `manual product sync failed user=${uid}`
             });
             return json(res, 500, {
                 ok: false,
                 message: msg,
-                data: out || null,
+                data: syncPhase || null,
                 task_id: runtimeTask.task_id,
                 lock_key: lockKey,
                 lock_waited_ms: Number(lock.waited_ms || 0)
             });
         }
-        const nonFatal = Array.isArray(out && out.non_fatal_errors) ? out.non_fatal_errors : [];
-        await markRuntimeTaskFinished(runtimeTask.task_id, {
-            status: nonFatal.length > 0 ? TASK_STATUS_PARTIAL_FAILED : TASK_STATUS_SUCCESS,
-            stage: 'done',
-            progress_text: nonFatal.length > 0 ? '商品同步完成，存在部分告警' : '商品同步完成',
+        await markRuntimeTaskRunning(runtimeTask.task_id, {
+            stage: 'background_running',
+            progress_text: '商品已同步，后续策略/上下架处理中',
             result_json: {
                 ok: true,
-                sync: out && out.sync ? out.sync : null,
-                accounts_count: Number(out && out.accounts_count || 0),
-                action_result: out && out.action_result ? out.action_result : null,
-                notify_result: out && out.notify_result ? out.notify_result : null,
-                non_fatal_errors: nonFatal
-            },
-            error_json: nonFatal,
-            desc: `manual product sync done user=${uid}`
+                phase: 'background_running',
+                background_running: true,
+                sync: syncPhase.sync,
+                accounts_count: Number(syncPhase.accounts_count || 0),
+                pipeline_timing: syncPhase.pipeline_timing || null
+            }
+        });
+        releaseInFinally = false;
+        setImmediate(() => {
+            continueProductPipelineInBackground({
+                fullUser,
+                syncOut: syncPhase.sync,
+                runtimeTask,
+                lockKey,
+                lockOwner,
+                pipelineStartedAt: syncPhase.pipeline_started_at_ms,
+                pipelineTiming: syncPhase.pipeline_timing
+            }).catch((err) => {
+                console.error(`[H5] product pipeline background unhandled user_id=${uid} task_id=${runtimeTask.task_id}: ${err.message}`);
+            });
         });
         return json(res, 200, {
             ok: true,
-            data: out || null,
+            phase: 'background_running',
+            background_running: true,
+            data: syncPhase || null,
             task_id: runtimeTask.task_id,
             lock_key: lockKey,
-            lock_waited_ms: Number(lock.waited_ms || 0)
+            lock_waited_ms: Number(lock.waited_ms || 0),
+            message: '商品已同步，后续策略/上下架处理中'
         });
     } finally {
-        await releaseLock(lockKey, `release by ${lockOwner}`);
+        if (releaseInFinally) {
+            await releaseLock(lockKey, `release by ${lockOwner}`);
+        }
     }
 }
 

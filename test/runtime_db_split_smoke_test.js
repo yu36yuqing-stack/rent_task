@@ -38,7 +38,8 @@ const {
 const {
     initLockDb,
     tryAcquireLock,
-    releaseLock
+    releaseLock,
+    touchLock
 } = require('../database/lock_db');
 
 function run(db, sql, params = []) {
@@ -111,6 +112,8 @@ async function main() {
 
     const lock = await tryAcquireLock('runtime_smoke_lock', 120, 'runtime owner');
     assertTrue(Boolean(lock && lock.acquired), 'runtime lock 获取失败');
+    assertTrue(await touchLock('runtime_smoke_lock', 120, 'runtime owner'), 'runtime lock 续租失败');
+    assertTrue(!await touchLock('runtime_smoke_lock', 120, 'runtime other owner'), 'runtime lock 不应被其他 owner 续租');
     assertTrue(await releaseLock('runtime_smoke_lock', 'runtime release'), 'runtime lock 释放失败');
 
     const runtimeDb = openRuntimeDatabase();

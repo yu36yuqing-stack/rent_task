@@ -167,24 +167,33 @@ async function reportPipelineStage(options = {}, stage = '', progressText = '', 
     });
 }
 
-async function runFullUserPipeline(user, options = {}) {
+function createPipelineTiming(input = null) {
+    const target = input && typeof input === 'object' ? input : {};
+    const keys = [
+        'total_ms',
+        'sync_accounts_ms',
+        'load_accounts_ms',
+        'reconcile_order_rules_ms',
+        'reconcile_face_verify_ms',
+        'load_blacklist_ms',
+        'execute_actions_ms',
+        'refresh_facts_ms',
+        'probe_and_notify_ms'
+    ];
+    for (const key of keys) {
+        target[key] = Number(target[key] || 0);
+    }
+    return target;
+}
+
+function createPipelineContext(user, options = {}) {
     const logger = options.logger || console;
     const actionEnabled = options.actionEnabled === undefined ? true : Boolean(options.actionEnabled);
     const readOnly = options.readOnly === undefined ? false : Boolean(options.readOnly);
     const uid = Number(user && user.id || 0);
     const userAccount = String(user && user.account || '').trim();
-    const pipelineStartedAt = nowMs();
-    const pipelineTiming = {
-        total_ms: 0,
-        sync_accounts_ms: 0,
-        load_accounts_ms: 0,
-        reconcile_order_rules_ms: 0,
-        reconcile_face_verify_ms: 0,
-        load_blacklist_ms: 0,
-        execute_actions_ms: 0,
-        refresh_facts_ms: 0,
-        probe_and_notify_ms: 0
-    };
+    const pipelineStartedAt = Number(options.pipelineStartedAt || 0) > 0 ? Number(options.pipelineStartedAt) : nowMs();
+    const pipelineTiming = createPipelineTiming(options.pipelineTiming);
     const finishTiming = () => {
         pipelineTiming.total_ms = elapsedMs(pipelineStartedAt);
         return pipelineTiming;
@@ -197,6 +206,78 @@ async function runFullUserPipeline(user, options = {}) {
             pipelineTiming[key] = Math.max(0, Number(pipelineTiming[key] || 0)) + elapsedMs(startedAt);
         }
     };
+    return {
+        logger,
+        actionEnabled,
+        readOnly,
+        uid,
+        userAccount,
+        pipelineStartedAt,
+        pipelineTiming,
+        finishTiming,
+        measure
+    };
+}
+
+async function runUserPipelineSyncAccounts(user, options = {}) {
+    const {
+        logger,
+        uid,
+        userAccount,
+        pipelineStartedAt,
+        finishTiming,
+        measure
+    } = createPipelineContext(user, options);
+
+    if (!uid) {
+        return {
+            ok: false,
+            errors: ['invalid_user'],
+            stage: 'validate',
+            sync: null,
+            accounts_count: 0,
+            pipeline_timing: finishTiming(),
+            pipeline_started_at_ms: pipelineStartedAt
+        };
+    }
+
+    try {
+        logger.log(`[User] 开始处理 user_id=${uid} account=${userAccount}`);
+        await reportPipelineStage(options, 'sync_accounts', '同步商品账号');
+        const syncOut = await measure('sync_accounts_ms', () => syncUserAccountsByAuth(uid));
+        return {
+            ok: true,
+            stage: 'sync_accounts_done',
+            sync: syncOut,
+            accounts_count: Number((syncOut && (syncOut.upserted || syncOut.count || syncOut.total)) || 0),
+            pipeline_timing: finishTiming(),
+            pipeline_started_at_ms: pipelineStartedAt
+        };
+    } catch (e) {
+        const msg = `sync_failed: ${String(e && e.message ? e.message : e || 'sync_accounts_failed')}`;
+        logger.error(`[User] 同步商品账号失败 user_id=${uid}: ${msg}`);
+        return {
+            ok: false,
+            stage: 'sync_accounts',
+            sync: null,
+            accounts_count: 0,
+            errors: [msg],
+            pipeline_timing: finishTiming(),
+            pipeline_started_at_ms: pipelineStartedAt
+        };
+    }
+}
+
+async function runUserPipelineAfterSync(user, syncOut = null, options = {}) {
+    const {
+        logger,
+        actionEnabled,
+        readOnly,
+        uid,
+        finishTiming,
+        measure
+    } = createPipelineContext(user, options);
+
     if (!uid) {
         return { ok: false, errors: ['invalid_user'], stage: 'validate', pipeline_timing: finishTiming() };
     }
@@ -205,14 +286,10 @@ async function runFullUserPipeline(user, options = {}) {
     let blacklistSet = new Set();
     let blacklistReasonMap = {};
     const actionResult = { actions: [], errors: [], planned: 0, timing: null };
-    let syncOut = null;
     let notifyResult = null;
     let accounts = [];
     const nonFatalErrors = [];
     try {
-        logger.log(`[User] 开始处理 user_id=${uid} account=${userAccount}`);
-        await reportPipelineStage(options, 'sync_accounts', '同步商品账号');
-        syncOut = await measure('sync_accounts_ms', () => syncUserAccountsByAuth(uid));
         await reportPipelineStage(options, 'load_accounts', '加载账号快照');
         rows = await measure('load_accounts_ms', () => listAllUserGameAccountsByUser(uid));
 
@@ -337,7 +414,25 @@ async function runFullUserPipeline(user, options = {}) {
     }
 }
 
+async function runFullUserPipeline(user, options = {}) {
+    const pipelineStartedAt = nowMs();
+    const pipelineTiming = createPipelineTiming();
+    const syncPhase = await runUserPipelineSyncAccounts(user, {
+        ...options,
+        pipelineStartedAt,
+        pipelineTiming
+    });
+    if (!syncPhase || !syncPhase.ok) return syncPhase;
+    return runUserPipelineAfterSync(user, syncPhase.sync, {
+        ...options,
+        pipelineStartedAt,
+        pipelineTiming
+    });
+}
+
 module.exports = {
+    runUserPipelineSyncAccounts,
+    runUserPipelineAfterSync,
     runFullUserPipeline,
     reconcilePlatformFaceVerifyBlacklist,
     detectFaceVerifyPlatforms

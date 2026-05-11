@@ -22,11 +22,19 @@ const pipelineMod = require('../pipeline/user_pipeline');
 const orderMod = require('../order/order');
 const originals = {
     runFullUserPipeline: pipelineMod.runFullUserPipeline,
+    runUserPipelineSyncAccounts: pipelineMod.runUserPipelineSyncAccounts,
+    runUserPipelineAfterSync: pipelineMod.runUserPipelineAfterSync,
     syncOrdersByUser: orderMod.syncOrdersByUser
 };
 
 pipelineMod.runFullUserPipeline = async () => {
     throw new Error('stub_pipeline_boom');
+};
+pipelineMod.runUserPipelineSyncAccounts = async () => {
+    throw new Error('stub_pipeline_boom');
+};
+pipelineMod.runUserPipelineAfterSync = async () => {
+    throw new Error('stub_pipeline_after_boom');
 };
 orderMod.syncOrdersByUser = async () => {
     throw new Error('stub_order_boom');
@@ -121,6 +129,8 @@ async function main() {
         console.log(`[PASS] h5_runtime_task_failure_smoke_test temp_dir=${tempDir}`);
     } finally {
         pipelineMod.runFullUserPipeline = originals.runFullUserPipeline;
+        pipelineMod.runUserPipelineSyncAccounts = originals.runUserPipelineSyncAccounts;
+        pipelineMod.runUserPipelineAfterSync = originals.runUserPipelineAfterSync;
         orderMod.syncOrdersByUser = originals.syncOrdersByUser;
         delete require.cache[require.resolve('../h5/local_h5_server')];
         try { await new Promise((resolve) => server.close(resolve)); } catch {}
