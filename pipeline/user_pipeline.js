@@ -204,7 +204,7 @@ async function runFullUserPipeline(user, options = {}) {
     let rows = [];
     let blacklistSet = new Set();
     let blacklistReasonMap = {};
-    const actionResult = { actions: [], errors: [], planned: 0 };
+    const actionResult = { actions: [], errors: [], planned: 0, timing: null };
     let syncOut = null;
     let notifyResult = null;
     let accounts = [];
@@ -260,6 +260,7 @@ async function runFullUserPipeline(user, options = {}) {
             actionResult.actions = Array.isArray(actionOut && actionOut.actions) ? actionOut.actions : [];
             actionResult.errors = Array.isArray(actionOut && actionOut.errors) ? actionOut.errors : [];
             actionResult.planned = Number(actionOut && actionOut.planned || 0);
+            actionResult.timing = actionOut && actionOut.timing && typeof actionOut.timing === 'object' ? actionOut.timing : null;
             applyActionResultToRows(rows, actionResult.actions);
         });
 

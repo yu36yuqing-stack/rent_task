@@ -42,7 +42,17 @@ async function main() {
     orderRuleMod.reconcileOrderNOffByUser = async () => ({ ok: true });
     userMod.loadUserBlacklistSet = async () => new Set();
     userMod.loadUserBlacklistReasonMap = async () => ({});
-    actionMod.executeUserActionsIfNeeded = async () => ({ actions: [], errors: [], planned: 0 });
+    actionMod.executeUserActionsIfNeeded = async () => ({
+        actions: [],
+        errors: [],
+        planned: 0,
+        timing: {
+            total_ms: 1,
+            execute_ms: 0,
+            planned: 0,
+            actions: { total_ms: 0, planned: 0, executed: 0, by_platform: {}, by_type: {}, actions: [] }
+        }
+    });
     reportMod.toReportAccountFromUserGameRow = (row) => ({
         account: row.game_account,
         game_account: row.game_account,
@@ -81,6 +91,7 @@ async function main() {
     assert.ok(Number(out.pipeline_timing.total_ms) >= 0, 'pipeline_timing.total_ms 应为非负数');
     assert.ok(Number(out.pipeline_timing.sync_accounts_ms) >= 0, '应记录 sync_accounts_ms');
     assert.ok(Number(out.pipeline_timing.probe_and_notify_ms) >= 0, '应记录 probe_and_notify_ms');
+    assert.ok(out.action_result && out.action_result.timing && typeof out.action_result.timing === 'object', '应透传 action_result.timing');
     assert.deepStrictEqual(stages, [
         'sync_accounts',
         'load_accounts',

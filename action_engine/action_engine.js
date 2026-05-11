@@ -24,6 +24,14 @@ function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
 
+function nowMs() {
+    return Number(Date.now());
+}
+
+function elapsedMs(startedAt) {
+    return Math.max(0, nowMs() - Number(startedAt || nowMs()));
+}
+
 function isActiveShelfStatus(status) {
     const s = String(status || '').trim();
     return s === '上架' || s === '租赁中' || s === '出租中';
@@ -280,8 +288,69 @@ async function executeActions({
     changeZhwStatus,
     readOnly = false
 }) {
+    if (runRecord && !runRecord.action_timing) {
+        runRecord.action_timing = {
+            total_ms: 0,
+            planned: Array.isArray(actions) ? actions.length : 0,
+            executed: 0,
+            success: 0,
+            failed: 0,
+            skipped: 0,
+            by_platform: {},
+            by_type: {},
+            queue_timing: {},
+            mode: 'platform_parallel',
+            actions: []
+        };
+    }
+    const timing = runRecord && runRecord.action_timing ? runRecord.action_timing : null;
+    const timingStartedAt = nowMs();
+    let finishIndex = 0;
+    const recordActionTiming = (action, patch = {}) => {
+        if (!timing || !action) return;
+        const type = String(action.type || '').trim();
+        const platform = platformFromActionType(type) || 'unknown';
+        const durationMs = Math.max(0, Number(patch.duration_ms || 0));
+        const success = Boolean(patch.success);
+        const skipped = Boolean(patch.skipped);
+        const failed = !success && !skipped;
+        const item = {
+            plan_index: Number(patch.plan_index || 0),
+            finish_index: finishIndex++,
+            type,
+            platform,
+            account: String((action.item && action.item.account) || '').trim(),
+            game_id: String((action.item && action.item.game_id) || '').trim(),
+            reason: String(action.reason || '').trim(),
+            duration_ms: durationMs,
+            success,
+            skipped,
+            error: String(patch.error || '').trim()
+        };
+        timing.actions.push(item);
+        timing.executed += 1;
+        if (skipped) timing.skipped += 1;
+        else if (success) timing.success += 1;
+        else timing.failed += 1;
+        if (!timing.by_platform[platform]) {
+            timing.by_platform[platform] = { count: 0, success: 0, failed: 0, skipped: 0, duration_ms: 0 };
+        }
+        if (!timing.by_type[type]) {
+            timing.by_type[type] = { count: 0, success: 0, failed: 0, skipped: 0, duration_ms: 0 };
+        }
+        for (const bucket of [timing.by_platform[platform], timing.by_type[type]]) {
+            bucket.count += 1;
+            bucket.duration_ms += durationMs;
+            if (skipped) bucket.skipped += 1;
+            else if (success) bucket.success += 1;
+            else bucket.failed += 1;
+        }
+    };
     console.log(`[Step] 策略计算完成，待执行操作数=${actions.length}`);
-    if (actions.length === 0) return;
+    if (actions.length === 0) {
+        if (timing) timing.total_ms = elapsedMs(timingStartedAt);
+        return;
+    }
 
     console.log('ALERT_NEEDED'); // 触发通知
     console.log(`[Action] 发现 ${actions.length} 个需要处理的操作`);
@@ -289,11 +358,14 @@ async function executeActions({
         console.log('[Action] 当前为只读模式：阻断上下架执行，仅记录动作');
     }
 
-    for (const action of actions) {
+    const executeOneAction = async (action, planIndex) => {
         console.log(`[Execute] ${action.reason} -> ${action.item.account}`);
+        const actionStartedAt = nowMs();
         try {
             if (readOnly) {
-                runRecord.actions.push({ ...action, time: Date.now(), success: true, skipped: true, mode: 'read_only' });
+                const durationMs = elapsedMs(actionStartedAt);
+                runRecord.actions.push({ ...action, plan_index: planIndex, time: Date.now(), success: true, skipped: true, mode: 'read_only', duration_ms: durationMs, platform: platformFromActionType(action.type) });
+                recordActionTiming(action, { plan_index: planIndex, duration_ms: durationMs, success: true, skipped: true });
                 await appendProductOnoffHistory({
                     user_id: user && user.id,
                     user_account: user && user.account,
@@ -309,7 +381,7 @@ async function executeActions({
                     desc: 'sync read_only skip'
                 });
                 console.log(`[Result] 已跳过(只读): ${action.type} -> ${action.item.account}`);
-                continue;
+                return { success: true, skipped: true };
             }
 
             let success = false;
@@ -357,7 +429,9 @@ async function executeActions({
                         runErrors: runRecord && Array.isArray(runRecord.errors) ? runRecord.errors : null
                     });
                 }
-                runRecord.actions.push({ ...action, time: Date.now(), success: true });
+                const durationMs = elapsedMs(actionStartedAt);
+                runRecord.actions.push({ ...action, plan_index: planIndex, time: Date.now(), success: true, duration_ms: durationMs, platform });
+                recordActionTiming(action, { plan_index: planIndex, duration_ms: durationMs, success: true });
                 await appendProductOnoffHistory({
                     user_id: user && user.id,
                     user_account: user && user.account,
@@ -372,6 +446,7 @@ async function executeActions({
                     event_time: Date.now(),
                     desc: 'sync action success'
                 });
+                return { success: true, skipped: false };
             } else {
                 console.warn(`[Result] 失败: ${action.type} -> ${action.item.account}`);
                 if (platform === 'uuzuhao' && action.type === 'on_y' && Number(detail.code || 0) === 12101012) {
@@ -407,13 +482,68 @@ async function executeActions({
                         desc: `code=12101012 msg=${String(detail.msg || '')}`
                     });
                 }
+                const durationMs = elapsedMs(actionStartedAt);
+                recordActionTiming(action, { plan_index: planIndex, duration_ms: durationMs, success: false, error: String(detail && detail.msg || '') });
                 runRecord.errors.push(`操作失败: ${action.reason} -> ${action.item.account}`);
+                return { success: false, skipped: false };
             }
         } catch (err) {
+            const durationMs = elapsedMs(actionStartedAt);
             console.error(`[Error] 操作失败: ${err.message}`);
+            recordActionTiming(action, { plan_index: planIndex, duration_ms: durationMs, success: false, error: String(err && err.message || err || '') });
             runRecord.errors.push(`异常: ${err.message} (${action.item.account})`);
+            return { success: false, skipped: false };
+        }
+    };
+
+    const plans = actions.map((action, planIndex) => ({
+        action,
+        planIndex,
+        platform: platformFromActionType(action && action.type) || 'unknown'
+    }));
+    const queues = new Map();
+    for (const plan of plans) {
+        if (!queues.has(plan.platform)) queues.set(plan.platform, []);
+        queues.get(plan.platform).push(plan);
+    }
+    const runPlatformQueue = async (platform, queue) => {
+        const queueStartedAt = nowMs();
+        if (timing) {
+            timing.queue_timing[platform] = {
+                total_ms: 0,
+                planned: queue.length,
+                executed: 0,
+                success: 0,
+                failed: 0,
+                skipped: 0
+            };
+        }
+        for (const plan of queue) {
+            const outcome = await executeOneAction(plan.action, plan.planIndex);
+            if (timing && timing.queue_timing[platform]) {
+                const qt = timing.queue_timing[platform];
+                qt.executed += 1;
+                if (outcome && outcome.skipped) qt.skipped += 1;
+                else if (outcome && outcome.success) qt.success += 1;
+                else qt.failed += 1;
+            }
+        }
+        if (timing && timing.queue_timing[platform]) {
+            timing.queue_timing[platform].total_ms = elapsedMs(queueStartedAt);
+        }
+    };
+    const queueResults = await Promise.allSettled(
+        Array.from(queues.entries()).map(([platform, queue]) => runPlatformQueue(platform, queue))
+    );
+    for (const result of queueResults) {
+        if (result.status === 'rejected') {
+            runRecord.errors.push(`平台动作队列异常: ${String(result.reason && result.reason.message ? result.reason.message : result.reason || '')}`);
         }
     }
+    if (Array.isArray(runRecord.actions)) {
+        runRecord.actions.sort((a, b) => Number(a && a.plan_index || 0) - Number(b && b.plan_index || 0));
+    }
+    if (timing) timing.total_ms = elapsedMs(timingStartedAt);
 }
 
 function buildPlatformRowsFromUserAccounts(rows = []) {
@@ -491,12 +621,42 @@ async function executeUserActionsIfNeeded({
     actionEnabled = true,
     readOnly = false
 }) {
-    if (!actionEnabled) return { planned: 0, actions: [], errors: [] };
+    const totalStartedAt = nowMs();
+    const timing = {
+        total_ms: 0,
+        auth_load_ms: 0,
+        restrict_cleanup_ms: 0,
+        plan_ms: 0,
+        execute_ms: 0,
+        planned: 0,
+        actions: {
+            total_ms: 0,
+            planned: 0,
+            executed: 0,
+            success: 0,
+            failed: 0,
+            skipped: 0,
+            by_platform: {},
+            by_type: {},
+            queue_timing: {},
+            mode: 'platform_parallel',
+            actions: []
+        }
+    };
+    const finishTiming = () => {
+        timing.total_ms = elapsedMs(totalStartedAt);
+        return timing;
+    };
+    if (!actionEnabled) return { planned: 0, actions: [], timing: finishTiming(), errors: [] };
     if (!user || !user.id) throw new Error('user 缺失或不合法');
 
+    const authStartedAt = nowMs();
     const authRows = (await listUserPlatformAuth(user.id, { with_payload: true }))
         .filter((row) => row.channel_enabled !== false);
     const authMap = buildAuthMap(authRows);
+    timing.auth_load_ms = elapsedMs(authStartedAt);
+
+    const planStartedAt = nowMs();
     const { youpinData, uhaozuData, zhwData } = buildPlatformRowsFromUserAccounts(rows);
     const platformStatusNormMap = buildPlatformStatusNormMapByAccount(rows);
     const accounts = Array.from(new Map((rows || [])
@@ -517,6 +677,7 @@ async function executeUserActionsIfNeeded({
     const cleanupStats = { attempted: 0, cleared: 0, failed: 0 };
 
     // 平台状态已恢复（上架/租赁中）时，自动清理限制标记，避免“平台限制上架”残留卡住。
+    const cleanupStartedAt = nowMs();
     for (const row of rows || []) {
         const acc = String((row && row.game_account) || '').trim();
         const gid = String((row && row.game_id) || '1').trim() || '1';
@@ -587,6 +748,7 @@ async function executeUserActionsIfNeeded({
     if (cleanupStats.attempted > 0) {
         console.log(`[RestrictClear] precheck user_id=${user.id} attempted=${cleanupStats.attempted} cleared=${cleanupStats.cleared} failed=${cleanupStats.failed}`);
     }
+    timing.restrict_cleanup_ms = elapsedMs(cleanupStartedAt);
     const { actions } = detectConflictsAndBuildSnapshot({
         youpinData,
         uhaozuData,
@@ -608,8 +770,9 @@ async function executeUserActionsIfNeeded({
             throw new Error(`${platform} 授权缺失，已阻断执行，避免混用非用户凭据`);
         }
     }
+    timing.plan_ms = elapsedMs(planStartedAt);
 
-    const runRecord = { actions: [], errors: [] };
+    const runRecord = { actions: [], errors: [], action_timing: null };
     await executeActions({
         user,
         actions,
@@ -648,10 +811,15 @@ async function executeUserActionsIfNeeded({
         },
         readOnly
     });
+    timing.execute_ms = runRecord.action_timing ? Number(runRecord.action_timing.total_ms || 0) : 0;
+    timing.planned = actions.length;
+    timing.actions = runRecord.action_timing || timing.actions;
+    finishTiming();
 
     return {
         planned: actions.length,
         actions: Array.isArray(runRecord.actions) ? runRecord.actions : [],
+        timing,
         errors: [
             ...(Array.isArray(preCleanupErrors) ? preCleanupErrors : []),
             ...(Array.isArray(runRecord.errors) ? runRecord.errors : [])
