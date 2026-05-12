@@ -752,9 +752,9 @@
       if (!account) return;
       const followGlobal = Boolean(sheet.follow_global);
       const rawThreshold = String((els.accountOrderOffThresholdInput && els.accountOrderOffThresholdInput.value) || '').trim();
-      const threshold = Math.max(1, Math.min(10, Math.floor(Number(rawThreshold || sheet.threshold || 0))));
-      if (!followGlobal && (!rawThreshold || !Number.isFinite(Number(rawThreshold)) || threshold < 1 || threshold > 10)) {
-        state.accountOrderOffSheet.result_text = '请输入 1~10 的整数';
+      const threshold = Math.max(1, Math.min(50, Math.floor(Number(rawThreshold || sheet.threshold || 0))));
+      if (!followGlobal && (!rawThreshold || !Number.isFinite(Number(rawThreshold)) || threshold < 1 || threshold > 50)) {
+        state.accountOrderOffSheet.result_text = '请输入 1~50 的整数';
         state.accountOrderOffSheet.result_type = 'err';
         renderAccountOrderOffSheet();
         return;

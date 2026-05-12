@@ -54,16 +54,16 @@ async function main() {
 
     const savedSwitch = await updateUserGameAccountSwitchByUserAndAccount(uid, '2147515620', {
         order_n_off: {
-            threshold: 2,
+            threshold: 50,
             mode: 'rolling_24h'
         }
     }, 'save account order off', '1', 'WZRY');
-    assertEqual(Number(savedSwitch.order_n_off && savedSwitch.order_n_off.threshold || 0), 2, '账号级阈值应写入');
+    assertEqual(Number(savedSwitch.order_n_off && savedSwitch.order_n_off.threshold || 0), 50, '账号级阈值应写入 50');
     assertEqual(String(savedSwitch.order_n_off && savedSwitch.order_n_off.mode || ''), 'rolling_24h', '账号级模式应写入');
     assertEqual(Boolean(savedSwitch.prod_guard && savedSwitch.prod_guard.enabled), false, '其他 switch 字段应保留');
 
     const stored = await getLatestUserGameAccountByUserAndAccount(uid, '2147515620', '1', 'WZRY');
-    assertEqual(Number(stored.switch && stored.switch.order_n_off && stored.switch.order_n_off.threshold || 0), 2, '数据库里应持久化账号级阈值');
+    assertEqual(Number(stored.switch && stored.switch.order_n_off && stored.switch.order_n_off.threshold || 0), 50, '数据库里应持久化账号级阈值 50');
 
     const clearedSwitch = await updateUserGameAccountSwitchByUserAndAccount(uid, '2147515620', {
         order_n_off: null

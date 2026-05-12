@@ -897,9 +897,9 @@
     async function submitOrderOffThreshold() {
       const raw = String((els.orderOffThresholdInput && els.orderOffThresholdInput.value) || '').trim();
       const n = Number(raw);
-      if (!Number.isFinite(n) || n < 1 || n > 10) {
+      if (!Number.isFinite(n) || n < 1 || n > 50) {
         if (els.orderOffThresholdSheetResult) {
-          els.orderOffThresholdSheetResult.textContent = '请输入 1~10 的整数';
+          els.orderOffThresholdSheetResult.textContent = '请输入 1~50 的整数';
           els.orderOffThresholdSheetResult.classList.add('err');
         }
         return;
@@ -1140,7 +1140,7 @@
     async function loadOrderOffThresholdRule() {
       const data = await request('/api/user-rules/order-off-threshold');
       const v = Number(data.threshold || 3);
-      state.userRules.order_off_threshold = Number.isFinite(v) ? Math.max(1, Math.min(10, Math.floor(v))) : 3;
+      state.userRules.order_off_threshold = Number.isFinite(v) ? Math.max(1, Math.min(50, Math.floor(v))) : 3;
       state.userRules.order_off_mode = normalizeOrderOffMode(data.mode, ORDER_OFF_MODE_NATURAL_DAY);
     }
 

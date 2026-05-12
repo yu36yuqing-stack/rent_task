@@ -144,6 +144,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const H5_REFRESH_TTL_REMEMBER_SEC = Number(process.env.H5_REFRESH_TTL_REMEMBER_SEC || (7 * 24 * 3600));
 const H5_REFRESH_TTL_SESSION_SEC = Number(process.env.H5_REFRESH_TTL_SESSION_SEC || (12 * 3600));
 const ORDER_OFF_THRESHOLD_RULE_NAME = 'X单下架阈值';
+const ORDER_OFF_THRESHOLD_MAX = 50;
 const ORDER_OFF_MODE_NATURAL_DAY = 'natural_day';
 const ORDER_OFF_MODE_ROLLING_24H = 'rolling_24h';
 const ORDER_SYNC_LOCK_KEY = String(process.env.ORDER_SYNC_LOCK_KEY || 'order_sync_all_users');
@@ -163,7 +164,7 @@ const orderBff = createOrderBff({ requireAuth, json });
 function normalizeOrderOffThreshold(v, fallback = 3) {
     const n = Number(v);
     if (!Number.isFinite(n)) return fallback;
-    return Math.max(1, Math.min(10, Math.floor(n)));
+    return Math.max(1, Math.min(ORDER_OFF_THRESHOLD_MAX, Math.floor(n)));
 }
 
 function normalizeOrderOffMode(v, fallback = ORDER_OFF_MODE_NATURAL_DAY) {
@@ -1464,7 +1465,7 @@ async function handleSetOrderOffThreshold(req, res) {
     const current = await getOrderOffRuleByUser(user.id);
     const threshold = normalizeOrderOffThreshold(body.threshold, NaN);
     if (!Number.isFinite(threshold)) {
-        return json(res, 400, { ok: false, message: 'threshold 必须是 1~10 的整数' });
+        return json(res, 400, { ok: false, message: `threshold 必须是 1~${ORDER_OFF_THRESHOLD_MAX} 的整数` });
     }
     const modeInput = body.mode === undefined || body.mode === null ? '' : String(body.mode || '').trim().toLowerCase();
     if (modeInput && modeInput !== ORDER_OFF_MODE_NATURAL_DAY && modeInput !== ORDER_OFF_MODE_ROLLING_24H) {
@@ -1572,7 +1573,7 @@ async function handleSetProfileOrderOff(req, res) {
     const body = await readJsonBody(req);
     const threshold = normalizeOrderOffThreshold(body.threshold, NaN);
     if (!Number.isFinite(threshold)) {
-        return json(res, 400, { ok: false, message: 'threshold 必须是 1~10 的整数' });
+        return json(res, 400, { ok: false, message: `threshold 必须是 1~${ORDER_OFF_THRESHOLD_MAX} 的整数` });
     }
     const modeInput = body.mode === undefined || body.mode === null ? '' : String(body.mode || '').trim().toLowerCase();
     if (modeInput && modeInput !== ORDER_OFF_MODE_NATURAL_DAY && modeInput !== ORDER_OFF_MODE_ROLLING_24H) {
@@ -2029,8 +2030,8 @@ async function handleProductAccountOrderOffConfigSave(req, res) {
     let patchSwitch = { order_n_off: null };
     if (!followGlobal) {
         const rawThreshold = Number(body.threshold);
-        if (!Number.isFinite(rawThreshold) || rawThreshold < 1 || rawThreshold > 10 || !Number.isInteger(rawThreshold)) {
-            return json(res, 400, { ok: false, message: 'threshold 必须是 1~10 的整数' });
+        if (!Number.isFinite(rawThreshold) || rawThreshold < 1 || rawThreshold > ORDER_OFF_THRESHOLD_MAX || !Number.isInteger(rawThreshold)) {
+            return json(res, 400, { ok: false, message: `threshold 必须是 1~${ORDER_OFF_THRESHOLD_MAX} 的整数` });
         }
         const threshold = normalizeOrderOffThreshold(rawThreshold, 0);
         const modeText = String(body.mode || '').trim().toLowerCase();

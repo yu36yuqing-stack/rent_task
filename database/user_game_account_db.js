@@ -6,6 +6,7 @@ const {
 } = require('../common/game_profile');
 
 const PLATFORM_KEYS = new Set(['zuhaowang', 'uhaozu', 'uuzuhao']);
+const ORDER_OFF_THRESHOLD_MAX = 50;
 
 function nowText() {
     const d = new Date();
@@ -307,7 +308,7 @@ function normalizeOrderOffSwitchConfig(raw) {
     if (!cfg) return null;
     const thresholdRaw = Number(cfg.threshold);
     if (!Number.isFinite(thresholdRaw)) return null;
-    const threshold = Math.max(1, Math.min(10, Math.floor(thresholdRaw)));
+    const threshold = Math.max(1, Math.min(ORDER_OFF_THRESHOLD_MAX, Math.floor(thresholdRaw)));
     const modeText = String(cfg.mode || '').trim().toLowerCase();
     const mode = modeText === 'rolling_24h' ? 'rolling_24h' : 'natural_day';
     return { threshold, mode };

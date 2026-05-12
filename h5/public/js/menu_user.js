@@ -24,7 +24,7 @@ async function loadProfile() {
 
     const thresholdRaw = Number(orderOff.threshold);
     const threshold = Number.isFinite(thresholdRaw)
-      ? Math.max(1, Math.min(10, Math.floor(thresholdRaw)))
+      ? Math.max(1, Math.min(50, Math.floor(thresholdRaw)))
       : 3;
     const mode = normalizeOrderOffMode(orderOff.mode, ORDER_OFF_MODE_NATURAL_DAY);
     const releaseDelayRaw = Number(orderCooldown.release_delay_min);
@@ -83,7 +83,7 @@ function renderProfileView() {
   }
   const thresholdRaw = Number(orderOff.threshold);
   const threshold = Number.isFinite(thresholdRaw)
-    ? Math.max(1, Math.min(10, Math.floor(thresholdRaw)))
+    ? Math.max(1, Math.min(50, Math.floor(thresholdRaw)))
     : 3;
   const preserveThresholdInput = orderOffSaving || (typeof document !== 'undefined' && document.activeElement === els.profileOrderOffThreshold);
   if (els.profileOrderOffThreshold && !preserveThresholdInput) {
@@ -143,8 +143,8 @@ async function submitProfileNotify() {
 async function submitProfileOrderOff() {
   const thresholdRaw = String((els.profileOrderOffThreshold && els.profileOrderOffThreshold.value) || '').trim();
   const thresholdNum = Number(thresholdRaw);
-  if (!Number.isFinite(thresholdNum) || thresholdNum < 1 || thresholdNum > 10) {
-    throw new Error('请输入 1~10 的整数');
+  if (!Number.isFinite(thresholdNum) || thresholdNum < 1 || thresholdNum > 50) {
+    throw new Error('请输入 1~50 的整数');
   }
   const threshold = Math.floor(thresholdNum);
   const mode = normalizeOrderOffMode((els.profileOrderOffMode && els.profileOrderOffMode.value) || ORDER_OFF_MODE_NATURAL_DAY);
@@ -157,7 +157,7 @@ async function submitProfileOrderOff() {
     : ((out && out.data && out.data.order_off && typeof out.data.order_off === 'object') ? out.data.order_off : {});
   const savedThresholdRaw = Number(saved.threshold);
   const savedThreshold = Number.isFinite(savedThresholdRaw)
-    ? Math.max(1, Math.min(10, Math.floor(savedThresholdRaw)))
+    ? Math.max(1, Math.min(50, Math.floor(savedThresholdRaw)))
     : threshold;
   const savedMode = normalizeOrderOffMode(saved.mode, mode);
   state.profile.order_off = {

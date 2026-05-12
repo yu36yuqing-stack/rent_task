@@ -54,6 +54,7 @@ const CHANNEL_ZHW = 'zuhaowang';
 const CHANNEL_ZHW_YUANBAO = 'zuhaowang-yuanbao';
 const ORDER_3_OFF_SOURCE = 'order_3_off';
 const ORDER_3_OFF_THRESHOLD = 3;
+const ORDER_OFF_THRESHOLD_MAX = 50;
 const ORDER_OFF_THRESHOLD_RULE_NAME = 'X单下架阈值';
 const ORDER_3_OFF_BLOCK_RECOVER_RULE_NAME = '3单下架-不恢复时段';
 const ORDER_OFF_MODE_NATURAL_DAY = 'natural_day';
@@ -68,7 +69,7 @@ const ORDER_ZHW_DAILY_COMPENSATION_LOOKBACK_SEC = 8 * 24 * 3600;
 function normalizeOrderOffThreshold(v, fallback = ORDER_3_OFF_THRESHOLD) {
     const n = Number(v);
     if (!Number.isFinite(n)) return fallback;
-    return Math.max(1, Math.min(10, Math.floor(n)));
+    return Math.max(1, Math.min(ORDER_OFF_THRESHOLD_MAX, Math.floor(n)));
 }
 
 function buildOrderOffReasonByThreshold(threshold) {

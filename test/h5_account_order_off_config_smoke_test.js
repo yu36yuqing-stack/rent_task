@@ -127,6 +127,22 @@ async function main() {
         assertEqual(Number(clearJson.data && clearJson.data.threshold || 0), 4, '跟随全局后应回退到全局阈值');
         assertEqual(String(clearJson.data && clearJson.data.config_source || ''), 'global', '跟随全局后应回退到全局来源');
 
+        const highThresholdRes = await fetch(`${baseUrl}/api/products/account-order-off-config`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                game_account: '2147515620',
+                game_id: '1',
+                game_name: 'WZRY',
+                follow_global: false,
+                threshold: 50,
+                mode: 'rolling_24h'
+            })
+        });
+        const highThresholdJson = await highThresholdRes.json();
+        assertTrue(highThresholdRes.ok && highThresholdJson.ok, '商品级 X 单下架应允许阈值 50');
+        assertEqual(Number(highThresholdJson.data && highThresholdJson.data.threshold || 0), 50, '商品级阈值应保存为 50');
+
         const badThresholdRes = await fetch(`${baseUrl}/api/products/account-order-off-config`, {
             method: 'POST',
             headers,
@@ -141,7 +157,7 @@ async function main() {
         });
         const badThresholdJson = await badThresholdRes.json();
         assertEqual(badThresholdRes.status, 400, '非法 threshold 应返回 400');
-        assertEqual(String(badThresholdJson.message || ''), 'threshold 必须是 1~10 的整数', '非法 threshold 错误文案应正确');
+        assertEqual(String(badThresholdJson.message || ''), 'threshold 必须是 1~50 的整数', '非法 threshold 错误文案应正确');
 
         const badModeRes = await fetch(`${baseUrl}/api/products/account-order-off-config`, {
             method: 'POST',
