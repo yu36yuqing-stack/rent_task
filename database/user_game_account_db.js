@@ -314,6 +314,15 @@ function normalizeOrderOffSwitchConfig(raw) {
     return { threshold, mode };
 }
 
+function normalizeOrderCooldownSwitchConfig(raw) {
+    const cfg = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
+    if (!cfg) return null;
+    const releaseDelayRaw = Number(cfg.release_delay_min);
+    if (!Number.isFinite(releaseDelayRaw) || Math.floor(releaseDelayRaw) !== releaseDelayRaw) return null;
+    const releaseDelayMin = Math.max(0, Math.min(120, Math.floor(releaseDelayRaw)));
+    return { release_delay_min: releaseDelayMin };
+}
+
 function normalizeAccountSwitch(raw) {
     const out = raw && typeof raw === 'object' && !Array.isArray(raw)
         ? raw
@@ -322,6 +331,11 @@ function normalizeAccountSwitch(raw) {
     for (const [key, value] of Object.entries(out)) {
         if (key === 'order_n_off') {
             const cfg = normalizeOrderOffSwitchConfig(value);
+            if (cfg) next[key] = cfg;
+            continue;
+        }
+        if (key === 'order_cooldown') {
+            const cfg = normalizeOrderCooldownSwitchConfig(value);
             if (cfg) next[key] = cfg;
             continue;
         }
@@ -349,6 +363,11 @@ function mergeAccountSwitch(baseRaw, patchRaw) {
         }
         if (key === 'order_n_off') {
             const cfg = normalizeOrderOffSwitchConfig(value);
+            if (cfg) merged[key] = cfg;
+            continue;
+        }
+        if (key === 'order_cooldown') {
+            const cfg = normalizeOrderCooldownSwitchConfig(value);
             if (cfg) merged[key] = cfg;
             continue;
         }

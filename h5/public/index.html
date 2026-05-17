@@ -373,6 +373,7 @@
       <div class="sheet-actions">
         <button id="moreOpsForbiddenBtn" class="sheet-btn warn">处理禁玩</button>
         <button id="moreOpsOrderOffBtn" class="sheet-btn">X单下架</button>
+        <button id="moreOpsCooldownBtn" class="sheet-btn">冷却期配置</button>
         <button id="moreOpsProdGuardBtn" class="sheet-btn">关闭在线风控</button>
         <button id="moreOpsMaintenanceBtn" class="sheet-btn">开启维护</button>
         <button id="moreOpsPurchaseBtn" class="sheet-btn">维护采购</button>
@@ -544,6 +545,39 @@
       <div class="sheet-actions">
         <button id="accountOrderOffSaveBtn" class="sheet-btn">保存</button>
         <button id="accountOrderOffCancelBtn" class="sheet-btn">关闭弹窗</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="accountCooldownSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon">冷</span>
+          <div id="accountCooldownSheetTitle" class="sheet-title">商品级冷却期配置</div>
+        </div>
+        <div id="accountCooldownSheetResult" class="sheet-result"></div>
+      </div>
+      <div class="field" style="margin-top:0;">
+        <label>生效方式</label>
+        <div class="mode-options">
+          <button id="accountCooldownFollowGlobal" type="button" class="mode-option-row active" data-source="global">
+            <span class="mode-name">跟随全局</span>
+            <span id="accountCooldownFollowTip" class="mode-tip-inline">默认使用全局配置</span>
+          </button>
+          <button id="accountCooldownCustom" type="button" class="mode-option-row" data-source="account">
+            <span class="mode-name">单独设置</span>
+            <span class="mode-tip-inline">为当前商品覆盖冷却期释放时间</span>
+          </button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="accountCooldownDelayInput">订单结束后释放（0~120 分钟）</label>
+        <input id="accountCooldownDelayInput" type="number" step="1" min="0" max="120" inputmode="numeric" placeholder="请输入 0~120">
+      </div>
+      <div class="sheet-actions">
+        <button id="accountCooldownSaveBtn" class="sheet-btn">保存</button>
+        <button id="accountCooldownCancelBtn" class="sheet-btn">关闭弹窗</button>
       </div>
     </div>
   </div>

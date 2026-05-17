@@ -90,6 +90,12 @@
       return `${source === 'account' ? '商品级' : '全局'} · ${safeThreshold}单 / ${shortMode}`;
     }
 
+    function buildCooldownSummaryText(source, releaseDelayMin) {
+      const n = Number(releaseDelayMin);
+      const safeMin = Number.isFinite(n) ? Math.max(0, Math.min(120, Math.floor(n))) : 10;
+      return `冷却期 · ${source === 'account' ? '商品级' : '全局'}${safeMin}分钟`;
+    }
+
     function productIdentityKey(input, fallbackGameId = '1') {
       if (!input || typeof input !== 'object') {
         const acc = String(input || '').trim();
@@ -516,11 +522,16 @@
       const prodGuardLoading = Boolean(state.moreOpsSheet.prod_guard_loading);
       const prodGuardEnabled = state.moreOpsSheet.prod_guard_enabled === undefined ? true : Boolean(state.moreOpsSheet.prod_guard_enabled);
       const orderOffSummary = String(state.moreOpsSheet.order_off_summary || '').trim() || 'X单下架';
+      const cooldownSummary = String(state.moreOpsSheet.cooldown_summary || '').trim() || '冷却期配置';
       els.moreOpsSheetTitle.textContent = `更多操作 · ${name || '当前账号'}`;
       els.moreOpsForbiddenBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
       if (els.moreOpsOrderOffBtn) {
         els.moreOpsOrderOffBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
         els.moreOpsOrderOffBtn.textContent = orderOffSummary;
+      }
+      if (els.moreOpsCooldownBtn) {
+        els.moreOpsCooldownBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+        els.moreOpsCooldownBtn.textContent = cooldownSummary;
       }
       if (els.moreOpsProdGuardBtn) {
         els.moreOpsProdGuardBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
@@ -596,8 +607,9 @@
 
     function closeActionSheets() {
       state.activeActionSheet = '';
-      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '' };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '', cooldown_summary: '' };
       state.accountOrderOffSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, threshold: '', mode: ORDER_OFF_MODE_NATURAL_DAY, global_threshold: 3, global_mode: ORDER_OFF_MODE_NATURAL_DAY, loading: false, result_text: '', result_type: '' };
+      state.accountCooldownSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, release_delay_min: '', global_release_delay_min: 10, loading: false, result_text: '', result_type: '' };
       state.forbiddenSheet = {
         open: false,
         account: '',
@@ -613,13 +625,14 @@
       };
       renderMoreOpsSheet();
       renderAccountOrderOffSheet();
+      renderAccountCooldownSheet();
       renderForbiddenSheet();
     }
 
     function openForbiddenSheet(item) {
       const account = String(item && item.game_account || '').trim();
       if (!account) return;
-      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '' };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '', cooldown_summary: '' };
       state.activeActionSheet = 'forbidden';
       renderMoreOpsSheet();
       state.forbiddenSheet = {
@@ -685,7 +698,8 @@
         maintenance_loading: false,
         prod_guard_enabled: item && item.prod_guard_enabled === undefined ? true : Boolean(item && item.prod_guard_enabled),
         prod_guard_loading: false,
-        order_off_summary: buildOrderOffSummaryText(item && item.order_off_config_source, item && item.order_off_threshold, item && item.order_off_mode)
+        order_off_summary: buildOrderOffSummaryText(item && item.order_off_config_source, item && item.order_off_threshold, item && item.order_off_mode),
+        cooldown_summary: buildCooldownSummaryText(item && item.cooldown_config_source, item && item.cooldown_release_delay_min)
       };
       renderForbiddenSheet();
       renderMoreOpsSheet();
@@ -693,7 +707,7 @@
 
     function closeMoreOpsSheet() {
       if (state.activeActionSheet === 'more') state.activeActionSheet = '';
-      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '' };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '', cooldown_summary: '' };
       renderMoreOpsSheet();
     }
 
@@ -802,6 +816,148 @@
       } finally {
         state.accountOrderOffSheet.loading = false;
         renderAccountOrderOffSheet();
+      }
+    }
+
+    function renderAccountCooldownSheet() {
+      const opened = Boolean(state.accountCooldownSheet && state.accountCooldownSheet.open);
+      if (!els.accountCooldownSheet) return;
+      els.accountCooldownSheet.classList.toggle('hidden', !opened);
+      if (!opened) return;
+      const sheet = state.accountCooldownSheet || {};
+      const name = String(sheet.role_name || sheet.account || '').trim();
+      const loading = Boolean(sheet.loading);
+      const followGlobal = Boolean(sheet.follow_global);
+      const globalDelayRaw = Number(sheet.global_release_delay_min);
+      const globalDelay = Number.isFinite(globalDelayRaw) ? globalDelayRaw : 10;
+      if (els.accountCooldownSheetTitle) {
+        els.accountCooldownSheetTitle.textContent = `冷却期配置 · ${name || '当前账号'}`;
+      }
+      if (els.accountCooldownSheetResult) {
+        const resultText = String(sheet.result_text || '').trim();
+        const resultType = String(sheet.result_type || '').trim();
+        els.accountCooldownSheetResult.className = `sheet-result ${resultType}`;
+        els.accountCooldownSheetResult.textContent = resultText;
+      }
+      if (els.accountCooldownFollowTip) {
+        els.accountCooldownFollowTip.textContent = `订单结束后 ${globalDelay} 分钟释放`;
+      }
+      if (els.accountCooldownFollowGlobal) {
+        els.accountCooldownFollowGlobal.classList.toggle('active', followGlobal);
+        els.accountCooldownFollowGlobal.disabled = loading;
+      }
+      if (els.accountCooldownCustom) {
+        els.accountCooldownCustom.classList.toggle('active', !followGlobal);
+        els.accountCooldownCustom.disabled = loading;
+      }
+      if (els.accountCooldownDelayInput) {
+        els.accountCooldownDelayInput.value = sheet.release_delay_min === undefined || sheet.release_delay_min === null
+          ? ''
+          : String(sheet.release_delay_min);
+        els.accountCooldownDelayInput.disabled = loading || followGlobal;
+      }
+      if (els.accountCooldownSaveBtn) els.accountCooldownSaveBtn.disabled = loading;
+      if (els.accountCooldownCancelBtn) els.accountCooldownCancelBtn.disabled = loading;
+    }
+
+    function openAccountCooldownSheet(item) {
+      const account = String(item && item.game_account || '').trim();
+      if (!account) return;
+      const globalDelayRaw = Number(state.userRules.cooldown_release_delay_min);
+      const globalDelay = Number.isFinite(globalDelayRaw) ? globalDelayRaw : 10;
+      const source = String(item && item.cooldown_config_source || 'global').trim() || 'global';
+      const followGlobal = source !== 'account';
+      state.accountCooldownSheet = {
+        open: true,
+        account,
+        game_id: String(item && item.game_id || '1').trim() || '1',
+        game_name: String(item && item.game_name || 'WZRY').trim() || 'WZRY',
+        role_name: String(item && (item.role_name || item.game_account) || '').trim(),
+        follow_global: followGlobal,
+        release_delay_min: String(item && item.cooldown_release_delay_min !== undefined ? item.cooldown_release_delay_min : globalDelay),
+        global_release_delay_min: globalDelay,
+        loading: false,
+        result_text: '',
+        result_type: ''
+      };
+      closeMoreOpsSheet();
+      renderAccountCooldownSheet();
+    }
+
+    function closeAccountCooldownSheet() {
+      state.accountCooldownSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, release_delay_min: '', global_release_delay_min: 10, loading: false, result_text: '', result_type: '' };
+      renderAccountCooldownSheet();
+    }
+
+    function setAccountCooldownSheetFollowGlobal(followGlobal) {
+      state.accountCooldownSheet.follow_global = Boolean(followGlobal);
+      state.accountCooldownSheet.result_text = '';
+      state.accountCooldownSheet.result_type = '';
+      if (state.accountCooldownSheet.follow_global) {
+        state.accountCooldownSheet.release_delay_min = String(state.accountCooldownSheet.global_release_delay_min || 0);
+      }
+      renderAccountCooldownSheet();
+    }
+
+    async function submitAccountCooldownConfig() {
+      const sheet = state.accountCooldownSheet || {};
+      const account = String(sheet.account || '').trim();
+      const gameId = String(sheet.game_id || '1').trim() || '1';
+      const gameName = String(sheet.game_name || 'WZRY').trim() || 'WZRY';
+      if (!account) return;
+      const followGlobal = Boolean(sheet.follow_global);
+      const rawDelay = String((els.accountCooldownDelayInput && els.accountCooldownDelayInput.value) || '').trim();
+      const fallbackDelay = sheet.release_delay_min === 0 ? 0 : (sheet.release_delay_min || 0);
+      const releaseDelayNum = Number(rawDelay || fallbackDelay);
+      const releaseDelayMin = Math.floor(releaseDelayNum);
+      if (!followGlobal && (!rawDelay || !Number.isFinite(releaseDelayNum) || releaseDelayNum !== releaseDelayMin || releaseDelayMin < 0 || releaseDelayMin > 120)) {
+        state.accountCooldownSheet.result_text = '请输入 0~120 的整数';
+        state.accountCooldownSheet.result_type = 'err';
+        renderAccountCooldownSheet();
+        return;
+      }
+      state.accountCooldownSheet.loading = true;
+      state.accountCooldownSheet.result_text = '';
+      state.accountCooldownSheet.result_type = '';
+      renderAccountCooldownSheet();
+      try {
+        const out = await request('/api/products/account-order-cooldown-config', {
+          method: 'POST',
+          body: {
+            game_account: account,
+            game_id: gameId,
+            game_name: gameName,
+            follow_global: followGlobal,
+            release_delay_min: followGlobal ? undefined : releaseDelayMin
+          }
+        });
+        const data = out && out.data ? out.data : {};
+        const nextSource = String(data.config_source || (followGlobal ? 'global' : 'account')).trim() || 'global';
+        const nextDelayRaw = Number(data.release_delay_min);
+        const nextDelay = Number.isFinite(nextDelayRaw)
+          ? nextDelayRaw
+          : (Number.isFinite(Number(state.userRules.cooldown_release_delay_min)) ? Number(state.userRules.cooldown_release_delay_min) : 10);
+        const item = findProductItemByIdentity(gameId, account);
+        if (item) {
+          item.switch = data.switch || item.switch || {};
+          item.cooldown_release_delay_min = nextDelay;
+          item.cooldown_release_delay_label = String(data.release_delay_label || `订单结束后${nextDelay}分钟释放`);
+          item.cooldown_config_source = nextSource;
+        }
+        state.accountCooldownSheet.follow_global = nextSource !== 'account';
+        state.accountCooldownSheet.release_delay_min = String(nextDelay);
+        state.accountCooldownSheet.result_text = '保存成功';
+        state.accountCooldownSheet.result_type = 'ok';
+        renderAccountCooldownSheet();
+        showToast(nextSource === 'account' ? `已设置商品级冷却期：${nextDelay}分钟` : '已改为跟随全局');
+        closeAccountCooldownSheet();
+      } catch (e) {
+        state.accountCooldownSheet.result_text = e.message || '保存失败';
+        state.accountCooldownSheet.result_type = 'err';
+        renderAccountCooldownSheet();
+      } finally {
+        state.accountCooldownSheet.loading = false;
+        renderAccountCooldownSheet();
       }
     }
 

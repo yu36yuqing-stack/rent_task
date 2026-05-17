@@ -465,6 +465,25 @@ function resolveAccountOrderOffConfig(raw, fallbackRule = {}) {
     };
 }
 
+function resolveAccountCooldownConfig(raw, fallbackCooldown = {}) {
+    const sw = normalizeAccountSwitch(raw);
+    const cfg = sw.order_cooldown && typeof sw.order_cooldown === 'object' ? sw.order_cooldown : null;
+    const fallbackDelay = normalizeCooldownReleaseDelayMin(
+        fallbackCooldown.release_delay_min,
+        DEFAULT_COOLDOWN_RELEASE_DELAY_MIN
+    );
+    if (!cfg) {
+        return {
+            release_delay_min: fallbackDelay,
+            source: 'global'
+        };
+    }
+    return {
+        release_delay_min: normalizeCooldownReleaseDelayMin(cfg.release_delay_min, fallbackDelay),
+        source: 'account'
+    };
+}
+
 async function cleanupProdGuardStateByAccount(userId, gameAccount, options = {}) {
     const uid = Number(userId || 0);
     const acc = String((gameAccount && gameAccount.game_account) || gameAccount || '').trim();
@@ -657,6 +676,7 @@ async function handleProducts(req, res, urlObj) {
     }
 
     const orderOffRule = await getOrderOffRuleByUser(user.id);
+    const cooldownRule = await getCooldownConfigByUser(user.id);
     const allRows = await listAllAccountsByUser(user.id);
     const scopedRows = isAllGame
         ? allRows.list
@@ -784,6 +804,13 @@ async function handleProducts(req, res, urlObj) {
         const accountSwitch = normalizeAccountSwitch(x.switch);
         const prodGuardSwitch = resolveProdGuardSwitch(accountSwitch);
         const accountOrderOff = resolveAccountOrderOffConfig(accountSwitch, orderOffRule);
+        const accountCooldown = resolveAccountCooldownConfig(accountSwitch, cooldownRule);
+        const globalCooldownDelayMin = Number.isFinite(Number(cooldownRule.release_delay_min))
+            ? Number(cooldownRule.release_delay_min)
+            : DEFAULT_COOLDOWN_RELEASE_DELAY_MIN;
+        const cooldownDelayMin = Number.isFinite(Number(accountCooldown.release_delay_min))
+            ? Number(accountCooldown.release_delay_min)
+            : globalCooldownDelayMin;
         const onlineLabelRaw = String(onlineSnapshot.label || '').trim();
         const onlineTag = prodGuardSwitch.enabled && (onlineLabelRaw === '在线' || onlineLabelRaw === '离线')
             ? onlineLabelRaw
@@ -816,6 +843,9 @@ async function handleProducts(req, res, urlObj) {
             order_off_mode: String(accountOrderOff.mode || orderOffRule.mode || ORDER_OFF_MODE_NATURAL_DAY),
             order_off_mode_label: orderOffModeLabel(accountOrderOff.mode || orderOffRule.mode || ORDER_OFF_MODE_NATURAL_DAY),
             order_off_config_source: String(accountOrderOff.source || 'global'),
+            cooldown_release_delay_min: cooldownDelayMin,
+            cooldown_release_delay_label: cooldownReleaseDelayLabel(cooldownDelayMin),
+            cooldown_config_source: String(accountCooldown.source || 'global'),
             blacklisted: Boolean(bl),
             blacklist_reason: bl ? bl.reason : '',
             blacklist_create_date: bl ? bl.create_date : '',
@@ -2068,6 +2098,59 @@ async function handleProductAccountOrderOffConfigSave(req, res) {
     });
 }
 
+async function handleProductAccountCooldownConfigSave(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const gameAccount = String(body.game_account || '').trim();
+    const normalizedGame = normalizeGameProfile(body.game_id, body.game_name, { preserveUnknown: true });
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    const followGlobal = body.follow_global === true || String(body.follow_global || '').trim().toLowerCase() === 'true';
+    let patchSwitch = { order_cooldown: null };
+    if (!followGlobal) {
+        const releaseDelayRaw = Number(body.release_delay_min);
+        if (!Number.isFinite(releaseDelayRaw)
+            || Math.floor(releaseDelayRaw) !== releaseDelayRaw
+            || releaseDelayRaw < MIN_COOLDOWN_RELEASE_DELAY_MIN
+            || releaseDelayRaw > MAX_COOLDOWN_RELEASE_DELAY_MIN) {
+            return json(res, 400, {
+                ok: false,
+                message: `release_delay_min 必须是 ${MIN_COOLDOWN_RELEASE_DELAY_MIN}~${MAX_COOLDOWN_RELEASE_DELAY_MIN} 的整数`
+            });
+        }
+        patchSwitch = {
+            order_cooldown: {
+                release_delay_min: normalizeCooldownReleaseDelayMin(releaseDelayRaw, DEFAULT_COOLDOWN_RELEASE_DELAY_MIN)
+            }
+        };
+    }
+    const nextSwitch = await updateUserGameAccountSwitchByUserAndAccount(
+        user.id,
+        gameAccount,
+        patchSwitch,
+        'save account cooldown config by h5',
+        normalizedGame.game_id,
+        normalizedGame.game_name
+    );
+    const globalCooldown = await getCooldownConfigByUser(user.id);
+    const effective = resolveAccountCooldownConfig(nextSwitch, globalCooldown);
+    const globalReleaseDelayMin = Number.isFinite(Number(globalCooldown.release_delay_min))
+        ? Number(globalCooldown.release_delay_min)
+        : DEFAULT_COOLDOWN_RELEASE_DELAY_MIN;
+    const releaseDelayMin = Number.isFinite(Number(effective.release_delay_min))
+        ? Number(effective.release_delay_min)
+        : globalReleaseDelayMin;
+    return json(res, 200, {
+        ok: true,
+        data: {
+            game_account: gameAccount,
+            switch: nextSwitch,
+            release_delay_min: releaseDelayMin,
+            release_delay_label: cooldownReleaseDelayLabel(releaseDelayMin),
+            config_source: String(effective.source || 'global')
+        }
+    });
+}
+
 async function handleRiskCenterList(req, res, urlObj) {
     const user = await requireAuth(req);
     const page = normalizePage(urlObj.searchParams.get('page'), 1);
@@ -2475,6 +2558,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/products/account-cost/delete') return await handleProductAccountCostDelete(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/account-switch/toggle') return await handleProductAccountSwitchToggle(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/account-order-off-config') return await handleProductAccountOrderOffConfigSave(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/products/account-order-cooldown-config') return await handleProductAccountCooldownConfigSave(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/risk-center/events') return await handleRiskCenterList(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/add') return await handleBlacklistAdd(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/blacklist/remove') return await handleBlacklistRemove(req, res);

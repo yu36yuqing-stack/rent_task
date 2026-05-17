@@ -64,6 +64,12 @@ async function main() {
             mode: 'natural_day'
         }
     }, { desc: 'seed global order off rule' });
+    await upsertUserRuleByName(user.id, {
+        rule_name: '冷却期释放时长',
+        rule_detail: {
+            release_delay_min: 20
+        }
+    }, { desc: 'seed global cooldown rule' });
     await upsertUserGameAccount({
         user_id: user.id,
         game_account: '2147515620',
@@ -111,6 +117,60 @@ async function main() {
         assertEqual(Number(item.order_off_threshold || 0), 2, '列表应显示账号级阈值');
         assertEqual(String(item.order_off_mode || ''), 'rolling_24h', '列表应显示账号级模式');
         assertEqual(String(item.order_off_config_source || ''), 'account', '列表应显示账号级来源');
+
+        const saveCooldownRes = await fetch(`${baseUrl}/api/products/account-order-cooldown-config`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                game_account: '2147515620',
+                game_id: '1',
+                game_name: 'WZRY',
+                follow_global: false,
+                release_delay_min: 10
+            })
+        });
+        const saveCooldownJson = await saveCooldownRes.json();
+        assertTrue(saveCooldownRes.ok && saveCooldownJson.ok, '保存商品级冷却期配置失败');
+        assertEqual(Number(saveCooldownJson.data && saveCooldownJson.data.release_delay_min || 0), 10, '保存后应返回账号级冷却期');
+        assertEqual(String(saveCooldownJson.data && saveCooldownJson.data.config_source || ''), 'account', '保存后应返回账号级冷却期来源');
+
+        const cooldownListRes = await fetch(`${baseUrl}/api/products?page=1&page_size=20`, { headers });
+        const cooldownListJson = await cooldownListRes.json();
+        assertTrue(cooldownListRes.ok && cooldownListJson.ok, '冷却期保存后商品列表查询失败');
+        const cooldownItem = (cooldownListJson.list || []).find((row) => String((row && row.game_account) || '') === '2147515620');
+        assertTrue(Boolean(cooldownItem), '冷却期保存后商品列表应包含目标账号');
+        assertEqual(Number(cooldownItem.cooldown_release_delay_min || 0), 10, '列表应显示账号级冷却期');
+        assertEqual(String(cooldownItem.cooldown_config_source || ''), 'account', '列表应显示账号级冷却期来源');
+
+        const clearCooldownRes = await fetch(`${baseUrl}/api/products/account-order-cooldown-config`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                game_account: '2147515620',
+                game_id: '1',
+                game_name: 'WZRY',
+                follow_global: true
+            })
+        });
+        const clearCooldownJson = await clearCooldownRes.json();
+        assertTrue(clearCooldownRes.ok && clearCooldownJson.ok, '冷却期切换为跟随全局失败');
+        assertEqual(Number(clearCooldownJson.data && clearCooldownJson.data.release_delay_min || 0), 20, '冷却期跟随全局后应回退到全局');
+        assertEqual(String(clearCooldownJson.data && clearCooldownJson.data.config_source || ''), 'global', '冷却期跟随全局后应回退到全局来源');
+
+        const badCooldownRes = await fetch(`${baseUrl}/api/products/account-order-cooldown-config`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                game_account: '2147515620',
+                game_id: '1',
+                game_name: 'WZRY',
+                follow_global: false,
+                release_delay_min: 121
+            })
+        });
+        const badCooldownJson = await badCooldownRes.json();
+        assertEqual(badCooldownRes.status, 400, '非法 release_delay_min 应返回 400');
+        assertEqual(String(badCooldownJson.message || ''), 'release_delay_min 必须是 0~120 的整数', '非法 release_delay_min 错误文案应正确');
 
         const clearRes = await fetch(`${baseUrl}/api/products/account-order-off-config`, {
             method: 'POST',

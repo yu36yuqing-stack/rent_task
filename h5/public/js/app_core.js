@@ -324,8 +324,9 @@
         query_status: '',
         query_text: ''
       },
-      moreOpsSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '' },
+      moreOpsSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '', cooldown_summary: '' },
       accountOrderOffSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, threshold: '', mode: ORDER_OFF_MODE_NATURAL_DAY, global_threshold: 3, global_mode: ORDER_OFF_MODE_NATURAL_DAY, loading: false, result_text: '', result_type: '' },
+      accountCooldownSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, release_delay_min: '', global_release_delay_min: 10, loading: false, result_text: '', result_type: '' },
       activeActionSheet: '',
       purchaseSheet: {
         open: false,
@@ -574,6 +575,7 @@
       moreOpsSheetTitle: document.getElementById('moreOpsSheetTitle'),
       moreOpsForbiddenBtn: document.getElementById('moreOpsForbiddenBtn'),
       moreOpsOrderOffBtn: document.getElementById('moreOpsOrderOffBtn'),
+      moreOpsCooldownBtn: document.getElementById('moreOpsCooldownBtn'),
       moreOpsProdGuardBtn: document.getElementById('moreOpsProdGuardBtn'),
       moreOpsMaintenanceBtn: document.getElementById('moreOpsMaintenanceBtn'),
       moreOpsPurchaseBtn: document.getElementById('moreOpsPurchaseBtn'),
@@ -590,6 +592,15 @@
       accountOrderOffModeRolling: document.getElementById('accountOrderOffModeRolling'),
       accountOrderOffSaveBtn: document.getElementById('accountOrderOffSaveBtn'),
       accountOrderOffCancelBtn: document.getElementById('accountOrderOffCancelBtn'),
+      accountCooldownSheet: document.getElementById('accountCooldownSheet'),
+      accountCooldownSheetTitle: document.getElementById('accountCooldownSheetTitle'),
+      accountCooldownSheetResult: document.getElementById('accountCooldownSheetResult'),
+      accountCooldownFollowGlobal: document.getElementById('accountCooldownFollowGlobal'),
+      accountCooldownFollowTip: document.getElementById('accountCooldownFollowTip'),
+      accountCooldownCustom: document.getElementById('accountCooldownCustom'),
+      accountCooldownDelayInput: document.getElementById('accountCooldownDelayInput'),
+      accountCooldownSaveBtn: document.getElementById('accountCooldownSaveBtn'),
+      accountCooldownCancelBtn: document.getElementById('accountCooldownCancelBtn'),
       purchaseSheet: document.getElementById('purchaseSheet'),
       purchaseSheetTitle: document.getElementById('purchaseSheetTitle'),
       purchaseSheetResult: document.getElementById('purchaseSheetResult'),
@@ -1340,6 +1351,7 @@
         renderDrawer();
         renderMoreOpsSheet();
         if (typeof renderAccountOrderOffSheet === 'function') renderAccountOrderOffSheet();
+        if (typeof renderAccountCooldownSheet === 'function') renderAccountCooldownSheet();
         renderForbiddenSheet();
         renderPurchaseSheet();
         renderAuthUuzuhaoSheet();
@@ -1533,8 +1545,9 @@
         query_status: '',
         query_text: ''
       };
-      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '' };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '', cooldown_summary: '' };
       state.accountOrderOffSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, threshold: '', mode: ORDER_OFF_MODE_NATURAL_DAY, global_threshold: 3, global_mode: ORDER_OFF_MODE_NATURAL_DAY, loading: false, result_text: '', result_type: '' };
+      state.accountCooldownSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, release_delay_min: '', global_release_delay_min: 10, loading: false, result_text: '', result_type: '' };
       state.activeActionSheet = '';
       state.pricing = {
         loading: false,
@@ -1726,12 +1739,14 @@
       };
       state.userRules = {
         order_off_threshold: 3,
-        order_off_mode: ORDER_OFF_MODE_NATURAL_DAY
+        order_off_mode: ORDER_OFF_MODE_NATURAL_DAY,
+        cooldown_release_delay_min: 10
       };
       state.profile = {
         loading: false,
         notify_saving: false,
         order_off_saving: false,
+        order_cooldown_saving: false,
         notify: {
           at_mode: 'none',
           at_mobiles: []
@@ -1739,6 +1754,9 @@
         order_off: {
           threshold: 3,
           mode: ORDER_OFF_MODE_NATURAL_DAY
+        },
+        order_cooldown: {
+          release_delay_min: 10
         }
       };
       state.orders.syncing = false;
@@ -1938,6 +1956,13 @@
         openAccountOrderOffSheet(item);
       });
     }
+    if (els.moreOpsCooldownBtn) {
+      els.moreOpsCooldownBtn.addEventListener('click', () => {
+        const item = findCurrentProductItem();
+        if (!item) return;
+        openAccountCooldownSheet(item);
+      });
+    }
     if (els.moreOpsProdGuardBtn) {
       els.moreOpsProdGuardBtn.addEventListener('click', () => {
         const item = findCurrentProductItem();
@@ -1993,6 +2018,25 @@
     if (els.accountOrderOffSheet) {
       els.accountOrderOffSheet.addEventListener('click', (e) => {
         if (e.target === els.accountOrderOffSheet) closeAccountOrderOffSheet();
+      });
+    }
+    if (els.accountCooldownFollowGlobal) {
+      els.accountCooldownFollowGlobal.addEventListener('click', () => setAccountCooldownSheetFollowGlobal(true));
+    }
+    if (els.accountCooldownCustom) {
+      els.accountCooldownCustom.addEventListener('click', () => setAccountCooldownSheetFollowGlobal(false));
+    }
+    if (els.accountCooldownSaveBtn) {
+      els.accountCooldownSaveBtn.addEventListener('click', () => {
+        void submitAccountCooldownConfig();
+      });
+    }
+    if (els.accountCooldownCancelBtn) {
+      els.accountCooldownCancelBtn.addEventListener('click', () => closeAccountCooldownSheet());
+    }
+    if (els.accountCooldownSheet) {
+      els.accountCooldownSheet.addEventListener('click', (e) => {
+        if (e.target === els.accountCooldownSheet) closeAccountCooldownSheet();
       });
     }
     els.purchaseSaveBtn.addEventListener('click', () => submitPurchaseConfig());
@@ -2155,6 +2199,7 @@
         state.drawerOpen ||
         (state.moreOpsSheet && state.moreOpsSheet.open) ||
         (state.accountOrderOffSheet && state.accountOrderOffSheet.open) ||
+        (state.accountCooldownSheet && state.accountCooldownSheet.open) ||
         (state.forbiddenSheet && state.forbiddenSheet.open) ||
         (state.purchaseSheet && state.purchaseSheet.open) ||
         (state.costSheet && state.costSheet.open) ||

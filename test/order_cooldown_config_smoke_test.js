@@ -11,7 +11,7 @@ process.env.RUNTIME_DB_FILE_PATH = path.join(tempDir, 'rent_robot_runtime.db');
 
 const { initOrderDb, upsertOrder } = require('../database/order_db');
 const { initUserRuleDb, upsertUserRuleByName } = require('../database/user_rule_db');
-const { initUserGameAccountDb } = require('../database/user_game_account_db');
+const { initUserGameAccountDb, upsertUserGameAccount } = require('../database/user_game_account_db');
 const { initUserBlacklistDb } = require('../database/user_blacklist_db');
 const { initUserBlacklistSourceDb, listBlacklistSourcesByUser } = require('../database/user_blacklist_source_db');
 const {
@@ -97,6 +97,39 @@ async function main() {
     assertEqual(customRows.length, 1, '自定义配置应写入 1 条冷却 source');
     assertEqual(Number((customRows[0].detail || {}).cooldown_until), customEndSec + 30 * 60, '自定义 cooldown_until 应为结束后 30 分钟');
     assertTrue(String(customRows[0].reason || '') === '冷却期下架', 'reason 应为冷却期下架');
+
+    const accountUserId = 103;
+    await upsertUserRuleByName(accountUserId, {
+        rule_name: COOLDOWN_RELEASE_RULE_NAME,
+        rule_detail: {
+            release_delay_min: 20
+        }
+    }, {
+        desc: 'cooldown account config smoke'
+    });
+    await upsertUserGameAccount({
+        user_id: accountUserId,
+        game_account: 'acct_account',
+        game_id: '1',
+        game_name: 'WZRY',
+        account_remark: 'account cooldown',
+        switch: {
+            order_cooldown: {
+                release_delay_min: 10
+            }
+        },
+        desc: 'cooldown account config smoke'
+    });
+    const accountEndSec = await seedActiveOrder(accountUserId, 'ORDER_ACCOUNT', 'acct_account', nowSec, 300);
+    const accountRet = await reconcileOrderCooldownEntryByUser(accountUserId);
+    assertEqual(accountRet.hit_accounts, 1, '账号级配置应命中 1 个账号');
+    assertEqual(accountRet.release_delay_min, 10, '账号级释放时长应优先于全局');
+
+    const accountRows = await listBlacklistSourcesByUser(accountUserId);
+    assertEqual(accountRows.length, 1, '账号级配置应写入 1 条冷却 source');
+    assertEqual(Number((accountRows[0].detail || {}).cooldown_until), accountEndSec + 10 * 60, '账号级 cooldown_until 应为结束后 10 分钟');
+    assertEqual(Number((accountRows[0].detail || {}).release_delay_min), 10, 'source detail 应记录账号级 release_delay_min');
+    assertEqual(String((accountRows[0].detail || {}).release_delay_source || ''), 'account', 'source detail 应记录账号级来源');
 
     console.log('[PASS] order_cooldown_config_smoke_test');
 }

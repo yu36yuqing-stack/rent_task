@@ -767,7 +767,8 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
             })
             .filter(([k]) => Boolean(k))
     );
-    const historicalTotalMap = await buildHistoricalTotalMapByUser(uid, gameName, periodInfo.endDate, config.configured || []);
+    const historicalTotalTargetDate = currentDateText(now);
+    const historicalTotalMap = await buildHistoricalTotalMapByUser(uid, gameName, historicalTotalTargetDate, config.configured || []);
 
     const summary = reduceRows(rows);
     const periodDays = dateDiffDaysInclusive(periodInfo.startDate, periodInfo.endDate);

@@ -179,6 +179,9 @@ async function main() {
     });
     assertTrue(Number((((dashboard || {}).summary || {}).total_rec_amount_all_time || 0)) > 0, '看板返回历史总收入 KPI');
     assertTrue(Number(((((dashboard || {}).by_account || [])[0] || {}).total_rec_amount_all_time || 0)) > 0, '看板返回账号历史总收入');
+    const dashboardAccount = ((dashboard || {}).by_account || [])[0] || {};
+    assertEqual(Number(dashboardAccount.amount_rec_sum || 0), 63, 'last7 周期收入仍按昨天结束');
+    assertEqual(Number(dashboardAccount.total_rec_amount_all_time || 0), 315, '历史总收入包含今天已统计收入');
 
     const workerOut = execFileSync(process.execPath, [path.join(__dirname, '..', 'stats', 'order_stats_worker.js')], {
         cwd: path.join(__dirname, '..'),

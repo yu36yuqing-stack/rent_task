@@ -65,14 +65,29 @@ async function main() {
     const stored = await getLatestUserGameAccountByUserAndAccount(uid, '2147515620', '1', 'WZRY');
     assertEqual(Number(stored.switch && stored.switch.order_n_off && stored.switch.order_n_off.threshold || 0), 50, '数据库里应持久化账号级阈值 50');
 
+    const cooldownSwitch = await updateUserGameAccountSwitchByUserAndAccount(uid, '2147515620', {
+        order_cooldown: {
+            release_delay_min: 10
+        }
+    }, 'save account cooldown', '1', 'WZRY');
+    assertEqual(Number(cooldownSwitch.order_cooldown && cooldownSwitch.order_cooldown.release_delay_min), 10, '账号级冷却期应写入 10 分钟');
+    assertEqual(Number(cooldownSwitch.order_n_off && cooldownSwitch.order_n_off.threshold || 0), 50, '新增冷却期不应影响 X 单下架配置');
+
     const clearedSwitch = await updateUserGameAccountSwitchByUserAndAccount(uid, '2147515620', {
         order_n_off: null
     }, 'clear account order off', '1', 'WZRY');
     assertTrue(!clearedSwitch.order_n_off, '跟随全局时应移除账号级 order_n_off');
+    assertEqual(Number(clearedSwitch.order_cooldown && clearedSwitch.order_cooldown.release_delay_min), 10, '移除 X 单下架不应影响账号级冷却期');
     assertEqual(Boolean(clearedSwitch.prod_guard && clearedSwitch.prod_guard.enabled), false, '移除账号级配置不应影响其他 switch');
+
+    const clearedCooldownSwitch = await updateUserGameAccountSwitchByUserAndAccount(uid, '2147515620', {
+        order_cooldown: null
+    }, 'clear account cooldown', '1', 'WZRY');
+    assertTrue(!clearedCooldownSwitch.order_cooldown, '跟随全局时应移除账号级 order_cooldown');
 
     const cleared = await getLatestUserGameAccountByUserAndAccount(uid, '2147515620', '1', 'WZRY');
     assertTrue(!cleared.switch.order_n_off, '数据库里应移除账号级 order_n_off');
+    assertTrue(!cleared.switch.order_cooldown, '数据库里应移除账号级 order_cooldown');
 
     console.log(`[PASS] account_order_off_config_smoke_test temp_dir=${tempDir}`);
 }

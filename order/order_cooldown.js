@@ -2,6 +2,10 @@ const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { getLastSyncTimestamp } = require('../database/order_sync_db');
 const { listBlacklistSourcesByUser } = require('../database/user_blacklist_source_db');
 const {
+    listUserGameAccounts,
+    normalizeAccountSwitch
+} = require('../database/user_game_account_db');
+const {
     listUserBlacklistByUserWithMeta
 } = require('../database/user_blacklist_db');
 const { upsertSourceAndReconcile } = require('../blacklist/blacklist_source_gateway');
@@ -145,16 +149,60 @@ async function isOrderSyncFreshByUser(userId, freshWindowSec = COOLDOWN_SYNC_FRE
     return { fresh: true, reason: '', lag_sec: maxLag, channels };
 }
 
+function accountKey(gameId, gameAccount) {
+    const gid = String(gameId || '1').trim() || '1';
+    const acc = String(gameAccount || '').trim();
+    return `${gid}::${acc}`;
+}
+
+function normalizeAccountCooldownConfig(accountSwitchRaw, fallbackReleaseDelayMin = DEFAULT_COOLDOWN_RELEASE_DELAY_MIN) {
+    const fallback = Math.max(0, Number(fallbackReleaseDelayMin || 0));
+    const sw = normalizeAccountSwitch(accountSwitchRaw);
+    const cfg = sw.order_cooldown && typeof sw.order_cooldown === 'object' ? sw.order_cooldown : null;
+    if (!cfg) {
+        return {
+            release_delay_min: fallback,
+            source: 'global'
+        };
+    }
+    return {
+        release_delay_min: Math.max(0, Number(cfg.release_delay_min || 0)),
+        source: 'account'
+    };
+}
+
+async function listAccountCooldownConfigMap(userId, fallbackReleaseDelayMin) {
+    const uid = Number(userId || 0);
+    const out = new Map();
+    if (!uid) return out;
+    let page = 1;
+    const pageSize = 200;
+    while (page <= 200) {
+        const ret = await listUserGameAccounts(uid, page, pageSize);
+        const rows = Array.isArray(ret && ret.list) ? ret.list : [];
+        for (const row of rows) {
+            const acc = String(row.game_account || '').trim();
+            if (!acc) continue;
+            out.set(accountKey(row.game_id, acc), normalizeAccountCooldownConfig(row.switch, fallbackReleaseDelayMin));
+        }
+        if (rows.length < pageSize) break;
+        page += 1;
+    }
+    return out;
+}
+
 async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
     const nowSec = Math.floor(Date.now() / 1000);
     const nearEndSec = Math.max(0, Number(options.near_end_sec || COOLDOWN_NEAR_END_SEC));
     const cooldownCfg = await getCooldownConfigByUser(uid);
-    const defaultEndDelaySec = Math.max(0, Number(cooldownCfg.release_delay_min || 0) * 60);
-    const endDelaySec = Math.max(0, Number(options.end_delay_sec ?? defaultEndDelaySec ?? COOLDOWN_END_DELAY_SEC));
+    const globalReleaseDelayMin = Math.max(0, Number(cooldownCfg.release_delay_min || 0));
+    const overrideEndDelaySec = options.end_delay_sec === undefined ? null : Math.max(0, Number(options.end_delay_sec || 0));
+    const accountCooldownMap = await listAccountCooldownConfigMap(uid, globalReleaseDelayMin);
     const rentingOrders = await listActiveRentingOrdersByUser(uid);
     const cooldownByAccount = new Map();
+    let minReleaseDelayMin = null;
 
     for (const row of rentingOrders) {
         const startSec = parseDateTimeTextToSec(row.start_time);
@@ -162,10 +210,20 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
         if (!startSec || !endSec) continue;
         if (nowSec >= endSec) continue;
         if ((endSec - nowSec) > nearEndSec) continue;
+        const key = accountKey(row.game_id, row.game_account);
+        const accountCfg = accountCooldownMap.get(key) || {
+            release_delay_min: globalReleaseDelayMin,
+            source: 'global'
+        };
+        const releaseDelayMin = overrideEndDelaySec === null
+            ? Math.max(0, Number(accountCfg.release_delay_min || 0))
+            : Math.floor(overrideEndDelaySec / 60);
+        const endDelaySec = overrideEndDelaySec === null
+            ? releaseDelayMin * 60
+            : overrideEndDelaySec;
         const untilSec = endSec + endDelaySec;
         if (untilSec <= nowSec) continue;
         const acc = row.game_account;
-        const key = `${row.game_id}::${acc}`;
         const prev = cooldownByAccount.get(key);
         if (!prev || untilSec > prev.cooldown_until) {
             cooldownByAccount.set(key, {
@@ -173,10 +231,13 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
                 game_id: row.game_id,
                 game_name: row.game_name,
                 cooldown_until: untilSec,
+                release_delay_min: releaseDelayMin,
+                release_delay_source: overrideEndDelaySec === null ? String(accountCfg.source || 'global') : 'override',
                 order_no: row.order_no,
                 channel: row.channel
             });
         }
+        if (minReleaseDelayMin === null || releaseDelayMin < minReleaseDelayMin) minReleaseDelayMin = releaseDelayMin;
     }
 
     const current = await listUserBlacklistByUserWithMeta(uid);
@@ -195,6 +256,8 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
         const desc = buildCooldownDesc(meta.cooldown_until, {
             source_order_no: meta.order_no,
             source_channel: meta.channel,
+            release_delay_min: meta.release_delay_min,
+            release_delay_source: meta.release_delay_source,
             updated_at_sec: nowSec
         });
         await upsertSourceAndReconcile(uid, {
@@ -208,7 +271,9 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
             detail: {
                 source_order_no: meta.order_no,
                 source_channel: meta.channel,
-                cooldown_until: meta.cooldown_until
+                cooldown_until: meta.cooldown_until,
+                release_delay_min: meta.release_delay_min,
+                release_delay_source: meta.release_delay_source
             }
         }, {
             source: COOLDOWN_SOURCE,
@@ -225,7 +290,8 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
         scanned_orders: rentingOrders.length,
         hit_accounts: cooldownByAccount.size,
         hit_account_keys: Array.from(cooldownByAccount.keys()),
-        release_delay_min: Math.floor(endDelaySec / 60),
+        release_delay_min: minReleaseDelayMin === null ? globalReleaseDelayMin : minReleaseDelayMin,
+        global_release_delay_min: globalReleaseDelayMin,
         added,
         updated,
         skipped_conflict
@@ -236,7 +302,10 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
     const freshWindowSec = Math.max(60, Number(options.fresh_window_sec || COOLDOWN_SYNC_FRESH_WINDOW_SEC));
-    const endDelaySec = Math.max(0, Number(options.end_delay_sec || COOLDOWN_END_DELAY_SEC));
+    const cooldownCfg = await getCooldownConfigByUser(uid);
+    const globalReleaseDelayMin = Math.max(0, Number(cooldownCfg.release_delay_min || 0));
+    const overrideEndDelaySec = options.end_delay_sec === undefined ? null : Math.max(0, Number(options.end_delay_sec || 0));
+    const accountCooldownMap = await listAccountCooldownConfigMap(uid, globalReleaseDelayMin);
     const nearEndSec = Math.max(0, Number(options.near_end_sec || COOLDOWN_NEAR_END_SEC));
     const nowSec = Math.floor(Date.now() / 1000);
     const freshness = await isOrderSyncFreshByUser(uid, freshWindowSec);
@@ -300,7 +369,15 @@ async function releaseOrderCooldownBlacklistByUser(userId, options = {}) {
         if (!untilSec && meta.source_order_no) {
             const endTime = await getOrderEndTimeByOrderNo(uid, meta.source_order_no, meta.source_channel);
             const endSec = parseDateTimeTextToSec(endTime);
-            if (endSec > 0) untilSec = endSec + endDelaySec;
+            if (endSec > 0) {
+                const cfg = accountCooldownMap.get(accountKey(candidate.game_id, acc)) || {
+                    release_delay_min: globalReleaseDelayMin
+                };
+                const endDelaySec = overrideEndDelaySec === null
+                    ? Math.max(0, Number(cfg.release_delay_min || 0)) * 60
+                    : overrideEndDelaySec;
+                untilSec = endSec + endDelaySec;
+            }
         }
         if (!untilSec) {
             invalid += 1;
@@ -400,6 +477,7 @@ module.exports = {
     COOLDOWN_SYNC_FRESH_WINDOW_SEC,
     listAuthorizedOrderPlatforms,
     isOrderSyncFreshByUser,
+    normalizeAccountCooldownConfig,
     reconcileOrderCooldownEntryByUser,
     releaseOrderCooldownBlacklistByUser
 };
