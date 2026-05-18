@@ -148,26 +148,27 @@ function buildAccountConfigStatus(rows = []) {
         const purchasePrice = toMoney2(row.purchase_price);
         const purchaseDate = String(row.purchase_date || '').slice(0, 10);
         const totalCostAmount = toMoney2(row.total_cost_amount || 0);
+        const assetStatus = String(row.asset_status || 'active').trim() || 'active';
         const ok = purchasePrice > 0 && /^\d{4}-\d{2}-\d{2}$/.test(purchaseDate);
+        const item = {
+            game_account: gameAccount,
+            game_name: String(row.game_name || '').trim(),
+            role_name: roleName,
+            display_name: displayName,
+            purchase_price: purchasePrice,
+            purchase_date: purchaseDate,
+            total_cost_amount: totalCostAmount,
+            asset_status: assetStatus,
+            sold_at: String(row.sold_at || '').slice(0, 10),
+            sold_price: toMoney2(row.sold_price || 0),
+            lifecycle_income_amount: toMoney2(row.lifecycle_income_amount || 0),
+            lifecycle_profit_amount: toMoney2(row.lifecycle_profit_amount || 0)
+        };
         if (ok) {
-            configured.push({
-                game_account: gameAccount,
-                game_name: String(row.game_name || '').trim(),
-                role_name: roleName,
-                display_name: displayName,
-                purchase_price: purchasePrice,
-                purchase_date: purchaseDate,
-                total_cost_amount: totalCostAmount
-            });
+            configured.push(item);
         } else {
             missing.push({
-                game_account: gameAccount,
-                game_name: String(row.game_name || '').trim(),
-                role_name: roleName,
-                display_name: displayName,
-                purchase_price: purchasePrice,
-                purchase_date: purchaseDate,
-                total_cost_amount: totalCostAmount
+                ...item
             });
         }
     }
@@ -223,14 +224,16 @@ async function loadAccountConfigByUser(userId, gameName = DEFAULT_GAME_NAME) {
     try {
         const rows = g === ALL_GAME_NAME
             ? await all(db, `
-                SELECT game_account, game_name, account_remark, channel_prd_info, purchase_price, purchase_date, total_cost_amount
+                SELECT game_account, game_name, account_remark, channel_prd_info, purchase_price, purchase_date, total_cost_amount,
+                       asset_status, sold_at, sold_price, lifecycle_income_amount, lifecycle_profit_amount
                 FROM user_game_account
                 WHERE user_id = ?
                   AND is_deleted = 0
                 ORDER BY id DESC
             `, [uid])
             : await all(db, `
-                SELECT game_account, game_name, account_remark, channel_prd_info, purchase_price, purchase_date, total_cost_amount
+                SELECT game_account, game_name, account_remark, channel_prd_info, purchase_price, purchase_date, total_cost_amount,
+                       asset_status, sold_at, sold_price, lifecycle_income_amount, lifecycle_profit_amount
                 FROM user_game_account
                 WHERE user_id = ?
                   AND is_deleted = 0
@@ -756,6 +759,9 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const config = await loadAccountConfigByUser(uid, gameName);
     const mergedConfigured = gameName === ALL_GAME_NAME ? mergeAccountRowsByGameAccount(config.configured || []) : (config.configured || []);
     const mergedMissing = gameName === ALL_GAME_NAME ? mergeAccountRowsByGameAccount(config.missing || []) : (config.missing || []);
+    const isSoldAccount = (x) => String(x && x.asset_status || 'active').trim() === 'sold';
+    const activeConfigured = mergedConfigured.filter((x) => !isSoldAccount(x));
+    const activeMissing = mergedMissing.filter((x) => !isSoldAccount(x));
     const latestDisplayNameMap = new Map(
         [...mergedConfigured, ...mergedMissing]
             .map((x) => {
@@ -777,7 +783,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const costMap = new Map((costRows || []).map((x) => [String(x.stat_date || '').slice(0, 10), toMoney2(x.cost_base || 0)]));
     const fallbackCostByDay = (dayText) => {
         const day = String(dayText || '').slice(0, 10);
-        const active = mergedConfigured.filter((x) => String(x.purchase_date || '').slice(0, 10) <= day);
+        const active = activeConfigured.filter((x) => String(x.purchase_date || '').slice(0, 10) <= day);
         return toMoney2(active.reduce((sum, x) => sum + toMoney2(x.purchase_price || 0), 0));
     };
     const costSeries = periodDateList.map((d) => {
@@ -809,8 +815,16 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         ...reduceRows(arr)
     })).sort((a, b) => b.amount_rec_sum - a.amount_rec_sum);
 
+    const soldPeriodAccountSet = new Set(Array.from(byAccountMap.entries())
+        .filter(([, arr]) => (arr || []).length > 0)
+        .map(([accountKey]) => accountKey));
+    const displayConfigured = mergedConfigured.filter((x) => {
+        const acc = String(x.game_account || '').trim();
+        if (!acc) return false;
+        return !isSoldAccount(x) || soldPeriodAccountSet.has(acc);
+    });
     const configuredByAccount = new Map(
-        mergedConfigured
+        displayConfigured
             .map((x) => {
                 const acc = String(x.game_account || '').trim();
                 const key = acc;
@@ -844,6 +858,11 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
             purchase_cost_amount: accountPurchaseBase,
             purchase_base: accountPurchaseBase,
             purchase_date: accountPurchaseDate,
+            asset_status: String(cfgOne.asset_status || 'active').trim() || 'active',
+            sold_at: String(cfgOne.sold_at || '').slice(0, 10),
+            sold_price: toMoney2(cfgOne.sold_price || 0),
+            lifecycle_income_amount: toMoney2(cfgOne.lifecycle_income_amount || 0),
+            lifecycle_profit_amount: toMoney2(cfgOne.lifecycle_profit_amount || 0),
             total_rec_amount_all_time: totalRecAmountAllTime,
             avg_daily_order_cnt: Number((Number(s.order_cnt_effective || 0) / periodDays).toFixed(4)),
             avg_daily_rent_hour: Number((Number(s.rent_hour_sum || 0) / periodDays).toFixed(4)),
@@ -859,13 +878,13 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
 
     // 年化收益率统一采用单利口径：
     // 年化 = 区间收益率 * (365 / 区间天数)
-    const purchaseBase = mergedConfigured.reduce((sum, x) => sum + toMoney2(x.purchase_price), 0);
+    const purchaseBase = activeConfigured.reduce((sum, x) => sum + toMoney2(x.purchase_price), 0);
     const costBaseMode = periodInfo.period === 'today' ? 'today_snapshot' : 'period_avg';
     const costBaseValue = costBaseMode === 'today_snapshot'
         ? toMoney2(costSeries[costSeries.length - 1] || 0)
         : toMoney2(costSeries.reduce((sum, x) => sum + Number(x || 0), 0) / Math.max(1, periodDays));
     const periodReturnRate = costBaseValue > 0 ? (summary.amount_rec_sum / costBaseValue) : 0;
-    const earliestPurchaseDate = mergedConfigured
+    const earliestPurchaseDate = activeConfigured
         .map((x) => String(x.purchase_date || '').slice(0, 10))
         .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
         .sort()[0] || '';
@@ -874,7 +893,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
 
     const orderBase = Math.max(1, summary.order_cnt_total);
     const summaryHitDaysByAccount = by_account.reduce((sum, x) => sum + Number(x.target3_hit_days || 0), 0);
-    const configuredCount = Number(mergedConfigured.length || 0);
+    const configuredCount = Number(activeConfigured.length || 0);
     const target3RateOverall = configuredCount > 0
         ? Number((summaryHitDaysByAccount / (configuredCount * periodDays)).toFixed(4))
         : 0;
@@ -911,8 +930,8 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         },
         by_channel,
         by_account,
-        missing_purchase_accounts: mergedMissing,
-        configured_account_count: configuredCount
+        configured_account_count: configuredCount,
+        missing_purchase_accounts: activeMissing
     };
 }
 

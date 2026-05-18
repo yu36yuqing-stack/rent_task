@@ -400,13 +400,20 @@
       if (list.length === 0) {
         els.statsAccountList.innerHTML = '<div class="panel"><div style="color:#6d7a8a;font-size:13px;">暂无可展示的账号统计</div></div>';
       } else {
-        els.statsAccountList.innerHTML = list.map((x) => `
-          <div class="stats-acc-item">
+        els.statsAccountList.innerHTML = list.map((x) => {
+          const sold = String(x.asset_status || '').trim() === 'sold';
+          const soldMeta = sold ? ` · 已售${x.sold_at ? ` ${x.sold_at}` : ''}` : '';
+          const soldChips = sold ? `
+              <div class="stats-acc-chip"><p class="stats-acc-chip-k">售出价</p><p class="stats-acc-chip-v">¥${Number(x.sold_price || 0).toFixed(2)}</p></div>
+              <div class="stats-acc-chip"><p class="stats-acc-chip-k">生命周期总收益</p><p class="stats-acc-chip-v">¥${Number(x.lifecycle_profit_amount || 0).toFixed(2)}</p></div>
+          ` : '';
+          return `
+          <div class="stats-acc-item ${sold ? 'is-sold' : ''}">
             <div class="stats-acc-top">
-              <p class="stats-acc-name">${gameIconByName(x.game_name) ? `<span class="game-avatar"><img src="${gameIconByName(x.game_name)}" alt="${x.game_name || ''}" loading="lazy" decoding="async"></span>` : ''}${x.display_name || x.role_name || x.game_account || '-'}</p>
+              <p class="stats-acc-name">${gameIconByName(x.game_name) ? `<span class="game-avatar"><img src="${gameIconByName(x.game_name)}" alt="${x.game_name || ''}" loading="lazy" decoding="async"></span>` : ''}${x.display_name || x.role_name || x.game_account || '-'}${sold ? '<span class="chip chip-black">已售</span>' : ''}</p>
               <span class="stats-acc-money">¥${Number(x.amount_rec_sum || 0).toFixed(2)}</span>
             </div>
-            <p class="stats-acc-meta">账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)} · 采购：${x.purchase_date || '-'}</p>
+            <p class="stats-acc-meta">账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)} · 采购：${x.purchase_date || '-'}${soldMeta}</p>
             <div class="stats-acc-grid">
               <div class="stats-acc-chip is-clickable" data-stats-cost-detail="${x.game_account || ''}" data-stats-cost-game="${x.game_name || ''}"><p class="stats-acc-chip-k">维护成本<span class="stats-acc-chip-mark">›</span></p><p class="stats-acc-chip-v">¥${Number(x.total_cost_amount || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">采购成本</p><p class="stats-acc-chip-v">¥${Number(x.purchase_cost_amount || x.purchase_base || 0).toFixed(2)}</p></div>
@@ -418,9 +425,11 @@
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">日均实收</p><p class="stats-acc-chip-v">¥${Number(x.avg_daily_rec || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">3单达成率</p><p class="stats-acc-chip-v">${(Number(x.target3_rate || 0) * 100).toFixed(1)}%</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">退款/撤单</p><p class="stats-acc-chip-v">${Number(x.order_cnt_refund || 0)}/${Number(x.order_cnt_cancel || 0)}</p></div>
+              ${soldChips}
             </div>
           </div>
-        `).join('');
+        `;
+        }).join('');
         Array.from(els.statsAccountList.querySelectorAll('[data-stats-cost-detail]')).forEach((n) => {
           n.addEventListener('click', async () => {
             const account = String(n.getAttribute('data-stats-cost-detail') || '').trim();

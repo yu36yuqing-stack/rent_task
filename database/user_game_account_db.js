@@ -145,6 +145,11 @@ function rowToAccount(row = {}) {
         purchase_price: Number(row.purchase_price || 0),
         purchase_date: String(row.purchase_date || '').slice(0, 10),
         total_cost_amount: Number(row.total_cost_amount || 0),
+        asset_status: String(row.asset_status || 'active').trim() || 'active',
+        sold_at: String(row.sold_at || '').slice(0, 10),
+        sold_price: Number(row.sold_price || 0),
+        lifecycle_income_amount: Number(row.lifecycle_income_amount || 0),
+        lifecycle_profit_amount: Number(row.lifecycle_profit_amount || 0),
         modify_date: String(row.modify_date || ''),
         manual_deleted: Number(row.manual_deleted || 0),
         manual_deleted_at: String(row.manual_deleted_at || ''),
@@ -169,6 +174,11 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
         'purchase_price',
         'purchase_date',
         'total_cost_amount',
+        'asset_status',
+        'sold_at',
+        'sold_price',
+        'lifecycle_income_amount',
+        'lifecycle_profit_amount',
         'modify_date',
         'manual_deleted',
         'manual_deleted_at',
@@ -180,6 +190,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
         return;
     }
 
+    await ensureUserGameAccountSoldColumns(db);
     await run(db, `ALTER TABLE user_game_account RENAME TO user_game_account_old`);
         await run(db, `
         CREATE TABLE user_game_account (
@@ -197,6 +208,11 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
             purchase_price REAL NOT NULL DEFAULT 0,
             purchase_date TEXT NOT NULL DEFAULT '',
             total_cost_amount REAL NOT NULL DEFAULT 0,
+            asset_status TEXT NOT NULL DEFAULT 'active',
+            sold_at TEXT NOT NULL DEFAULT '',
+            sold_price REAL NOT NULL DEFAULT 0,
+            lifecycle_income_amount REAL NOT NULL DEFAULT 0,
+            lifecycle_profit_amount REAL NOT NULL DEFAULT 0,
             modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             manual_deleted INTEGER NOT NULL DEFAULT 0,
             manual_deleted_at TEXT NOT NULL DEFAULT '',
@@ -206,7 +222,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
     `);
     await run(db, `
         INSERT INTO user_game_account
-        (id, user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, switch, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, total_cost_amount, modify_date, manual_deleted, manual_deleted_at, is_deleted, desc)
+        (id, user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, switch, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, total_cost_amount, asset_status, sold_at, sold_price, lifecycle_income_amount, lifecycle_profit_amount, modify_date, manual_deleted, manual_deleted_at, is_deleted, desc)
         SELECT
             id,
             user_id,
@@ -227,6 +243,11 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
             COALESCE(purchase_price, 0),
             COALESCE(purchase_date, ''),
             COALESCE(total_cost_amount, 0),
+            COALESCE(asset_status, 'active'),
+            COALESCE(sold_at, ''),
+            COALESCE(sold_price, 0),
+            COALESCE(lifecycle_income_amount, 0),
+            COALESCE(lifecycle_profit_amount, 0),
             COALESCE(modify_date, CURRENT_TIMESTAMP),
             COALESCE(manual_deleted, 0),
             COALESCE(manual_deleted_at, ''),
@@ -254,6 +275,11 @@ async function ensureUserGameAccountTableBase(db) {
             purchase_price REAL NOT NULL DEFAULT 0,
             purchase_date TEXT NOT NULL DEFAULT '',
             total_cost_amount REAL NOT NULL DEFAULT 0,
+            asset_status TEXT NOT NULL DEFAULT 'active',
+            sold_at TEXT NOT NULL DEFAULT '',
+            sold_price REAL NOT NULL DEFAULT 0,
+            lifecycle_income_amount REAL NOT NULL DEFAULT 0,
+            lifecycle_profit_amount REAL NOT NULL DEFAULT 0,
             modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             manual_deleted INTEGER NOT NULL DEFAULT 0,
             manual_deleted_at TEXT NOT NULL DEFAULT '',
@@ -261,6 +287,21 @@ async function ensureUserGameAccountTableBase(db) {
             desc TEXT NOT NULL DEFAULT ''
         )
     `);
+}
+
+async function ensureColumn(db, tableName, columnName, ddl) {
+    const cols = await tableColumns(db, tableName);
+    if (!cols.has(columnName)) {
+        await run(db, `ALTER TABLE ${tableName} ADD COLUMN ${ddl}`);
+    }
+}
+
+async function ensureUserGameAccountSoldColumns(db) {
+    await ensureColumn(db, 'user_game_account', 'asset_status', `asset_status TEXT NOT NULL DEFAULT 'active'`);
+    await ensureColumn(db, 'user_game_account', 'sold_at', `sold_at TEXT NOT NULL DEFAULT ''`);
+    await ensureColumn(db, 'user_game_account', 'sold_price', `sold_price REAL NOT NULL DEFAULT 0`);
+    await ensureColumn(db, 'user_game_account', 'lifecycle_income_amount', `lifecycle_income_amount REAL NOT NULL DEFAULT 0`);
+    await ensureColumn(db, 'user_game_account', 'lifecycle_profit_amount', `lifecycle_profit_amount REAL NOT NULL DEFAULT 0`);
 }
 
 async function ensureUserGameAccountIndexes(db) {
@@ -282,6 +323,7 @@ async function initUserGameAccountDb() {
         const db = openDatabase();
         try {
             await ensureUserGameAccountTableBase(db);
+            await ensureUserGameAccountSoldColumns(db);
             await ensureUserGameAccountIndexes(db);
         } finally {
             db.close();
@@ -653,6 +695,9 @@ async function upsertUserGameAccount(input = {}) {
                 }
             }
         } else {
+            if (String(row.asset_status || 'active').trim() === 'sold') {
+                return rowToAccount(row);
+            }
             const finalGameId = hasGameHint
                 ? hintedGameId
                 : canonicalGameId(row.game_id, row.game_name);
@@ -1114,6 +1159,61 @@ async function updateUserGameAccountTotalCostByUserAndAccount(userId, gameAccoun
     }
 }
 
+async function updateUserGameAccountSoldByUserAndAccount(userId, gameAccount, input = {}) {
+    await initUserGameAccountDb();
+    const uid = Number(userId || 0);
+    const acc = String(gameAccount || '').trim();
+    const gameId = canonicalGameId(input.game_id, input.game_name || 'WZRY');
+    const soldAt = String(input.sold_at || '').slice(0, 10);
+    const soldPrice = Number(input.sold_price);
+    const lifecycleIncomeAmount = Number(input.lifecycle_income_amount || 0);
+    const lifecycleProfitAmount = Number(input.lifecycle_profit_amount || 0);
+    const desc = String(input.desc || '').trim();
+    if (!uid) throw new Error('user_id 不合法');
+    if (!acc) throw new Error('game_account 不能为空');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(soldAt)) throw new Error('sold_at 格式不合法');
+    if (!Number.isFinite(soldPrice) || soldPrice < 0) throw new Error('sold_price 不合法');
+    if (!Number.isFinite(lifecycleIncomeAmount)) throw new Error('lifecycle_income_amount 不合法');
+    if (!Number.isFinite(lifecycleProfitAmount)) throw new Error('lifecycle_profit_amount 不合法');
+
+    const db = openDatabase();
+    try {
+        const row = await get(db, `
+            SELECT id, desc
+            FROM user_game_account
+            WHERE user_id = ? AND game_id = ? AND game_account = ? AND is_deleted = 0
+            ORDER BY id DESC
+            LIMIT 1
+        `, [uid, gameId, acc]);
+        if (!row) throw new Error(`找不到账号: ${acc}`);
+
+        await run(db, `
+            UPDATE user_game_account
+            SET asset_status = 'sold',
+                sold_at = ?,
+                sold_price = ?,
+                lifecycle_income_amount = ?,
+                lifecycle_profit_amount = ?,
+                modify_date = ?,
+                desc = ?
+            WHERE id = ?
+        `, [
+            soldAt,
+            Number(soldPrice.toFixed(2)),
+            Number(lifecycleIncomeAmount.toFixed(2)),
+            Number(lifecycleProfitAmount.toFixed(2)),
+            nowText(),
+            desc || String(row.desc || '').trim(),
+            Number(row.id)
+        ]);
+
+        const updated = await get(db, `SELECT * FROM user_game_account WHERE id = ? LIMIT 1`, [Number(row.id)]);
+        return rowToAccount(updated);
+    } finally {
+        db.close();
+    }
+}
+
 function normalizeProbeSnapshot(kind, input = {}, queryTimeText = nowText()) {
     if (kind === 'online') {
         const online = Boolean(input.online);
@@ -1324,6 +1424,7 @@ module.exports = {
     updateUserGameAccountPurchaseByUserAndAccount,
     clearUserGameAccountPurchaseByUserAndAccount,
     updateUserGameAccountTotalCostByUserAndAccount,
+    updateUserGameAccountSoldByUserAndAccount,
     updateUserGameAccountSwitchByUserAndAccount,
     getLatestUserGameAccountByUserAndAccount,
     getUserGameAccountProbeSnapshotsByUserAndAccount,

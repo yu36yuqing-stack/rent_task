@@ -9,6 +9,7 @@ const {
     initUserGameAccountDb,
     listUserGameAccounts,
     updateUserGameAccountSwitchByUserAndAccount,
+    updateUserGameAccountSoldByUserAndAccount,
     normalizeAccountSwitch: normalizeAccountSwitchDb
 } = require('../database/user_game_account_db');
 const {
@@ -625,6 +626,8 @@ async function handleProducts(req, res, urlObj) {
     const filter = (filterRaw === 'restricted' || filterRaw === 'renting' || filterRaw === 'all')
         ? filterRaw
         : 'all';
+    const assetStatusRaw = String(urlObj.searchParams.get('asset_status') || 'active').trim().toLowerCase();
+    const assetStatus = assetStatusRaw === 'sold' ? 'sold' : 'active';
     const mode = Number(getBlacklistV2Mode());
     const blacklistRows = await listUserBlacklistByUserWithMeta(user.id);
     const keyOfGameAccount = (gameId, gameAccount) => `${String(gameId || '1').trim() || '1'}::${String(gameAccount || '').trim()}`;
@@ -680,9 +683,13 @@ async function handleProducts(req, res, urlObj) {
     const orderOffRule = await getOrderOffRuleByUser(user.id);
     const cooldownRule = await getCooldownConfigByUser(user.id);
     const allRows = await listAllAccountsByUser(user.id);
-    const scopedRows = isAllGame
+    const scopedAllRows = isAllGame
         ? allRows.list
         : allRows.list.filter((x) => String((x && x.game_name) || '').trim() === gameName);
+    const scopedRows = scopedAllRows.filter((x) => {
+        const rowStatus = String((x && x.asset_status) || 'active').trim() || 'active';
+        return assetStatus === 'sold' ? rowStatus === 'sold' : rowStatus !== 'sold';
+    });
     const syncAnomalyRows = await listOpenProductSyncAnomaliesByUser(user.id);
     const scopedSyncAnomalies = syncAnomalyRows
         .map((row) => {
@@ -828,6 +835,11 @@ async function handleProducts(req, res, urlObj) {
             purchase_price: Number(x.purchase_price || 0),
             purchase_date: String(x.purchase_date || '').slice(0, 10),
             total_cost_amount: Number(x.total_cost_amount || 0),
+            asset_status: String(x.asset_status || 'active').trim() || 'active',
+            sold_at: String(x.sold_at || '').slice(0, 10),
+            sold_price: Number(x.sold_price || 0),
+            lifecycle_income_amount: Number(x.lifecycle_income_amount || 0),
+            lifecycle_profit_amount: Number(x.lifecycle_profit_amount || 0),
             channel_status: channelStatus,
             platform_status_norm: platformStatusNorm,
             overall_status_norm: overallStatusNorm,
@@ -882,6 +894,7 @@ async function handleProducts(req, res, urlObj) {
     return json(res, 200, {
         ok: true,
         game_name: gameName,
+        asset_status: assetStatus,
         page,
         page_size: pageSize,
         total,
@@ -2050,6 +2063,57 @@ async function handleProductAccountCostDelete(req, res) {
     });
 }
 
+async function handleProductSoldMaintenance(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const gameAccount = String(body.game_account || '').trim();
+    const normalizedGame = normalizeGameProfile(body.game_id, body.game_name, { preserveUnknown: true });
+    const soldAt = String(body.sold_at || '').trim();
+    const soldPrice = Number(body.sold_price);
+    const totalCostAmount = Number(body.total_cost_amount || 0);
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(soldAt)) {
+        return json(res, 400, { ok: false, message: 'sold_at 格式应为 YYYY-MM-DD' });
+    }
+    if (!Number.isFinite(soldPrice) || soldPrice < 0) {
+        return json(res, 400, { ok: false, message: 'sold_price 不合法' });
+    }
+
+    const dashboard = await getOrderStatsDashboardByUser(user.id, {
+        game_name: normalizedGame.game_name,
+        period: 'today'
+    });
+    const accountRow = ((dashboard && dashboard.by_account) || [])
+        .find((x) => String((x && x.game_account) || '').trim() === gameAccount);
+    const lifecycleIncomeAmount = Number(accountRow && accountRow.total_rec_amount_all_time || 0);
+    const dbCostAmount = Number(accountRow && accountRow.total_cost_amount || 0);
+    const costAmount = Number.isFinite(totalCostAmount) && totalCostAmount > 0 ? totalCostAmount : dbCostAmount;
+    const lifecycleProfitAmount = Number((soldPrice - costAmount + lifecycleIncomeAmount).toFixed(2));
+    const account = await updateUserGameAccountSoldByUserAndAccount(user.id, gameAccount, {
+        game_id: normalizedGame.game_id,
+        game_name: normalizedGame.game_name,
+        sold_at: soldAt,
+        sold_price: soldPrice,
+        lifecycle_income_amount: lifecycleIncomeAmount,
+        lifecycle_profit_amount: lifecycleProfitAmount,
+        desc: 'sold maintenance by h5'
+    });
+    return json(res, 200, {
+        ok: true,
+        data: {
+            game_account: account.game_account,
+            game_id: account.game_id,
+            game_name: account.game_name,
+            asset_status: account.asset_status,
+            sold_at: account.sold_at,
+            sold_price: Number(account.sold_price || 0),
+            total_cost_amount: Number(account.total_cost_amount || 0),
+            lifecycle_income_amount: Number(account.lifecycle_income_amount || 0),
+            lifecycle_profit_amount: Number(account.lifecycle_profit_amount || 0)
+        }
+    });
+}
+
 async function handleProductAccountSwitchToggle(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
@@ -2594,6 +2658,7 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/products/purchase-config') return await handleProductPurchaseConfig(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/account-cost/create') return await handleProductAccountCostCreate(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/account-cost/delete') return await handleProductAccountCostDelete(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/products/sold-maintenance') return await handleProductSoldMaintenance(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/account-switch/toggle') return await handleProductAccountSwitchToggle(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/account-order-off-config') return await handleProductAccountOrderOffConfigSave(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/account-order-cooldown-config') return await handleProductAccountCooldownConfigSave(req, res);

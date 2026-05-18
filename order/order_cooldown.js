@@ -181,6 +181,7 @@ async function listAccountCooldownConfigMap(userId, fallbackReleaseDelayMin) {
         const ret = await listUserGameAccounts(uid, page, pageSize);
         const rows = Array.isArray(ret && ret.list) ? ret.list : [];
         for (const row of rows) {
+            if (String(row.asset_status || 'active').trim() === 'sold') continue;
             const acc = String(row.game_account || '').trim();
             if (!acc) continue;
             out.set(accountKey(row.game_id, acc), normalizeAccountCooldownConfig(row.switch, fallbackReleaseDelayMin));

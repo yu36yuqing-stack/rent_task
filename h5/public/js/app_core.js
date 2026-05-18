@@ -102,7 +102,7 @@
       total: 0,
       list: [],
       currentMenu: 'products',
-      drawerExpandedGroups: { pricing: false },
+      drawerExpandedGroups: { products: false, pricing: false },
       drawerOpen: false,
       pullRefresh: { dragging: false, ready: false, loading: false, startY: 0, distance: 0 },
       stats: {
@@ -328,6 +328,7 @@
         query_text: ''
       },
       moreOpsSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '', cooldown_summary: '' },
+      soldSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', sold_price: '', sold_at: '', total_cost_amount: 0, lifecycle_income_amount: 0, lifecycle_profit_amount: 0, read_only: false, result_text: '', result_type: '', loading: false },
       accountOrderOffSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, threshold: '', mode: ORDER_OFF_MODE_NATURAL_DAY, global_threshold: 3, global_mode: ORDER_OFF_MODE_NATURAL_DAY, loading: false, result_text: '', result_type: '' },
       accountCooldownSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, release_delay_min: '', global_release_delay_min: 10, loading: false, result_text: '', result_type: '' },
       activeActionSheet: '',
@@ -379,6 +380,7 @@
 
     function menuTitleByKey(key) {
       const k = String(key || '').trim();
+      if (k === 'products_sold') return '已售商品';
       if (k === 'orders') return '订单列表';
       if (k === 'risk') return '风控中心';
       if (k === 'stats') return '统计看板';
@@ -405,7 +407,7 @@
         if (m === 'pricing_uhaozu' || m === 'pricing_uuzuhao' || m === 'pricing_zuhaowang') {
           return { menu: m, pricingChannel: pricingChannelFromMenu(m) };
         }
-        if (m === 'orders' || m === 'risk' || m === 'stats' || m === 'auth' || m === 'board' || m === 'profile' || m === 'products') {
+        if (m === 'orders' || m === 'risk' || m === 'stats' || m === 'auth' || m === 'board' || m === 'profile' || m === 'products' || m === 'products_sold') {
           return { menu: m, pricingChannel: 'uhaozu' };
         }
       } catch (_) {}
@@ -583,7 +585,16 @@
       moreOpsMaintenanceBtn: document.getElementById('moreOpsMaintenanceBtn'),
       moreOpsPurchaseBtn: document.getElementById('moreOpsPurchaseBtn'),
       moreOpsCostBtn: document.getElementById('moreOpsCostBtn'),
+      moreOpsSoldBtn: document.getElementById('moreOpsSoldBtn'),
       moreOpsCloseBtn: document.getElementById('moreOpsCloseBtn'),
+      soldSheet: document.getElementById('soldSheet'),
+      soldSheetTitle: document.getElementById('soldSheetTitle'),
+      soldSheetResult: document.getElementById('soldSheetResult'),
+      soldPriceInput: document.getElementById('soldPriceInput'),
+      soldDateInput: document.getElementById('soldDateInput'),
+      soldSheetPreview: document.getElementById('soldSheetPreview'),
+      soldSaveBtn: document.getElementById('soldSaveBtn'),
+      soldCancelBtn: document.getElementById('soldCancelBtn'),
       accountOrderOffSheet: document.getElementById('accountOrderOffSheet'),
       accountOrderOffSheetTitle: document.getElementById('accountOrderOffSheetTitle'),
       accountOrderOffSheetResult: document.getElementById('accountOrderOffSheetResult'),
@@ -1070,7 +1081,9 @@
 
     async function loadList() {
       const gameName = String(state.product_game_name || '全部').trim() || '全部';
-      const data = await request(`/api/products?page=${state.page}&page_size=${state.pageSize}&filter=${state.filter}&game_name=${encodeURIComponent(gameName)}`);
+      const assetStatus = state.currentMenu === 'products_sold' ? 'sold' : 'active';
+      const filter = assetStatus === 'sold' ? 'all' : state.filter;
+      const data = await request(`/api/products?page=${state.page}&page_size=${state.pageSize}&filter=${filter}&game_name=${encodeURIComponent(gameName)}&asset_status=${encodeURIComponent(assetStatus)}`);
       state.list = Array.isArray(data.list) ? data.list : [];
       state.total = Number(data.total || 0);
       state.product_game_name = String(data.game_name || gameName).trim() || gameName;
@@ -1222,6 +1235,8 @@
         const key = String(node.getAttribute('data-drawer-group') || '').trim();
         const active = key === 'pricing'
           ? (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang')
+          : key === 'products'
+          ? (state.currentMenu === 'products' || state.currentMenu === 'products_sold')
           : key === state.currentMenu;
         const expanded = Boolean(state.drawerExpandedGroups && state.drawerExpandedGroups[key]);
         node.classList.toggle('active', active);
@@ -1296,7 +1311,7 @@
     function render() {
       const loggedIn = Boolean(state.token && state.user);
       els.loginView.classList.toggle('hidden', loggedIn);
-      const showProducts = loggedIn && state.currentMenu === 'products';
+      const showProducts = loggedIn && (state.currentMenu === 'products' || state.currentMenu === 'products_sold');
       const showOrders = loggedIn && state.currentMenu === 'orders';
       const showOrderComplaint = showOrders && Boolean(state.orders && state.orders.complaint_detail && state.orders.complaint_detail.open);
       const showOrderDetail = showOrders && Boolean(state.orders && state.orders.detail_view && state.orders.detail_view.open);
@@ -1407,6 +1422,9 @@
     function activateMenu(key, options = {}) {
       const nextMenu = String(key || 'products').trim() || 'products';
       state.currentMenu = nextMenu;
+      if (nextMenu === 'products' || nextMenu === 'products_sold') {
+        state.drawerExpandedGroups.products = true;
+      }
       if (nextMenu === 'pricing_uhaozu' || nextMenu === 'pricing_uuzuhao' || nextMenu === 'pricing_zuhaowang') {
         state.pricing.channel = pricingChannelFromMenu(String(options.pricingChannel || nextMenu).trim());
         state.drawerExpandedGroups.pricing = true;
@@ -1420,8 +1438,18 @@
 
     function navigateMenu(key, options = {}) {
       activateMenu(key, options);
-      if (key === 'products') {
+      if (key === 'products' || key === 'products_sold') {
+        state.page = 1;
+        if (key === 'products_sold') state.filter = 'all';
         render();
+        (async () => {
+          try {
+            await loadList();
+            renderList();
+          } catch (e) {
+            showToast(e.message || '商品列表加载失败');
+          }
+        })();
         return;
       }
       if (key === 'orders') {
@@ -1530,7 +1558,7 @@
       state.page = 1;
       state.product_game_name = '全部';
       state.currentMenu = 'products';
-      state.drawerExpandedGroups = { pricing: false };
+      state.drawerExpandedGroups = { products: false, pricing: false };
       state.drawerOpen = false;
       state.onlineStatusMap = {};
       state.onlineLoadingMap = {};
@@ -1555,6 +1583,7 @@
         query_text: ''
       };
       state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '', cooldown_summary: '' };
+      state.soldSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', sold_price: '', sold_at: '', total_cost_amount: 0, lifecycle_income_amount: 0, lifecycle_profit_amount: 0, read_only: false, result_text: '', result_type: '', loading: false };
       state.accountOrderOffSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, threshold: '', mode: ORDER_OFF_MODE_NATURAL_DAY, global_threshold: 3, global_mode: ORDER_OFF_MODE_NATURAL_DAY, loading: false, result_text: '', result_type: '' };
       state.accountCooldownSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, release_delay_min: '', global_release_delay_min: 10, loading: false, result_text: '', result_type: '' };
       state.activeActionSheet = '';
@@ -2000,6 +2029,14 @@
         openCostSheet(item);
       });
     }
+    if (els.moreOpsSoldBtn) {
+      els.moreOpsSoldBtn.addEventListener('click', () => {
+        const item = findCurrentProductItem();
+        if (!item) return;
+        closeMoreOpsSheet();
+        openSoldSheet(item);
+      });
+    }
     els.moreOpsCloseBtn.addEventListener('click', () => closeMoreOpsSheet());
     els.moreOpsSheet.addEventListener('click', (e) => {
       if (e.target === els.moreOpsSheet) closeMoreOpsSheet();
@@ -2053,6 +2090,20 @@
     els.purchaseSheet.addEventListener('click', (e) => {
       if (e.target === els.purchaseSheet) closePurchaseSheet();
     });
+    if (els.soldSaveBtn) {
+      els.soldSaveBtn.addEventListener('click', () => submitSoldMaintenance());
+    }
+    if (els.soldCancelBtn) {
+      els.soldCancelBtn.addEventListener('click', () => closeSoldSheet());
+    }
+    if (els.soldSheet) {
+      els.soldSheet.addEventListener('click', (e) => {
+        if (e.target === els.soldSheet) closeSoldSheet();
+      });
+    }
+    if (els.soldPriceInput) {
+      els.soldPriceInput.addEventListener('input', () => updateSoldPreviewFromInput());
+    }
     if (els.costSaveBtn) {
       els.costSaveBtn.addEventListener('click', () => submitCostConfig());
     }
@@ -2210,6 +2261,7 @@
         (state.accountOrderOffSheet && state.accountOrderOffSheet.open) ||
         (state.accountCooldownSheet && state.accountCooldownSheet.open) ||
         (state.forbiddenSheet && state.forbiddenSheet.open) ||
+        (state.soldSheet && state.soldSheet.open) ||
         (state.purchaseSheet && state.purchaseSheet.open) ||
         (state.costSheet && state.costSheet.open) ||
         (state.pricingCostSheet && state.pricingCostSheet.open) ||
@@ -2266,6 +2318,9 @@
       state.pricing.channel = initialRoute.pricingChannel;
       if (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang') {
         state.drawerExpandedGroups.pricing = true;
+      }
+      if (state.currentMenu === 'products' || state.currentMenu === 'products_sold') {
+        state.drawerExpandedGroups.products = true;
       }
       if (state.user && !state.token && state.refreshToken) {
         try {

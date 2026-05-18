@@ -295,7 +295,16 @@
         </div>
       </div>
       <div class="drawer-list">
-        <button class="drawer-item" data-menu="products" data-label="商品列表">商品列表</button>
+        <div class="drawer-group" data-drawer-group="products">
+          <button class="drawer-group-toggle" data-drawer-group-toggle="products" type="button" aria-expanded="false">
+            <span>商品列表</span>
+            <span class="drawer-group-chevron" aria-hidden="true">▾</span>
+          </button>
+          <div class="drawer-sub-list hidden" data-drawer-group-list="products">
+            <button class="drawer-sub-item" data-menu="products" data-label="在售商品">在售商品</button>
+            <button class="drawer-sub-item" data-menu="products_sold" data-label="已售商品">已售商品</button>
+          </div>
+        </div>
         <button class="drawer-item" data-menu="orders" data-label="订单列表">订单列表</button>
         <button class="drawer-item" data-menu="stats" data-label="统计看板">统计看板</button>
         <button class="drawer-item" data-menu="risk" data-label="风控中心">风控中心</button>
@@ -378,7 +387,35 @@
         <button id="moreOpsMaintenanceBtn" class="sheet-btn">开启维护</button>
         <button id="moreOpsPurchaseBtn" class="sheet-btn">维护采购</button>
         <button id="moreOpsCostBtn" class="sheet-btn">新增成本</button>
+        <button id="moreOpsSoldBtn" class="sheet-btn warn">售出维护</button>
         <button id="moreOpsCloseBtn" class="sheet-btn">关闭弹窗</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="soldSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon">售</span>
+          <div id="soldSheetTitle" class="sheet-title">售出维护</div>
+        </div>
+      </div>
+      <div id="soldSheetResult" class="sheet-result"></div>
+      <div class="sheet-inline-fields">
+        <div class="field sheet-inline-field" style="margin-top:0;">
+          <label for="soldPriceInput">售出价</label>
+          <input id="soldPriceInput" type="number" step="0.01" min="0" inputmode="decimal" placeholder="例如 2888.88">
+        </div>
+        <div class="field sheet-inline-field" style="margin-top:0;">
+          <label for="soldDateInput">售出日期</label>
+          <input id="soldDateInput" type="date">
+        </div>
+      </div>
+      <div id="soldSheetPreview" class="sheet-result sold-sheet-preview"></div>
+      <div class="sheet-actions">
+        <button id="soldSaveBtn" class="sheet-btn warn">确认售出</button>
+        <button id="soldCancelBtn" class="sheet-btn">关闭弹窗</button>
       </div>
     </div>
   </div>

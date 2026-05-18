@@ -1133,6 +1133,15 @@
       color: #b5423b;
     }
 
+    .sold-sheet-preview {
+      white-space: normal;
+      line-height: 1.45;
+      padding: 8px 10px;
+      border: 1px solid #d7e1eb;
+      border-radius: 10px;
+      background: #f8fbff;
+    }
+
     .auth-curl-textarea {
       width: 100%;
       min-height: 220px;

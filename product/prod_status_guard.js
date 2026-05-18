@@ -177,7 +177,7 @@ async function listProductRentingSignalsByUser(userId, accounts = []) {
     try {
         const tupleSql = uniq.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
         const rows = await dbAll(db, `
-            SELECT game_id, game_name, game_account, channel_status, channel_prd_info
+            SELECT game_id, game_name, game_account, channel_status, channel_prd_info, asset_status
             FROM user_game_account
             WHERE user_id = ?
               AND is_deleted = 0
@@ -189,6 +189,7 @@ async function listProductRentingSignalsByUser(userId, accounts = []) {
             const gid = String((row && row.game_id) || '1').trim() || '1';
             const key = `${gid}::${acc}`;
             if (!acc || out[key]) continue;
+            if (String(row && row.asset_status || 'active').trim() === 'sold') continue;
             const status = parseJsonObjectSafe(row && row.channel_status);
             const prd = parseJsonObjectSafe(row && row.channel_prd_info);
             out[key] = buildProductRentingGuardDetail({
@@ -292,7 +293,9 @@ async function probeProdOnlineStatus(user, accounts = [], options = {}) {
         return { ok: true, skipped: true, reason: 'out_of_probe_window' };
     }
 
-    const inputList = (Array.isArray(accounts) ? accounts : []).filter((x) => isProdGuardEnabledByAccount(x));
+    const inputList = (Array.isArray(accounts) ? accounts : [])
+        .filter((x) => String(x && x.asset_status || 'active').trim() !== 'sold')
+        .filter((x) => isProdGuardEnabledByAccount(x));
     const list = [];
     for (const one of inputList) {
         if (resolveUuzuhaoReauthorizeState(one).hit) continue;
@@ -395,7 +398,9 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
     if (!isProdGuardEnabledByUser(user)) return { ok: true, skipped: true, reason: 'prod_guard_disabled_by_user_switch', queued: 0 };
     const uid = Number((user && user.id) || 0);
     if (!uid) return { ok: false, skipped: true, reason: 'invalid_user', queued: 0 };
-    const rawList = (Array.isArray(badAccounts) ? badAccounts : []).filter((x) => isProdGuardEnabledByAccount(x));
+    const rawList = (Array.isArray(badAccounts) ? badAccounts : [])
+        .filter((x) => String(x && x.asset_status || 'active').trim() !== 'sold')
+        .filter((x) => isProdGuardEnabledByAccount(x));
     const list = [];
     let skippedAuthAbnormalCount = 0;
     for (const one of rawList) {

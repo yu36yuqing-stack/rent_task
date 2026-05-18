@@ -622,6 +622,9 @@
       if (els.moreOpsCostBtn) {
         els.moreOpsCostBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
       }
+      if (els.moreOpsSoldBtn) {
+        els.moreOpsSoldBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+      }
       els.moreOpsCloseBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
       els.moreOpsForbiddenBtn.textContent = handling ? '处理中...' : '处理禁玩';
     }
@@ -681,6 +684,7 @@
     function closeActionSheets() {
       state.activeActionSheet = '';
       state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '', cooldown_summary: '' };
+      state.soldSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', sold_price: '', sold_at: '', total_cost_amount: 0, lifecycle_income_amount: 0, lifecycle_profit_amount: 0, result_text: '', result_type: '', loading: false };
       state.accountOrderOffSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, threshold: '', mode: ORDER_OFF_MODE_NATURAL_DAY, global_threshold: 3, global_mode: ORDER_OFF_MODE_NATURAL_DAY, loading: false, result_text: '', result_type: '' };
       state.accountCooldownSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, release_delay_min: '', global_release_delay_min: 10, loading: false, result_text: '', result_type: '' };
       state.forbiddenSheet = {
@@ -697,6 +701,7 @@
         query_text: ''
       };
       renderMoreOpsSheet();
+      renderSoldSheet();
       renderAccountOrderOffSheet();
       renderAccountCooldownSheet();
       renderForbiddenSheet();
@@ -776,6 +781,10 @@
       };
       renderForbiddenSheet();
       renderMoreOpsSheet();
+    }
+
+    function openSoldSheetReadonly(item) {
+      openSoldSheet(item, { read_only: true });
     }
 
     function closeMoreOpsSheet() {
@@ -1092,6 +1101,77 @@
       renderPurchaseSheet();
     }
 
+    function soldSheetProfitPreview() {
+      const soldPrice = Number(els.soldPriceInput && els.soldPriceInput.value || 0);
+      const totalCost = Number((state.soldSheet || {}).total_cost_amount || 0);
+      const income = Number((state.soldSheet || {}).lifecycle_income_amount || 0);
+      if (!Number.isFinite(soldPrice) || soldPrice < 0) return null;
+      return Number((soldPrice - totalCost + income).toFixed(2));
+    }
+
+    function renderSoldSheet() {
+      if (!els.soldSheet) return;
+      const opened = Boolean(state.soldSheet && state.soldSheet.open);
+      els.soldSheet.classList.toggle('hidden', !opened);
+      if (!opened) return;
+
+      const titleName = String(state.soldSheet.role_name || state.soldSheet.account || '').trim() || '当前账号';
+      const resultText = String(state.soldSheet.result_text || '').trim();
+      const resultType = String(state.soldSheet.result_type || '').trim();
+      const loading = Boolean(state.soldSheet.loading);
+      const readOnly = Boolean(state.soldSheet.read_only);
+      const totalCost = Number(state.soldSheet.total_cost_amount || 0);
+      const income = Number(state.soldSheet.lifecycle_income_amount || 0);
+      const profit = soldSheetProfitPreview();
+
+      els.soldSheetTitle.textContent = `售出维护 · ${titleName}`;
+      els.soldSheetResult.className = `sheet-result ${resultType}`;
+      els.soldSheetResult.textContent = resultText;
+      els.soldPriceInput.value = String(state.soldSheet.sold_price || '');
+      els.soldDateInput.value = String(state.soldSheet.sold_at || '');
+      els.soldSheetPreview.className = 'sheet-result sold-sheet-preview';
+      els.soldSheetPreview.textContent = `总成本 ¥${totalCost.toFixed(2)} · 历史收入 ¥${income.toFixed(2)} · 生命周期总收益 ${profit === null ? '-' : `¥${profit.toFixed(2)}`}`;
+      els.soldPriceInput.disabled = loading || readOnly;
+      els.soldDateInput.disabled = loading || readOnly;
+      els.soldSaveBtn.disabled = loading || readOnly;
+      els.soldCancelBtn.disabled = loading;
+    }
+
+    function updateSoldPreviewFromInput() {
+      if (!state.soldSheet || !state.soldSheet.open) return;
+      state.soldSheet.sold_price = String(els.soldPriceInput.value || '').trim();
+      renderSoldSheet();
+    }
+
+    function openSoldSheet(item, options = {}) {
+      const account = String(item && item.game_account || '').trim();
+      if (!account) return;
+      const soldPriceRaw = Number(item && item.sold_price);
+      const soldAt = String(item && item.sold_at || '').slice(0, 10);
+      state.soldSheet = {
+        open: true,
+        account,
+        game_id: String(item && item.game_id || '1').trim() || '1',
+        game_name: String(item && item.game_name || 'WZRY').trim() || 'WZRY',
+        role_name: String(item && (item.role_name || item.game_account) || '').trim(),
+        sold_price: Number.isFinite(soldPriceRaw) && soldPriceRaw > 0 ? soldPriceRaw.toFixed(2) : '',
+        sold_at: /^\d{4}-\d{2}-\d{2}$/.test(soldAt) ? soldAt : todayDateText(),
+        total_cost_amount: Number(item && item.total_cost_amount || 0),
+        lifecycle_income_amount: Number(item && item.lifecycle_income_amount || 0),
+        lifecycle_profit_amount: Number(item && item.lifecycle_profit_amount || 0),
+        read_only: Boolean(options && options.read_only),
+        result_text: '',
+        result_type: '',
+        loading: false
+      };
+      renderSoldSheet();
+    }
+
+    function closeSoldSheet() {
+      state.soldSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', sold_price: '', sold_at: '', total_cost_amount: 0, lifecycle_income_amount: 0, lifecycle_profit_amount: 0, read_only: false, result_text: '', result_type: '', loading: false };
+      renderSoldSheet();
+    }
+
     function renderCostSheet() {
       const opened = Boolean(state.costSheet && state.costSheet.open);
       els.costSheet.classList.toggle('hidden', !opened);
@@ -1217,6 +1297,75 @@
       }
     }
 
+    async function submitSoldMaintenance() {
+      const account = String((state.soldSheet || {}).account || '').trim();
+      const gameId = String((state.soldSheet || {}).game_id || '1').trim() || '1';
+      const gameName = String((state.soldSheet || {}).game_name || 'WZRY').trim() || 'WZRY';
+      if (!account) return;
+      const soldPriceRaw = String(els.soldPriceInput.value || '').trim();
+      const soldAt = String(els.soldDateInput.value || '').trim();
+      const soldPrice = Number(soldPriceRaw);
+      if (!Number.isFinite(soldPrice) || soldPrice < 0) {
+        state.soldSheet.result_text = '售出价不合法';
+        state.soldSheet.result_type = 'err';
+        renderSoldSheet();
+        return;
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(soldAt)) {
+        state.soldSheet.result_text = '请选择售出日期';
+        state.soldSheet.result_type = 'err';
+        renderSoldSheet();
+        return;
+      }
+      const confirmed = window.confirm('确认将该账号标记为已售？商品页默认会隐藏该账号。');
+      if (!confirmed) return;
+
+      state.soldSheet.loading = true;
+      state.soldSheet.result_text = '保存中...';
+      state.soldSheet.result_type = '';
+      renderSoldSheet();
+      try {
+        const out = await request('/api/products/sold-maintenance', {
+          method: 'POST',
+          body: JSON.stringify({
+            game_account: account,
+            game_id: gameId,
+            game_name: gameName,
+            sold_price: Number(soldPrice.toFixed(2)),
+            sold_at: soldAt,
+            total_cost_amount: Number((state.soldSheet || {}).total_cost_amount || 0)
+          })
+        });
+        const saved = out && out.data ? out.data : {};
+        state.list = (state.list || []).filter((x) => {
+          return !(String(x && x.game_account || '').trim() === account && String((x && x.game_id) || '1').trim() === gameId);
+        });
+        state.soldSheet = {
+          ...state.soldSheet,
+          sold_price: Number(saved.sold_price || soldPrice).toFixed(2),
+          sold_at: String(saved.sold_at || soldAt).slice(0, 10),
+          lifecycle_income_amount: Number(saved.lifecycle_income_amount || 0),
+          lifecycle_profit_amount: Number(saved.lifecycle_profit_amount || 0),
+          result_text: `保存成功，生命周期总收益 ¥${Number(saved.lifecycle_profit_amount || 0).toFixed(2)}`,
+          result_type: 'ok'
+        };
+        renderSoldSheet();
+        showToast('售出信息已保存');
+        setTimeout(() => {
+          closeSoldSheet();
+          renderList();
+          void loadList().then(() => renderList());
+        }, 300);
+      } catch (e) {
+        state.soldSheet.result_text = String(e && e.message ? e.message : '保存失败');
+        state.soldSheet.result_type = 'err';
+        renderSoldSheet();
+      } finally {
+        state.soldSheet.loading = false;
+        renderSoldSheet();
+      }
+    }
+
     async function submitCostConfig() {
       const account = String((state.costSheet || {}).account || '').trim();
       const gameId = String((state.costSheet || {}).game_id || '1').trim() || '1';
@@ -1298,6 +1447,20 @@
         display_name: String(sheet.role_name || account).trim(),
         total_cost_amount: Number(item.total_cost_amount || 0),
         purchase_cost_amount: Number(item.purchase_price || 0)
+      });
+    }
+
+    function openCostDetailForProduct(item) {
+      const account = String(item && item.game_account || '').trim();
+      if (!account || typeof window.openStatsCostDetailExternal !== 'function') return;
+      void window.openStatsCostDetailExternal({
+        game_account: account,
+        game_id: String(item && item.game_id || '1').trim() || '1',
+        game_name: String(item && item.game_name || 'WZRY').trim() || 'WZRY',
+        role_name: String(item && (item.role_name || item.game_account) || '').trim(),
+        display_name: String(item && (item.display_name || item.role_name || item.game_account) || account).trim(),
+        total_cost_amount: Number(item && item.total_cost_amount || 0),
+        purchase_cost_amount: Number(item && item.purchase_price || 0)
       });
     }
 
@@ -1421,6 +1584,7 @@
     }
 
     function renderFilters() {
+      const soldView = state.currentMenu === 'products_sold';
       if (els.productGameTabs) {
         const games = [
           { k: '全部', t: '全部', icon: '' },
@@ -1451,18 +1615,21 @@
       const restrictedActive = state.filter === 'restricted';
       const rentingActive = state.filter === 'renting';
       const orderCountLabel = orderCountLabelByMode();
-      els.filters.innerHTML = `
-        <button class="stats-period-btn product-filter-tab ${allActive ? 'active' : ''}" data-filter="all" type="button">全部</button>
-        <button class="stats-period-btn product-filter-tab ${restrictedActive ? 'active' : ''}" data-filter="restricted" type="button">限制中</button>
-        <button class="stats-period-btn product-filter-tab ${rentingActive ? 'active' : ''}" data-filter="renting" type="button">租赁中</button>
-      `;
+      els.filters.innerHTML = soldView
+        ? '<button class="stats-period-btn product-filter-tab active" data-filter="all" type="button">已售商品</button>'
+        : `
+          <button class="stats-period-btn product-filter-tab ${allActive ? 'active' : ''}" data-filter="all" type="button">全部</button>
+          <button class="stats-period-btn product-filter-tab ${restrictedActive ? 'active' : ''}" data-filter="restricted" type="button">限制中</button>
+          <button class="stats-period-btn product-filter-tab ${rentingActive ? 'active' : ''}" data-filter="renting" type="button">租赁中</button>
+        `;
       els.orderTotal.innerHTML = `
-        <span class="order-total-main">${orderCountLabel}：${Number(state.stats.total_paid || 0)}</span>
+        <span class="order-total-main">${soldView ? '已售商品' : orderCountLabel}：${soldView ? Number(state.stats.master_total || state.stats.total_all || 0) : Number(state.stats.total_paid || 0)}</span>
         <span class="order-total-divider" aria-hidden="true"></span>
         <span class="order-total-summary">商品主档总数：${Number(state.stats.master_total || state.stats.total_all || 0)}</span>
       `;
       Array.from(els.filters.querySelectorAll('.product-filter-tab')).forEach((n) => {
         n.addEventListener('click', async () => {
+          if (soldView) return;
           const nextFilter = n.getAttribute('data-filter') || 'all';
           if (nextFilter === state.filter) return;
           state.filter = nextFilter;
@@ -1473,7 +1640,8 @@
       });
       if (els.productSyncNowBtn) {
         const syncing = Boolean(state.productsSyncing);
-        els.productSyncNowBtn.disabled = syncing;
+        els.productSyncNowBtn.classList.toggle('hidden', soldView);
+        els.productSyncNowBtn.disabled = syncing || soldView;
         els.productSyncNowBtn.textContent = syncing ? '同步中...' : '同步商品';
       }
     }
@@ -1492,6 +1660,7 @@
         root.innerHTML = '<div class="panel"><div style="color:#6d7a8a;font-size:13px;">暂无数据</div></div>';
       } else {
         state.list.forEach((item, idx) => {
+          const soldView = state.currentMenu === 'products_sold';
           const node = document.createElement('div');
           node.className = 'order-card product-card';
           const plat = platformBadges(item).map((x) => {
@@ -1518,7 +1687,9 @@
             : {};
           const overallLabel = String(overall.label || '').trim();
           const anyNormalChannel = hasAnyNormalChannel(item);
-          const statusText = item.blacklisted
+          const statusText = soldView
+            ? `已售${item.sold_at ? ` · ${String(item.sold_at).slice(5, 10)}` : ''}`
+            : item.blacklisted
             ? `${compactMainStatusReason(item.blacklist_reason || '无原因')}${blacklistTime ? ` · ${blacklistTime}` : ''}`
             : (anyNormalChannel
               ? '状态正常'
@@ -1531,8 +1702,8 @@
             <div class="order-card-top product-card-top">
               <p class="order-card-role product-card-role">${buildGameAvatarHtml(item)}<span class="product-role-text">${item.display_name || item.role_name || item.game_account}</span></p>
               <div class="card-top-chips">
-                <span data-slot="online-chip">${buildOnlineChipHtml(identityKey)}</span>
-                <span data-slot="forbidden-chip">${buildForbiddenChipHtml(identityKey)}</span>
+                ${soldView ? '' : `<span data-slot="online-chip">${buildOnlineChipHtml(identityKey)}</span>`}
+                ${soldView ? '' : `<span data-slot="forbidden-chip">${buildForbiddenChipHtml(identityKey)}</span>`}
                 <span class="chip ${statusClass} status-main-chip" title="${escapeAttr(statusText)}">
                   ${statusText}
                 </span>
@@ -1542,11 +1713,11 @@
               <div class="info-square base-square">
                 <div class="account-main">
                   <div class="account">账号：${item.game_account}</div>
-                  <button class="copy-btn" data-copy="${item.game_account}">复制</button>
+                  ${soldView ? '' : `<button class="copy-btn" data-copy="${item.game_account}">复制</button>`}
                 </div>
                 ${buildPurchaseBriefHtml(item)}
-                <p class="square-line">${orderCountLabelByMode()}：${item.today_paid_count}</p>
-                ${buildRentCountdownHtml(item)}
+                ${soldView ? `<p class="square-line">售出价：¥${Number(item.sold_price || 0).toFixed(2)}</p><p class="square-line">生命周期总收益：¥${Number(item.lifecycle_profit_amount || 0).toFixed(2)}</p>` : `<p class="square-line">${orderCountLabelByMode()}：${item.today_paid_count}</p>`}
+                ${soldView ? '' : buildRentCountdownHtml(item)}
               </div>
               <div class="info-square channel-square">
                 <p class="square-title">渠道状态</p>
@@ -1554,6 +1725,14 @@
               </div>
             </div>
             <div class="ops">
+              ${soldView ? `
+              <button class="btn btn-ghost btn-card-action product-op-btn" data-op="sold-maintenance">
+                售出维护
+              </button>
+              <button class="btn btn-ghost btn-card-action product-op-btn" data-op="cost-detail">
+                成本明细
+              </button>
+              ` : `
               <button class="btn btn-ghost btn-card-action product-op-btn" data-op="online-query" ${querying ? 'disabled' : ''}>
                 ${querying ? '查询中...' : (isCs2 ? '查令牌码' : '状态查询')}
               </button>
@@ -1563,18 +1742,27 @@
               <button class="btn btn-ghost btn-card-action product-op-btn" data-op="more-ops" ${(querying || forbiddenLoading) ? 'disabled' : ''}>
                 更多操作
               </button>
+              `}
             </div>
           `;
-          node.querySelector('.copy-btn').addEventListener('click', (e) => {
-            const v = e.currentTarget.getAttribute('data-copy') || '';
-            copyAccount(v);
-          });
-          node.querySelector('[data-op=\"online-query\"]').addEventListener('click', () => {
-            if (isCs2Product(item)) querySteamGuardCode(item);
-            else queryStatus(item);
-          });
-          node.querySelector('[data-op=\"blacklist-toggle\"]').addEventListener('click', () => toggleBlacklist(item));
-          node.querySelector('[data-op=\"more-ops\"]').addEventListener('click', () => openMoreOpsSheet(item));
+          const copyBtn = node.querySelector('.copy-btn');
+          if (copyBtn) {
+            copyBtn.addEventListener('click', (e) => {
+              const v = e.currentTarget.getAttribute('data-copy') || '';
+              copyAccount(v);
+            });
+          }
+          if (soldView) {
+            node.querySelector('[data-op=\"sold-maintenance\"]').addEventListener('click', () => openSoldSheetReadonly(item));
+            node.querySelector('[data-op=\"cost-detail\"]').addEventListener('click', () => openCostDetailForProduct(item));
+          } else {
+            node.querySelector('[data-op=\"online-query\"]').addEventListener('click', () => {
+              if (isCs2Product(item)) querySteamGuardCode(item);
+              else queryStatus(item);
+            });
+            node.querySelector('[data-op=\"blacklist-toggle\"]').addEventListener('click', () => toggleBlacklist(item));
+            node.querySelector('[data-op=\"more-ops\"]').addEventListener('click', () => openMoreOpsSheet(item));
+          }
           state.cardNodeMap[identityKey] = node;
           root.appendChild(node);
         });

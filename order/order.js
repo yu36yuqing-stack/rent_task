@@ -836,6 +836,7 @@ async function reconcileOrder3OffBlacklistByUser(user = {}) {
     const allAccounts = [];
     const accountConfigMap = new Map();
     for (const row of rows) {
+        if (String(row.asset_status || 'active').trim() === 'sold') continue;
         const acc = String(row.game_account || '').trim();
         if (!acc) continue;
         const gid = String(row.game_id || '').trim() || '1';

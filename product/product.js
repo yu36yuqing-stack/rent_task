@@ -532,7 +532,8 @@ async function syncUserAccountsByAuth(userId) {
     const mirroredByOrders = await ensureLinkedGameAccountsByOrders(uid);
     timing.mirror_orders_ms = elapsedMs(mirrorStartedAt);
     const loadCurrentRowsStartedAt = nowMs();
-    const currentRows = await listAllUserGameAccountsByUser(uid);
+    const currentRows = (await listAllUserGameAccountsByUser(uid))
+        .filter((x) => String(x && x.asset_status || 'active').trim() !== 'sold');
     timing.load_current_rows_ms = elapsedMs(loadCurrentRowsStartedAt);
     const anomalyStartedAt = nowMs();
     const anomalies = await reconcileProductSyncAnomalies(uid, currentRows, pulledRowsByPlatform, errors, validPlatforms);
