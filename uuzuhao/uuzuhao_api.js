@@ -9,6 +9,7 @@ const PATH_ON = '/api/youpin/rent-connector/product/v1/on';
 const PATH_OFF = '/api/youpin/rent-connector/product/v1/off';
 const PATH_GAME_ONLINE = '/api/youpin/rent-connector/product/v1/game/online';
 const PATH_FORBIDDEN_PLAY = '/api/youpin/rent-connector/product/v1/forbidden/play';
+const PATH_STEAM_GUARD_CODE = '/api/youpin/rent-connector/product/v1/steamGuardCode';
 const PATH_ORDER_LIST = '/api/youpin/rent-connector/order/v1/list';
 const PATH_ORDER_DETAIL = '/api/youpin/rent-connector/order/v1/detail';
 
@@ -391,6 +392,28 @@ async function disableForbiddenPlay(accountId, options = {}) {
     return setForbiddenPlay(accountId, false, options);
 }
 
+async function getSteamGuardCode(accountId, options = {}) {
+    const auth = options.auth || {};
+    const acc = String(accountId || '').trim();
+    if (!acc) throw new Error('accountId 不能为空');
+
+    const gameId = Number(options.game_id || 4);
+    if (gameId !== 4) throw new Error('steamGuardCode 仅支持 CS2 gameId=4');
+
+    const json = await postSigned(PATH_STEAM_GUARD_CODE, {
+        accountId: acc,
+        gameId: 4
+    }, auth);
+    const data = json && json.data && typeof json.data === 'object' ? json.data : {};
+    return {
+        account: acc,
+        game_id: 4,
+        guard_code: String(data.guardCode || '').trim(),
+        seconds_remaining: Number(data.secondsRemaining || 0),
+        raw: json
+    };
+}
+
 function sanitizeOrderListParams(params = {}) {
     const orderStatus = Number(params.orderStatus);
     if (!Number.isFinite(orderStatus)) {
@@ -484,6 +507,7 @@ module.exports = {
     queryForbiddenPlay,
     enableForbiddenPlay,
     disableForbiddenPlay,
+    getSteamGuardCode,
     listOrders,
     listAllOrders,
     getOrderDetail,
@@ -501,6 +525,7 @@ module.exports = {
         resolveGameIdByName,
         sanitizeOrderListParams,
         sanitizeOrderDetailParams,
-        normalizeForbiddenEnabled
+        normalizeForbiddenEnabled,
+        getSteamGuardCode
     }
 };

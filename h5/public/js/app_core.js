@@ -310,6 +310,9 @@
       },
       onlineStatusMap: {},
       onlineLoadingMap: {},
+      steamGuardMap: {},
+      steamGuardLoadingMap: {},
+      steamGuardTimer: 0,
       forbiddenLoadingMap: {},
       forbiddenSheet: {
         open: false,
@@ -1531,6 +1534,12 @@
       state.drawerOpen = false;
       state.onlineStatusMap = {};
       state.onlineLoadingMap = {};
+      state.steamGuardMap = {};
+      state.steamGuardLoadingMap = {};
+      if (state.steamGuardTimer) {
+        clearInterval(state.steamGuardTimer);
+        state.steamGuardTimer = 0;
+      }
       state.forbiddenLoadingMap = {};
       state.forbiddenSheet = {
         open: false,

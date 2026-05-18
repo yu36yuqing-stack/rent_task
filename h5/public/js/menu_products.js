@@ -130,6 +130,10 @@
       return 'WZRY';
     }
 
+    function isCs2Product(item) {
+      return normalizeGameName(item && item.game_name, item && item.game_id) === 'CSGO';
+    }
+
     function buildGameAvatarHtml(item) {
       const normalized = normalizeGameName(item && item.game_name, item && item.game_id);
       if (normalized === 'CSGO') {
@@ -331,11 +335,58 @@
       }
     }
 
+    async function querySteamGuardCode(item) {
+      const account = String(item && item.game_account || '').trim();
+      const gameId = String(item && item.game_id || '4').trim() || '4';
+      const gameName = String(item && item.game_name || 'CSGO').trim() || 'CSGO';
+      const identityKey = productIdentityKey(item);
+      if (!account) return;
+      state.steamGuardLoadingMap[identityKey] = true;
+      renderOnlinePart(identityKey);
+      try {
+        const out = await request('/api/products/steam-guard-code', {
+          method: 'POST',
+          body: JSON.stringify({
+            game_account: account,
+            game_id: gameId,
+            game_name: gameName
+          })
+        });
+        const data = out && out.data ? out.data : {};
+        const seconds = Math.max(0, Math.floor(Number(data.seconds_remaining || 0)));
+        state.steamGuardMap[identityKey] = {
+          guard_code: String(data.guard_code || '').trim(),
+          seconds_remaining: seconds,
+          expires_at_ms: Date.now() + seconds * 1000
+        };
+        startSteamGuardTicker();
+        renderOnlinePart(identityKey);
+      } catch (e) {
+        alert(e.message || '令牌码查询失败');
+      } finally {
+        state.steamGuardLoadingMap[identityKey] = false;
+        renderOnlinePart(identityKey);
+      }
+    }
+
+    function buildSteamGuardChipHtml(identityKey) {
+      const key = String(identityKey || '').trim();
+      const one = state.steamGuardMap && state.steamGuardMap[key] ? state.steamGuardMap[key] : null;
+      const code = String((one && one.guard_code) || '').trim();
+      if (!code) return '';
+      const expiresAtMs = Number((one && one.expires_at_ms) || 0);
+      const remain = expiresAtMs > 0
+        ? Math.max(0, Math.ceil((expiresAtMs - Date.now()) / 1000))
+        : Math.max(0, Math.floor(Number((one && one.seconds_remaining) || 0)));
+      return `<span class="chip chip-online" title="Steam 令牌码">令牌 ${escapeAttr(code)} · ${remain}s</span>`;
+    }
+
     function buildOnlineChipHtml(identityKey) {
       const key = String(identityKey || '').trim();
-      const mapText = String(state.onlineStatusMap[key] || '').trim();
       const [gid, acc] = key.split('::');
       const hit = findProductItemByIdentity(gid, acc);
+      if (isCs2Product(hit)) return buildSteamGuardChipHtml(key);
+      const mapText = String(state.onlineStatusMap[key] || '').trim();
       const rowText = String((hit && hit.online_tag) || '').trim();
       const onlineText = mapText || rowText;
       if (!onlineText) return '';
@@ -472,10 +523,32 @@
 
       const btn = card.querySelector('[data-op="online-query"]');
       if (btn) {
-        const querying = Boolean(state.onlineLoadingMap[key] || state.forbiddenLoadingMap[key]);
+        const [gid, acc] = key.split('::');
+        const hit = findProductItemByIdentity(gid, acc);
+        const isCs2 = isCs2Product(hit);
+        const querying = isCs2
+          ? Boolean(state.steamGuardLoadingMap[key])
+          : Boolean(state.onlineLoadingMap[key] || state.forbiddenLoadingMap[key]);
         btn.disabled = querying;
-        btn.textContent = querying ? '查询中...' : '状态查询';
+        btn.textContent = querying ? '查询中...' : (isCs2 ? '查令牌码' : '状态查询');
       }
+    }
+
+    function startSteamGuardTicker() {
+      if (state.steamGuardTimer) return;
+      state.steamGuardTimer = setInterval(() => {
+        let active = 0;
+        for (const key of Object.keys(state.steamGuardMap || {})) {
+          const one = state.steamGuardMap[key] || {};
+          const expiresAtMs = Number(one.expires_at_ms || 0);
+          if (expiresAtMs > Date.now()) active += 1;
+          renderOnlinePart(key);
+        }
+        if (active <= 0 && state.steamGuardTimer) {
+          clearInterval(state.steamGuardTimer);
+          state.steamGuardTimer = 0;
+        }
+      }, 1000);
     }
 
     function renderForbiddenPart(identityKey) {
@@ -1433,7 +1506,10 @@
           }).join('');
           const account = String(item.game_account || '').trim();
           const identityKey = productIdentityKey(item);
-          const querying = Boolean(state.onlineLoadingMap[identityKey] || state.forbiddenLoadingMap[identityKey]);
+          const isCs2 = isCs2Product(item);
+          const querying = Boolean(isCs2
+            ? state.steamGuardLoadingMap[identityKey]
+            : (state.onlineLoadingMap[identityKey] || state.forbiddenLoadingMap[identityKey]));
           const forbiddenLoading = Boolean(state.forbiddenLoadingMap[identityKey]);
           const blacklistDisplayDate = String(item.blacklist_display_date || item.blacklist_create_date || '').trim();
           const blacklistTime = formatBlacklistTimeForCard(blacklistDisplayDate);
@@ -1479,7 +1555,7 @@
             </div>
             <div class="ops">
               <button class="btn btn-ghost btn-card-action product-op-btn" data-op="online-query" ${querying ? 'disabled' : ''}>
-                状态查询
+                ${querying ? '查询中...' : (isCs2 ? '查令牌码' : '状态查询')}
               </button>
               <button class="btn btn-ghost btn-card-action product-op-btn ${item.blacklisted ? 'product-op-btn-danger' : ''}" data-op="blacklist-toggle">
                 ${item.blacklisted ? '移出黑名单' : '加入黑名单'}
@@ -1493,7 +1569,10 @@
             const v = e.currentTarget.getAttribute('data-copy') || '';
             copyAccount(v);
           });
-          node.querySelector('[data-op=\"online-query\"]').addEventListener('click', () => queryStatus(item));
+          node.querySelector('[data-op=\"online-query\"]').addEventListener('click', () => {
+            if (isCs2Product(item)) querySteamGuardCode(item);
+            else queryStatus(item);
+          });
           node.querySelector('[data-op=\"blacklist-toggle\"]').addEventListener('click', () => toggleBlacklist(item));
           node.querySelector('[data-op=\"more-ops\"]').addEventListener('click', () => openMoreOpsSheet(item));
           state.cardNodeMap[identityKey] = node;

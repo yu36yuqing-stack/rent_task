@@ -50,6 +50,7 @@ const { createAccessToken, createOpaqueRefreshToken } = require('../user/auth_to
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
 const {
     resolveUuzuhaoAuthAbnormalByUserAndAccount,
+    resolveUuzuhaoAuthByUser,
     queryOnlineStatusCached,
     queryForbiddenStatusCached,
     setForbiddenPlayWithSnapshot
@@ -79,6 +80,7 @@ const { startProdRiskTaskWorker } = require('../product/prod_status_guard');
 const { resolveDisplayNameByRow } = require('../product/display_name');
 const { normalizeGameProfile } = require('../common/game_profile');
 const { syncOrdersByUser } = require('../order/order');
+const { getSteamGuardCode } = require('../uuzuhao/uuzuhao_api');
 const {
     savePurchaseCostByUserAndAccount,
     createAccountCostByUserAndAccount,
@@ -1829,6 +1831,41 @@ async function handleProductOnlineQuery(req, res) {
     });
 }
 
+async function handleProductSteamGuardCode(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const gameAccount = String(body.game_account || '').trim();
+    const normalizedGame = normalizeGameProfile(body.game_id || 4, body.game_name || 'CSGO', { preserveUnknown: true });
+    const gameId = String(normalizedGame.game_id || body.game_id || '4').trim();
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    if (gameId !== '4') return json(res, 400, { ok: false, message: '仅 CS2 商品支持查询令牌码' });
+
+    let result;
+    try {
+        const auth = await resolveUuzuhaoAuthByUser(user.id);
+        result = await getSteamGuardCode(gameAccount, { auth, game_id: 4 });
+    } catch (e) {
+        const msg = String(e && e.message ? e.message : e || '').trim();
+        if (/uuzuhao .*未配置|缺少可用的 uuzuhao 授权|accountId 不能为空|仅支持 CS2/i.test(msg)) {
+            throw httpError(422, msg);
+        }
+        if (/code=\d+/i.test(msg) || /HTTP \d+/i.test(msg) || /API 返回非JSON/i.test(msg)) {
+            throw httpError(502, `令牌码查询失败: ${msg}`);
+        }
+        throw e;
+    }
+
+    return json(res, 200, {
+        ok: true,
+        data: {
+            game_account: gameAccount,
+            game_id: 4,
+            guard_code: String(result.guard_code || '').trim(),
+            seconds_remaining: Number(result.seconds_remaining || 0)
+        }
+    });
+}
+
 async function handleProductForbiddenPlay(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
@@ -2551,6 +2588,7 @@ async function bootstrap() {
             if (req.method === 'GET' && urlObj.pathname === '/api/user-rules/order-off-threshold') return await handleGetOrderOffThreshold(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/user-rules/order-off-threshold') return await handleSetOrderOffThreshold(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/online') return await handleProductOnlineQuery(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/products/steam-guard-code') return await handleProductSteamGuardCode(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/play') return await handleProductForbiddenPlay(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/query') return await handleProductForbiddenQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/purchase-config') return await handleProductPurchaseConfig(req, res);
