@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const util = require('util');
 const { sendTelegram } = require('./report/report_rent_status.js');
-const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('./database/user_db.js');
+const { listActiveUsers, USER_STATUS_ENABLED } = require('./database/user_db.js');
 const { startOrderSyncWorkerIfNeeded } = require('./order/order');
 const { startOrderStatsWorkerIfNeeded } = require('./stats/order_stats');
 const { tryAcquireLock: tryAcquireDbLock, releaseLock: releaseDbLock } = require('./database/lock_db');
@@ -109,16 +109,15 @@ function releaseLock() {
 const HISTORY_FILE = path.join(TASK_DIR, 'rent_robot_history.jsonl');
 
 async function runPipeline(runRecord) {
-    // 用户范围: 非管理员 + 启用状态
+    // 用户范围: 启用状态；管理员也可以作为租号业务人员参与轮询。
     const users = await listActiveUsers();
     const targets = users
-        .filter((u) => String(u.user_type || '') !== USER_TYPE_ADMIN)
         .filter((u) => String(u.status || '') === USER_STATUS_ENABLED);
 
     if (targets.length === 0) {
         return {
             routed: false,
-            reason: 'no_non_admin_users',
+            reason: 'no_enabled_users',
             routed_users: [],
             routed_user_count: 0,
             processed_user_count: 0,

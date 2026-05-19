@@ -48,6 +48,14 @@ async function main() {
         status: 'enabled',
         desc: 'cron skip user'
     });
+    const adminUser = await createUserByAdmin({
+        account: 'cron_admin_user',
+        password: '123456',
+        name: 'Cron Admin User',
+        user_type: '管理员',
+        status: 'enabled',
+        desc: 'cron admin user should enter pipeline'
+    });
     const failUser = await createUserByAdmin({
         account: 'cron_fail_user',
         password: '123456',
@@ -86,10 +94,14 @@ async function main() {
 
     const rows = await listProductTasks();
     const skipRow = rows.find((row) => Number(row.user_id || 0) === Number(lockedUser.id));
+    const adminRow = rows.find((row) => Number(row.user_id || 0) === Number(adminUser.id));
     const failRow = rows.find((row) => Number(row.user_id || 0) === Number(failUser.id));
     assert.ok(skipRow, '应生成 skip 任务');
     assert.strictEqual(skipRow.status, 'skipped', 'skip 任务状态应为 skipped');
     assert.strictEqual(skipRow.stage, 'lock_skipped', 'skip 任务阶段不对');
+    assert.ok(adminRow, '管理员用户也应进入 product_sync 主流程');
+    assert.strictEqual(adminRow.status, 'success', '管理员用户任务应成功');
+    assert.strictEqual(adminRow.stage, 'done', '管理员用户任务阶段应为 done');
     assert.ok(failRow, '应生成 fail 任务');
     assert.strictEqual(failRow.status, 'failed', 'fail 任务状态应为 failed');
     assert.strictEqual(failRow.stage, 'pipeline_failed', 'fail 任务阶段应为 pipeline_failed');
