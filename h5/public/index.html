@@ -210,6 +210,18 @@
       <div id="boardListContainer"></div>
     </section>
 
+    <section id="maintenanceCleanupView" class="hidden orders-view maintenance-view">
+      <div class="maintenance-top-row">
+        <div>
+          <p class="auth-title">数据清理</p>
+          <p class="head-summary-text">当前策略：runtime_task 仅保留最近 7 天已结束任务。</p>
+        </div>
+        <button id="maintenanceCleanupRunBtn" class="btn btn-ghost btn-page-action">立即清理一次</button>
+      </div>
+      <div id="maintenanceCleanupSummary" class="maintenance-summary-grid"></div>
+      <div id="maintenanceCleanupList" class="maintenance-log-list"></div>
+    </section>
+
     <section id="profileView" class="hidden profile-view">
       <div class="panel profile-card">
         <div class="profile-head-row">
@@ -321,6 +333,15 @@
           </div>
         </div>
         <button class="drawer-item" data-menu="board" data-label="板卡管理">板卡管理</button>
+        <div class="drawer-group hidden" data-admin-only="1" data-drawer-group="maintenance">
+          <button class="drawer-group-toggle" data-drawer-group-toggle="maintenance" type="button" aria-expanded="false">
+            <span>系统维护</span>
+            <span class="drawer-group-chevron" aria-hidden="true">▾</span>
+          </button>
+          <div class="drawer-sub-list hidden" data-drawer-group-list="maintenance">
+            <button class="drawer-sub-item" data-menu="maintenance_cleanup" data-label="数据清理">数据清理</button>
+          </div>
+        </div>
         <button class="drawer-item" data-menu="profile" data-label="个人中心">个人中心</button>
       </div>
     </aside>
@@ -822,5 +843,6 @@
   <script defer src="/js/menu_stats.js?v=20260329b"></script>
   <script defer src="/js/menu_price.js?v=20260405b"></script>
   <script defer src="/js/menu_board.js?v=20260329a"></script>
+  <script defer src="/js/menu_maintenance.js?v=20260519a"></script>
 </body>
 </html>

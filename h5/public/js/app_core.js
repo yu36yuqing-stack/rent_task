@@ -102,7 +102,7 @@
       total: 0,
       list: [],
       currentMenu: 'products',
-      drawerExpandedGroups: { products: false, pricing: false },
+      drawerExpandedGroups: { products: false, pricing: false, maintenance: false },
       drawerOpen: false,
       pullRefresh: { dragging: false, ready: false, loading: false, startY: 0, distance: 0 },
       stats: {
@@ -268,6 +268,12 @@
         order_off_mode: ORDER_OFF_MODE_NATURAL_DAY,
         cooldown_release_delay_min: 10
       },
+      maintenanceCleanup: {
+        loading: false,
+        running: false,
+        dashboard: null,
+        error: ''
+      },
       profile: {
         loading: false,
         notify_saving: false,
@@ -389,6 +395,7 @@
       if (k === 'pricing_uuzuhao') return '定价规则 · 悠悠租号';
       if (k === 'pricing_zuhaowang') return '定价规则 · 租号王';
       if (k === 'board') return '板卡管理';
+      if (k === 'maintenance_cleanup') return '系统维护 · 数据清理';
       if (k === 'profile') return '个人中心';
       return '商品列表';
     }
@@ -407,7 +414,7 @@
         if (m === 'pricing_uhaozu' || m === 'pricing_uuzuhao' || m === 'pricing_zuhaowang') {
           return { menu: m, pricingChannel: pricingChannelFromMenu(m) };
         }
-        if (m === 'orders' || m === 'risk' || m === 'stats' || m === 'auth' || m === 'board' || m === 'profile' || m === 'products' || m === 'products_sold') {
+        if (m === 'orders' || m === 'risk' || m === 'stats' || m === 'auth' || m === 'board' || m === 'maintenance_cleanup' || m === 'profile' || m === 'products' || m === 'products_sold') {
           return { menu: m, pricingChannel: 'uhaozu' };
         }
       } catch (_) {}
@@ -446,6 +453,10 @@
       pricingMetricGrid: document.getElementById('pricingMetricGrid'),
       pricingListContainer: document.getElementById('pricingListContainer'),
       boardView: document.getElementById('boardView'),
+      maintenanceCleanupView: document.getElementById('maintenanceCleanupView'),
+      maintenanceCleanupRunBtn: document.getElementById('maintenanceCleanupRunBtn'),
+      maintenanceCleanupSummary: document.getElementById('maintenanceCleanupSummary'),
+      maintenanceCleanupList: document.getElementById('maintenanceCleanupList'),
       profileView: document.getElementById('profileView'),
       heroLoginView: document.getElementById('heroLoginView'),
       heroAppView: document.getElementById('heroAppView'),
@@ -1201,6 +1212,19 @@
       }
     }
 
+    function loadMaintenanceCleanupSafe() {
+      if (typeof window.loadMaintenanceCleanup === 'function') {
+        return window.loadMaintenanceCleanup();
+      }
+      return Promise.resolve();
+    }
+
+    function renderMaintenanceCleanupSafe() {
+      if (typeof window.renderMaintenanceCleanup === 'function') {
+        window.renderMaintenanceCleanup();
+      }
+    }
+
     function renderPricingViewSafe() {
       if (typeof window.renderPricingView === 'function') {
         window.renderPricingView();
@@ -1219,11 +1243,18 @@
       }
     }
 
+    function currentUserIsAdmin() {
+      return String((state.user && state.user.user_type) || '').trim() === '管理员';
+    }
+
     function renderDrawer() {
       const opened = Boolean(state.drawerOpen);
       els.drawerMask.classList.toggle('hidden', !opened);
       els.sideDrawer.classList.toggle('hidden', !opened);
       els.sideDrawer.setAttribute('aria-hidden', opened ? 'false' : 'true');
+      Array.from(document.querySelectorAll('[data-admin-only="1"]')).forEach((node) => {
+        node.classList.toggle('hidden', !currentUserIsAdmin());
+      });
       Array.from(document.querySelectorAll('.drawer-item')).forEach((n) => {
         const k = String(n.getAttribute('data-menu') || '').trim();
         const active = k === state.currentMenu;
@@ -1237,6 +1268,8 @@
           ? (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang')
           : key === 'products'
           ? (state.currentMenu === 'products' || state.currentMenu === 'products_sold')
+          : key === 'maintenance'
+          ? (state.currentMenu === 'maintenance_cleanup')
           : key === state.currentMenu;
         const expanded = Boolean(state.drawerExpandedGroups && state.drawerExpandedGroups[key]);
         node.classList.toggle('active', active);
@@ -1320,6 +1353,7 @@
       const showAuth = loggedIn && state.currentMenu === 'auth';
       const showPricing = loggedIn && (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang');
       const showBoard = loggedIn && state.currentMenu === 'board';
+      const showMaintenanceCleanup = loggedIn && currentUserIsAdmin() && state.currentMenu === 'maintenance_cleanup';
       const showProfile = loggedIn && state.currentMenu === 'profile';
       els.listView.classList.toggle('hidden', !showProducts);
       els.orderView.classList.toggle('hidden', !showOrders || showOrderComplaint || showOrderDetail);
@@ -1330,6 +1364,7 @@
       els.authView.classList.toggle('hidden', !showAuth);
       if (els.pricingView) els.pricingView.classList.toggle('hidden', !showPricing);
       if (els.boardView) els.boardView.classList.toggle('hidden', !showBoard);
+      if (els.maintenanceCleanupView) els.maintenanceCleanupView.classList.toggle('hidden', !showMaintenanceCleanup);
       if (els.profileView) els.profileView.classList.toggle('hidden', !showProfile);
       els.heroLoginView.classList.toggle('hidden', loggedIn);
       els.heroAppView.classList.toggle('hidden', !loggedIn);
@@ -1365,6 +1400,7 @@
         if (showAuth) renderAuthView();
         if (showPricing) renderPricingViewSafe();
         if (showBoard) renderBoardViewSafe();
+        if (showMaintenanceCleanup) renderMaintenanceCleanupSafe();
         if (showProfile) renderProfileViewSafe();
         renderDrawer();
         renderMoreOpsSheet();
@@ -1428,6 +1464,9 @@
       if (nextMenu === 'pricing_uhaozu' || nextMenu === 'pricing_uuzuhao' || nextMenu === 'pricing_zuhaowang') {
         state.pricing.channel = pricingChannelFromMenu(String(options.pricingChannel || nextMenu).trim());
         state.drawerExpandedGroups.pricing = true;
+      }
+      if (nextMenu === 'maintenance_cleanup') {
+        state.drawerExpandedGroups.maintenance = true;
       }
       resetStatsCostDetail();
       closeActionSheets();
@@ -1532,6 +1571,24 @@
         })();
         return;
       }
+      if (key === 'maintenance_cleanup') {
+        if (!currentUserIsAdmin()) {
+          showToast('当前操作需要管理员权限');
+          state.currentMenu = 'products';
+          render();
+          return;
+        }
+        render();
+        (async () => {
+          try {
+            await loadMaintenanceCleanupSafe();
+            render();
+          } catch (e) {
+            showToast(e.message || '数据清理加载失败');
+          }
+        })();
+        return;
+      }
       if (key === 'profile') {
         render();
         (async () => {
@@ -1558,7 +1615,7 @@
       state.page = 1;
       state.product_game_name = '全部';
       state.currentMenu = 'products';
-      state.drawerExpandedGroups = { products: false, pricing: false };
+      state.drawerExpandedGroups = { products: false, pricing: false, maintenance: false };
       state.drawerOpen = false;
       state.onlineStatusMap = {};
       state.onlineLoadingMap = {};
@@ -1669,6 +1726,12 @@
           result_type: '',
           list: []
         }
+      };
+      state.maintenanceCleanup = {
+        loading: false,
+        running: false,
+        dashboard: null,
+        error: ''
       };
       state.purchaseSheet = {
         open: false,
@@ -2322,12 +2385,18 @@
       if (state.currentMenu === 'products' || state.currentMenu === 'products_sold') {
         state.drawerExpandedGroups.products = true;
       }
+      if (state.currentMenu === 'maintenance_cleanup') {
+        state.drawerExpandedGroups.maintenance = true;
+      }
       if (state.user && !state.token && state.refreshToken) {
         try {
           await tryRefreshAccessToken();
         } catch {
           clearAuthState();
         }
+      }
+      if (state.user && state.currentMenu === 'maintenance_cleanup' && !currentUserIsAdmin()) {
+        state.currentMenu = 'products';
       }
       if (state.token && state.user) {
         try {
@@ -2342,6 +2411,9 @@
           }
           if (state.currentMenu === 'board') {
             await loadBoardCardsSafe();
+          }
+          if (state.currentMenu === 'maintenance_cleanup' && currentUserIsAdmin()) {
+            await loadMaintenanceCleanupSafe();
           }
         } catch {
           clearAuthState();

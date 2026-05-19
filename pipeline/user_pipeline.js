@@ -20,6 +20,20 @@ function accountKeyOf(gameId, account) {
     return `${String(gameId || '1').trim() || '1'}::${String(account || '').trim()}`;
 }
 
+function isSoldAccountRow(row = {}) {
+    return String((row && row.asset_status) || 'active').trim() === 'sold';
+}
+
+function buildAccountKeySet(rows = []) {
+    const out = new Set();
+    for (const row of Array.isArray(rows) ? rows : []) {
+        const acc = String((row && row.game_account) || '').trim();
+        const gid = String((row && row.game_id) || '1').trim() || '1';
+        if (acc) out.add(accountKeyOf(gid, acc));
+    }
+    return out;
+}
+
 const FACE_VERIFY_HOLD_MS = 12 * 3600 * 1000;
 
 function toDateTimeText(input = new Date()) {
@@ -283,6 +297,8 @@ async function runUserPipelineAfterSync(user, syncOut = null, options = {}) {
     }
 
     let rows = [];
+    let activeRows = [];
+    let activeAccountKeys = new Set();
     let blacklistSet = new Set();
     let blacklistReasonMap = {};
     const actionResult = { actions: [], errors: [], planned: 0, timing: null };
@@ -292,6 +308,8 @@ async function runUserPipelineAfterSync(user, syncOut = null, options = {}) {
     try {
         await reportPipelineStage(options, 'load_accounts', '加载账号快照');
         rows = await measure('load_accounts_ms', () => listAllUserGameAccountsByUser(uid));
+        activeRows = rows.filter((row) => !isSoldAccountRow(row));
+        activeAccountKeys = buildAccountKeySet(activeRows);
 
         await measure('reconcile_order_rules_ms', async () => {
             try {
@@ -308,7 +326,7 @@ async function runUserPipelineAfterSync(user, syncOut = null, options = {}) {
         await measure('reconcile_face_verify_ms', async () => {
             try {
                 await reportPipelineStage(options, 'reconcile_face_verify', '收敛人脸识别规则');
-                const faceRet = await reconcilePlatformFaceVerifyBlacklist(uid, rows, logger);
+                const faceRet = await reconcilePlatformFaceVerifyBlacklist(uid, activeRows, logger);
                 if (faceRet && Number(faceRet.touched || 0) > 0) {
                     logger.log(`[FaceVerifyBL] user_id=${uid} result=${JSON.stringify(faceRet)}`);
                 }
@@ -329,7 +347,7 @@ async function runUserPipelineAfterSync(user, syncOut = null, options = {}) {
         await measure('execute_actions_ms', async () => {
             const actionOut = await executeUserActionsIfNeeded({
                 user,
-                rows,
+                rows: activeRows,
                 blacklistSet,
                 actionEnabled,
                 readOnly
@@ -338,12 +356,12 @@ async function runUserPipelineAfterSync(user, syncOut = null, options = {}) {
             actionResult.errors = Array.isArray(actionOut && actionOut.errors) ? actionOut.errors : [];
             actionResult.planned = Number(actionOut && actionOut.planned || 0);
             actionResult.timing = actionOut && actionOut.timing && typeof actionOut.timing === 'object' ? actionOut.timing : null;
-            applyActionResultToRows(rows, actionResult.actions);
+            applyActionResultToRows(activeRows, actionResult.actions);
         });
 
         await reportPipelineStage(options, 'refresh_facts', '刷新订单事实');
         await measure('refresh_facts_ms', async () => {
-            accounts = rows.map((r) => toReportAccountFromUserGameRow(r, blacklistSet, blacklistReasonMap));
+            accounts = activeRows.map((r) => toReportAccountFromUserGameRow(r, blacklistSet, blacklistReasonMap));
             await fillTodayOrderCounts(uid, accounts);
             await fillRentingOrderFacts(uid, accounts);
         });
@@ -361,12 +379,12 @@ async function runUserPipelineAfterSync(user, syncOut = null, options = {}) {
                 one.online_tag = String(onlineTagMap[acc] || '').trim();
             }
             triggerProdStatusGuard(user, accounts, { logger, snapshot: onlineProbe });
-            const recentActions = await buildRecentActionsForUser(uid, { limit: 8 });
-            const syncAnomalies = await listUserSyncAnomaliesForReport(uid);
+            const recentActions = await buildRecentActionsForUser(uid, { limit: 8, include_account_keys: activeAccountKeys });
+            const syncAnomalies = await listUserSyncAnomaliesForReport(uid, { include_account_keys: activeAccountKeys });
             const payload = buildPayloadForOneUser(accounts, {
                 report_owner: String(user.name || user.account || '').trim(),
                 recentActions,
-                master_total: rows.length,
+                master_total: activeRows.length,
                 sync_anomalies: syncAnomalies
             });
             notifyResult = await notifyUserByPayload(user, payload);

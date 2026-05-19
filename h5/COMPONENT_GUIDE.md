@@ -72,6 +72,12 @@
   - `#boardView .board-account-list`：account 标签列表
   - `#boardView .board-account-tag`：account 标签
   - `#boardView .board-account-tag-text`：account 标签文案区（配合 `.game-avatar`）
+- Maintenance（页面锚点变体）
+  - `#maintenanceCleanupView .maintenance-top-row`：维护页标题和手动操作按钮行
+  - `#maintenanceCleanupView .maintenance-summary-grid`：维护任务摘要指标网格
+  - `#maintenanceCleanupView .maintenance-kpi-card`：维护任务指标卡片
+  - `#maintenanceCleanupView .maintenance-log-card`：维护任务历史卡片（基于 `.panel`）
+  - `#maintenanceCleanupView .maintenance-status-pill`：维护任务状态标签
 - Products（页面锚点变体）
   - `#listView .product-filters`：商品页筛选容器（复用 `.orders-tabs`）
   - `#listView .product-filter-tab`：商品页筛选项（复用 `.orders-tab`）

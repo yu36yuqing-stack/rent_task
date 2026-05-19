@@ -3368,6 +3368,125 @@
       line-height: 1.5;
     }
 
+    #maintenanceCleanupView .maintenance-top-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    #maintenanceCleanupView .maintenance-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    #maintenanceCleanupView .maintenance-kpi-card {
+      border: 1px solid rgba(123, 146, 174, .24);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, .88);
+      padding: 12px;
+      box-shadow: 0 8px 18px rgba(31, 57, 91, .06);
+    }
+
+    #maintenanceCleanupView .maintenance-kpi-card span {
+      display: block;
+      color: #667b96;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    #maintenanceCleanupView .maintenance-kpi-card strong {
+      display: block;
+      color: #17283d;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    #maintenanceCleanupView .maintenance-kpi-wide {
+      grid-column: span 2;
+    }
+
+    #maintenanceCleanupView .maintenance-error,
+    #maintenanceCleanupView .maintenance-log-error {
+      grid-column: 1 / -1;
+      color: #b84a3a;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    #maintenanceCleanupView .maintenance-log-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    #maintenanceCleanupView .maintenance-log-card {
+      padding: 14px;
+    }
+
+    #maintenanceCleanupView .maintenance-log-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    #maintenanceCleanupView .maintenance-log-title {
+      margin: 0;
+      color: #17283d;
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    #maintenanceCleanupView .maintenance-log-time {
+      margin: 4px 0 0;
+      color: #667b96;
+      font-size: 12px;
+    }
+
+    #maintenanceCleanupView .maintenance-status-pill {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 12px;
+      font-weight: 800;
+      background: #eef3f9;
+      color: #52677f;
+    }
+
+    #maintenanceCleanupView .maintenance-status-success {
+      color: #1f6f4a;
+      background: #e4f6ed;
+    }
+
+    #maintenanceCleanupView .maintenance-status-failed {
+      color: #a64132;
+      background: #fde9e5;
+    }
+
+    #maintenanceCleanupView .maintenance-status-running {
+      color: #8a5a0b;
+      background: #fff3d7;
+    }
+
+    #maintenanceCleanupView .maintenance-log-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 7px 10px;
+      color: #41546d;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    #maintenanceCleanupView .maintenance-empty {
+      color: #667b96;
+      font-size: 13px;
+      text-align: center;
+    }
+
     @media (max-width: 360px) {
       .title { max-width: 64%; }
       .filters { gap: 5px; }
@@ -3415,5 +3534,18 @@
 
       .account-row {
         flex-wrap: wrap;
+      }
+
+      #maintenanceCleanupView .maintenance-top-row {
+        flex-direction: column;
+      }
+
+      #maintenanceCleanupView .maintenance-summary-grid,
+      #maintenanceCleanupView .maintenance-log-grid {
+        grid-template-columns: 1fr;
+      }
+
+      #maintenanceCleanupView .maintenance-kpi-wide {
+        grid-column: span 1;
       }
     }

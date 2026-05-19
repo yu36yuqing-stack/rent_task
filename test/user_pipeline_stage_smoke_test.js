@@ -35,14 +35,29 @@ async function main() {
             game_account: 'acc_1',
             game_id: '1',
             game_name: 'WZRY',
+            asset_status: 'active',
             channel_status: { uhaozu: '上架中' },
+            channel_prd_info: {}
+        },
+        {
+            game_account: 'sold_acc',
+            game_id: '2',
+            game_name: '和平精英',
+            asset_status: 'sold',
+            channel_status: { uuzuhao: '下架', uhaozu: '下架', zuhaowang: '下架' },
             channel_prd_info: {}
         }
     ]);
     orderRuleMod.reconcileOrderNOffByUser = async () => ({ ok: true });
     userMod.loadUserBlacklistSet = async () => new Set();
     userMod.loadUserBlacklistReasonMap = async () => ({});
-    actionMod.executeUserActionsIfNeeded = async () => ({
+    actionMod.executeUserActionsIfNeeded = async (input = {}) => {
+        assert.deepStrictEqual(
+            (input.rows || []).map((row) => row.game_account),
+            ['acc_1'],
+            '执行上下架动作不应包含已售账号'
+        );
+        return ({
         actions: [],
         errors: [],
         planned: 0,
@@ -52,7 +67,8 @@ async function main() {
             planned: 0,
             actions: { total_ms: 0, planned: 0, executed: 0, by_platform: {}, by_type: {}, actions: [] }
         }
-    });
+        });
+    };
     reportMod.toReportAccountFromUserGameRow = (row) => ({
         account: row.game_account,
         game_account: row.game_account,
@@ -61,13 +77,30 @@ async function main() {
     });
     reportMod.fillTodayOrderCounts = async () => {};
     reportMod.fillRentingOrderFacts = async () => {};
-    prodGuardMod.probeProdOnlineStatus = async () => ({
-        probe_rows: [{ account: 'acc_1', online_tag: 'ONLINE' }]
-    });
+    prodGuardMod.probeProdOnlineStatus = async (_user, accounts = []) => {
+        assert.deepStrictEqual(accounts.map((x) => x.account), ['acc_1'], '在线探测不应包含已售账号');
+        return {
+            probe_rows: [{ account: 'acc_1', online_tag: 'ONLINE' }]
+        };
+    };
     prodGuardMod.triggerProdStatusGuard = () => {};
-    reportMod.buildRecentActionsForUser = async () => [];
-    reportMod.listUserSyncAnomaliesForReport = async () => [];
-    reportMod.buildPayloadForOneUser = () => ({ ok: true });
+    reportMod.buildRecentActionsForUser = async (_uid, opts = {}) => {
+        assert.ok(opts.include_account_keys instanceof Set, '最近操作应传入在售账号过滤集合');
+        assert.ok(opts.include_account_keys.has('1::acc_1'), '最近操作过滤集合应包含在售账号');
+        assert.ok(!opts.include_account_keys.has('2::sold_acc'), '最近操作过滤集合不应包含已售账号');
+        return [];
+    };
+    reportMod.listUserSyncAnomaliesForReport = async (_uid, opts = {}) => {
+        assert.ok(opts.include_account_keys instanceof Set, '同步异常应传入在售账号过滤集合');
+        assert.ok(opts.include_account_keys.has('1::acc_1'), '同步异常过滤集合应包含在售账号');
+        assert.ok(!opts.include_account_keys.has('2::sold_acc'), '同步异常过滤集合不应包含已售账号');
+        return [];
+    };
+    reportMod.buildPayloadForOneUser = (accounts, extra = {}) => {
+        assert.deepStrictEqual(accounts.map((x) => x.account), ['acc_1'], '通知 payload 不应包含已售账号');
+        assert.strictEqual(Number(extra.master_total), 1, '通知主档总数应按在售账号计算');
+        return { ok: true };
+    };
     reportMod.notifyUserByPayload = async () => ({ ok: true });
 
     delete require.cache[require.resolve('../pipeline/user_pipeline')];
@@ -87,6 +120,7 @@ async function main() {
     );
 
     assert.strictEqual(out.ok, true, 'pipeline 应成功');
+    assert.strictEqual(out.accounts_count, 1, 'pipeline 返回账号数应按在售账号计算');
     assert.ok(out.pipeline_timing && typeof out.pipeline_timing === 'object', '应返回 pipeline_timing');
     assert.ok(Number(out.pipeline_timing.total_ms) >= 0, 'pipeline_timing.total_ms 应为非负数');
     assert.ok(Number(out.pipeline_timing.sync_accounts_ms) >= 0, '应记录 sync_accounts_ms');

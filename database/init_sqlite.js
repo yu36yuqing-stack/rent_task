@@ -26,6 +26,8 @@ const { initOrderStatsJobStateDb } = require('./order_stats_job_state_db');
 const { initOrderComplaintDb } = require('./order_complaint_db');
 const { initOrderDetailDb } = require('./order_detail_db');
 const { initLockDb } = require('./lock_db');
+const { initRuntimeTaskDb } = require('./runtime_task_db');
+const { initMaintenanceTaskLogDb } = require('./maintenance_task_log_db');
 const { initUserPriceRuleDb } = require('./user_price_rule_db');
 const { initPricePublishLogDb } = require('./price_publish_log_db');
 const { ensureMigrationsReady } = require('./migration_runner');
@@ -63,9 +65,11 @@ async function main() {
     await initOrderStatsCostDailyDb();
     await initOrderStatsWeeklySnapshotDb();
     await initOrderStatsJobStateDb();
+    await initRuntimeTaskDb();
     await initOrderComplaintDb();
     await initOrderDetailDb();
     await initLockDb();
+    await initMaintenanceTaskLogDb();
     await initUserPriceRuleDb();
     await initPricePublishLogDb();
 

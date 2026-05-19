@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
 const { fetch } = require('undici');
-const { initUserDb, verifyUserLogin, getActiveUserById, updateUserNotifyConfigByUserId } = require('../database/user_db');
+const { initUserDb, verifyUserLogin, getActiveUserById, updateUserNotifyConfigByUserId, USER_TYPE_ADMIN } = require('../database/user_db');
 const {
     initUserGameAccountDb,
     listUserGameAccounts,
@@ -139,6 +139,11 @@ const {
 } = require('../price/price_publish_service');
 const { initUserPriceRuleDb } = require('../database/user_price_rule_db');
 const { initPricePublishLogDb } = require('../database/price_publish_log_db');
+const { initMaintenanceTaskLogDb } = require('../database/maintenance_task_log_db');
+const {
+    getRuntimeTaskPruneDashboard,
+    runRuntimeTaskPrune
+} = require('../maintenance/runtime_task_prune_service');
 const { ensureMigrationsReady } = require('../database/migration_runner');
 
 const HOST = process.env.H5_HOST || '0.0.0.0';
@@ -275,6 +280,14 @@ async function requireAuth(req) {
         ({ user } = await parseAccessTokenOrThrow(token));
     } catch (e) {
         throw httpError(401, e.message || 'token 无效或已过期');
+    }
+    return user;
+}
+
+async function requireAdmin(req) {
+    const user = await requireAuth(req);
+    if (String(user.user_type || '') !== USER_TYPE_ADMIN) {
+        throw httpError(403, '当前操作需要管理员权限');
     }
     return user;
 }
@@ -1574,6 +1587,23 @@ async function handleGetProfile(req, res) {
     });
 }
 
+async function handleMaintenanceRuntimeCleanup(req, res, urlObj) {
+    await requireAdmin(req);
+    const limit = Math.max(1, Math.min(50, Number(urlObj.searchParams.get('limit') || 20)));
+    const dashboard = await getRuntimeTaskPruneDashboard({ limit });
+    return json(res, 200, { ok: true, dashboard });
+}
+
+async function handleMaintenanceRuntimeCleanupRun(req, res) {
+    const user = await requireAdmin(req);
+    const result = await runRuntimeTaskPrune({
+        trigger_type: 'manual',
+        trigger_user_id: user.id,
+        retention_days: 7
+    });
+    return json(res, 200, { ok: true, ...result });
+}
+
 async function handleSetProfileNotify(req, res) {
     const user = await requireAuth(req);
     const body = await readJsonBody(req);
@@ -2616,6 +2646,7 @@ async function bootstrap() {
     await initUserRuleDb();
     await initUserPriceRuleDb();
     await initPricePublishLogDb();
+    await initMaintenanceTaskLogDb();
     await initProdRiskEventDb();
     await initProdGuardTaskDb();
     await initBoardCardDb();
@@ -2649,6 +2680,8 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/profile/notify') return await handleSetProfileNotify(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/profile/order-off') return await handleSetProfileOrderOff(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/profile/order-cooldown') return await handleSetProfileOrderCooldown(req, res);
+            if (req.method === 'GET' && urlObj.pathname === '/api/maintenance/runtime-cleanup') return await handleMaintenanceRuntimeCleanup(req, res, urlObj);
+            if (req.method === 'POST' && urlObj.pathname === '/api/maintenance/runtime-cleanup/run') return await handleMaintenanceRuntimeCleanupRun(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/user-rules/order-off-threshold') return await handleGetOrderOffThreshold(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/user-rules/order-off-threshold') return await handleSetOrderOffThreshold(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/online') return await handleProductOnlineQuery(req, res);

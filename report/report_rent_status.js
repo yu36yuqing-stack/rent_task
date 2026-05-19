@@ -80,12 +80,31 @@ function formatActionForDisplay(act = {}, fallbackTs = Date.now()) {
     return `• ${ts} ${icon}${platform} -> ${account} (${reason})${mode}`;
 }
 
+function normalizeAccountKeySet(input) {
+    if (!input) return null;
+    const raw = input instanceof Set ? Array.from(input) : (Array.isArray(input) ? input : []);
+    const out = new Set();
+    for (const item of raw) {
+        if (typeof item === 'string') {
+            const text = item.trim();
+            if (text) out.add(text.includes('::') ? text : accountKeyOf('1', text));
+            continue;
+        }
+        if (!item || typeof item !== 'object') continue;
+        const account = String(item.account || item.game_account || '').trim();
+        const gameId = String(item.game_id || '1').trim() || '1';
+        if (account) out.add(accountKeyOf(gameId, account));
+    }
+    return out;
+}
+
 async function buildRecentActionsForUser(userId, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) return [];
     const limit = Math.max(1, Number(options.limit || 8));
     const windowMs = Math.max(60 * 1000, Number(options.window_ms || 1800 * 1000));
     const rawLimit = Math.max(limit * 8, 64);
+    const includeAccountKeys = normalizeAccountKeySet(options.include_account_keys || options.active_account_keys || null);
     const rows = await listRecentProductOnoffByUser(uid, { window_ms: windowMs, limit: rawLimit });
     if (!Array.isArray(rows) || rows.length === 0) return [];
 
@@ -112,6 +131,7 @@ async function buildRecentActionsForUser(userId, options = {}) {
         const acc = String(row.game_account || '').trim();
         const gid = String(row.game_id || '1').trim() || '1';
         if (!acc) continue;
+        if (includeAccountKeys && !includeAccountKeys.has(accountKeyOf(gid, acc))) continue;
         const key = `${direction}::${gid}::${acc}`;
         const ts = Number(row.event_time || 0);
         const skipped = Number(row.skipped || 0) > 0;
@@ -435,17 +455,44 @@ async function notifyUserByPayload(user, payload) {
     return { ok: true, reason: '', errors: [] };
 }
 
-async function listUserSyncAnomaliesForReport(userId) {
+function formatMissingSample(missingAccounts = []) {
+    return missingAccounts
+        .slice(0, 3)
+        .map((item) => {
+            const gameName = String((item && item.game_name) || '').trim();
+            const account = String((item && (item.game_account || item.account)) || '').trim();
+            return [gameName, account].filter(Boolean).join('/');
+        })
+        .filter(Boolean)
+        .join('、');
+}
+
+async function listUserSyncAnomaliesForReport(userId, options = {}) {
     const rows = await listOpenProductSyncAnomaliesByUser(userId);
-    return rows.map((row) => ({
-        platform: String((row && row.platform) || '').trim(),
-        expected_count: Number((row && row.expected_count) || 0),
-        pulled_count: Number((row && row.pulled_count) || 0),
-        missing_count: Number((row && row.missing_count) || 0),
-        sample_missing_text: String((row && row.sample_missing_text) || '').trim(),
-        first_seen_at: String((row && row.first_seen_at) || '').trim(),
-        last_seen_at: String((row && row.last_seen_at) || '').trim()
-    }));
+    const includeAccountKeys = normalizeAccountKeySet(options.include_account_keys || options.active_account_keys || null);
+    return rows.map((row) => {
+        const rawMissingAccounts = Array.isArray(row && row.missing_accounts) ? row.missing_accounts : [];
+        const missingAccounts = includeAccountKeys
+            ? rawMissingAccounts.filter((item) => {
+                const account = String((item && (item.game_account || item.account)) || '').trim();
+                const gameId = String((item && item.game_id) || '1').trim() || '1';
+                return account && includeAccountKeys.has(accountKeyOf(gameId, account));
+            })
+            : rawMissingAccounts;
+        const missingCount = includeAccountKeys ? missingAccounts.length : Number((row && row.missing_count) || 0);
+        return {
+            platform: String((row && row.platform) || '').trim(),
+            expected_count: Number((row && row.expected_count) || 0),
+            pulled_count: Number((row && row.pulled_count) || 0),
+            missing_count: missingCount,
+            missing_accounts: missingAccounts,
+            sample_missing_text: includeAccountKeys
+                ? formatMissingSample(missingAccounts)
+                : String((row && row.sample_missing_text) || '').trim(),
+            first_seen_at: String((row && row.first_seen_at) || '').trim(),
+            last_seen_at: String((row && row.last_seen_at) || '').trim()
+        };
+    }).filter((row) => Number(row.missing_count || 0) > 0);
 }
 
 async function fillTodayOrderCounts(userId, accounts = []) {

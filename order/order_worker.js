@@ -11,6 +11,7 @@ const {
     TASK_STATUS_SUCCESS,
     TASK_STATUS_FAILED
 } = require('../database/runtime_task_db');
+const { runScheduledRuntimeTaskPruneIfDue } = require('../maintenance/runtime_task_prune_service');
 
 const TASK_DIR = path.join(__dirname, '..');
 const LOG_DIR = path.join(TASK_DIR, 'log');
@@ -51,6 +52,17 @@ async function main() {
 
     let runtimeTask = null;
     try {
+        try {
+            const pruneResult = await runScheduledRuntimeTaskPruneIfDue({});
+            if (pruneResult && pruneResult.skipped) {
+                console.log(`[OrderWorker] runtime_task 清理跳过 reason=${pruneResult.reason || ''}`);
+            } else if (pruneResult && pruneResult.result) {
+                console.log(`[OrderWorker] runtime_task 清理完成 deleted=${Number(pruneResult.result.deleted_rows || 0)}`);
+            }
+        } catch (e) {
+            console.warn(`[OrderWorker] runtime_task 清理失败，不阻断订单同步: ${e.message}`);
+        }
+
         runtimeTask = await createRuntimeTask({
             user_id: 0,
             task_type: 'order_sync',
