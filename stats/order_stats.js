@@ -3,7 +3,7 @@ const fs = require('fs');
 const { fork } = require('child_process');
 const { openDatabase, openStatsDatabase } = require('../database/sqlite_client');
 const { queryDailyRowsFromOrders } = require('../order/service/order_query_service');
-const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('../database/user_db');
+const { listActiveUsers, USER_STATUS_ENABLED } = require('../database/user_db');
 const { initUserGameAccountDb } = require('../database/user_game_account_db');
 const {
     initOrderStatsDailyDb,
@@ -593,7 +593,6 @@ async function refreshOrderStatsDailyForAllUsers(options = {}) {
     await initOrderStatsDailyDb();
     const users = await listActiveUsers();
     const targets = users
-        .filter((u) => String(u.user_type || '') !== USER_TYPE_ADMIN)
         .filter((u) => String(u.status || '') === USER_STATUS_ENABLED);
     const out = [];
     for (const user of targets) {

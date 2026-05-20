@@ -1,4 +1,4 @@
-const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('../database/user_db');
+const { listActiveUsers, USER_STATUS_ENABLED } = require('../database/user_db');
 const { tryAcquireLock, releaseLock } = require('../database/lock_db');
 const { sendDingdingMessage, resolveDingdingAtOptions } = require('../report/dingding/ding_notify');
 const {
@@ -138,7 +138,6 @@ async function runBlacklistInspectorOnce(options = {}) {
 
         const mode = String(getBlacklistV2Mode());
         const users = (await listActiveUsers())
-            .filter((u) => String((u && u.user_type) || '') !== USER_TYPE_ADMIN)
             .filter((u) => String((u && u.status) || '') === USER_STATUS_ENABLED);
 
         let usersMismatch = 0;

@@ -50,6 +50,7 @@ async function main() {
     assert.ok(Array.isArray(errs) && errs[0].includes('stub_order_worker_boom'), '失败错误信息不正确');
     orderMod.syncOrdersForAllUsers = original;
     delete require.cache[require.resolve('../order/order_worker')];
+    process.exitCode = 0;
     console.log(`[PASS] order_worker_runtime_task_failure_smoke_test temp_dir=${tempDir}`);
 }
 

@@ -34,7 +34,7 @@ const { listAllOrders, getOrderDetail } = require('../uuzuhao/uuzuhao_api');
 const { listAllOrderPages, getOrderDetailPage, parseUhaozuOrderDetailHtml } = require('../uhaozu/uhaozu_api');
 const { getOrderListByEncryptedPayload } = require('../zuhaowang/zuhaowang_api');
 const { listAllUserGameAccountsByUser } = require('../product/product');
-const { listActiveUsers, USER_TYPE_ADMIN, USER_STATUS_ENABLED } = require('../database/user_db');
+const { listActiveUsers, USER_STATUS_ENABLED } = require('../database/user_db');
 const { openOrderDatabase } = require('../database/sqlite_client');
 const { normalizeZuhaowangAuthPayload } = require('../user/user');
 const { normalizeAccountSwitch } = require('../database/user_game_account_db');
@@ -1610,7 +1610,6 @@ async function syncOrdersByUser(userId, options = {}) {
 async function syncOrdersForAllUsers(options = {}) {
     const users = await listActiveUsers();
     const targets = users
-        .filter((u) => String(u.user_type || '') !== USER_TYPE_ADMIN)
         .filter((u) => String(u.status || '') === USER_STATUS_ENABLED);
 
     const summary = {
