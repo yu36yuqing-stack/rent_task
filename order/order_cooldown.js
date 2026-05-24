@@ -26,7 +26,7 @@ const CHANNEL_ZHW_YUANBAO = 'zuhaowang-yuanbao';
 
 const COOLDOWN_REASON = '冷却期下架';
 const COOLDOWN_SOURCE = 'order_cooldown';
-const COOLDOWN_NEAR_END_SEC = 10 * 60;
+const COOLDOWN_NEAR_END_SEC = 30;
 const COOLDOWN_END_DELAY_SEC = DEFAULT_COOLDOWN_RELEASE_DELAY_MIN * 60;
 const COOLDOWN_SYNC_FRESH_WINDOW_SEC = 12 * 60;
 
@@ -209,8 +209,6 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
         const startSec = parseDateTimeTextToSec(row.start_time);
         const endSec = parseDateTimeTextToSec(row.end_time);
         if (!startSec || !endSec) continue;
-        if (nowSec >= endSec) continue;
-        if ((endSec - nowSec) > nearEndSec) continue;
         const key = accountKey(row.game_id, row.game_account);
         const accountCfg = accountCooldownMap.get(key) || {
             release_delay_min: globalReleaseDelayMin,
@@ -223,6 +221,7 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
             ? releaseDelayMin * 60
             : overrideEndDelaySec;
         const untilSec = endSec + endDelaySec;
+        if (nowSec < (endSec - nearEndSec)) continue;
         if (untilSec <= nowSec) continue;
         const acc = row.game_account;
         const prev = cooldownByAccount.get(key);
