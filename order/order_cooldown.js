@@ -14,7 +14,7 @@ const {
     DEFAULT_COOLDOWN_RELEASE_DELAY_MIN
 } = require('./order_cooldown_config');
 const {
-    listActiveRentingOrdersByUser,
+    listCooldownCandidateOrdersByUser,
     getOrderStatusByOrderNo,
     getOrderEndTimeByOrderNo
 } = require('./service/order_query_service');
@@ -192,6 +192,15 @@ async function listAccountCooldownConfigMap(userId, fallbackReleaseDelayMin) {
     return out;
 }
 
+function maxCooldownReleaseDelayMin(globalReleaseDelayMin, accountCooldownMap = new Map()) {
+    let maxMin = Math.max(0, Number(globalReleaseDelayMin || 0));
+    for (const cfg of accountCooldownMap.values()) {
+        const delay = Math.max(0, Number((cfg && cfg.release_delay_min) || 0));
+        if (delay > maxMin) maxMin = delay;
+    }
+    return maxMin;
+}
+
 async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
@@ -201,7 +210,11 @@ async function reconcileOrderCooldownEntryByUser(userId, options = {}) {
     const globalReleaseDelayMin = Math.max(0, Number(cooldownCfg.release_delay_min || 0));
     const overrideEndDelaySec = options.end_delay_sec === undefined ? null : Math.max(0, Number(options.end_delay_sec || 0));
     const accountCooldownMap = await listAccountCooldownConfigMap(uid, globalReleaseDelayMin);
-    const rentingOrders = await listActiveRentingOrdersByUser(uid);
+    const maxReleaseDelayMin = overrideEndDelaySec === null
+        ? maxCooldownReleaseDelayMin(globalReleaseDelayMin, accountCooldownMap)
+        : Math.ceil(overrideEndDelaySec / 60);
+    const cooldownLookbackSec = Math.max(nearEndSec + 60, maxReleaseDelayMin * 60 + nearEndSec + 60);
+    const rentingOrders = await listCooldownCandidateOrdersByUser(uid, { lookback_sec: cooldownLookbackSec });
     const cooldownByAccount = new Map();
     let minReleaseDelayMin = null;
 

@@ -37,7 +37,7 @@ function formatDateTime(sec) {
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-async function seedActiveOrder(userId, orderNo, gameAccount, nowSec, endOffsetSec) {
+async function seedOrder(userId, orderNo, gameAccount, nowSec, endOffsetSec, orderStatus = '租赁中') {
     const endSec = nowSec + endOffsetSec;
     await upsertOrder({
         user_id: userId,
@@ -47,7 +47,7 @@ async function seedActiveOrder(userId, orderNo, gameAccount, nowSec, endOffsetSe
         game_name: 'WZRY',
         game_account: gameAccount,
         role_name: `role_${gameAccount}`,
-        order_status: '租赁中',
+        order_status: orderStatus,
         order_amount: 12,
         rent_hour: 1,
         ren_way: '时租',
@@ -58,6 +58,10 @@ async function seedActiveOrder(userId, orderNo, gameAccount, nowSec, endOffsetSe
         desc: 'cooldown config smoke'
     });
     return endSec;
+}
+
+async function seedActiveOrder(userId, orderNo, gameAccount, nowSec, endOffsetSec) {
+    return seedOrder(userId, orderNo, gameAccount, nowSec, endOffsetSec, '租赁中');
 }
 
 async function main() {
@@ -137,9 +141,9 @@ async function main() {
     assertEqual(earlyRet.hit_accounts, 0, '距离结束超过 30 秒时不应提前进入冷却期');
 
     const missedUserId = 105;
-    const missedEndSec = await seedActiveOrder(missedUserId, 'ORDER_MISSED', 'acct_missed', nowSec, -120);
+    const missedEndSec = await seedOrder(missedUserId, 'ORDER_MISSED', 'acct_missed', nowSec, -120, '已完成');
     const missedRet = await reconcileOrderCooldownEntryByUser(missedUserId);
-    assertEqual(missedRet.hit_accounts, 1, '订单结束后但未到释放时间时应补建冷却期');
+    assertEqual(missedRet.hit_accounts, 1, '已完成订单结束后但未到释放时间时应补建冷却期');
 
     const missedRows = await listBlacklistSourcesByUser(missedUserId);
     assertEqual(missedRows.length, 1, '补建冷却期应写入 1 条 source');

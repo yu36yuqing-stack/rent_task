@@ -99,6 +99,43 @@ async function listActiveRentingOrdersByUser(userId) {
     }
 }
 
+async function listCooldownCandidateOrdersByUser(userId, options = {}) {
+    const uid = Number(userId || 0);
+    if (!uid) return [];
+    const lookbackSec = Math.max(60, Number(options.lookback_sec || 0));
+    const sinceText = toDateTimeText(Date.now() - lookbackSec * 1000);
+    await initOrderDb();
+    const db = openOrderDatabase();
+    try {
+        const rows = await dbAll(db, `
+            SELECT game_account, game_id, game_name, start_time, end_time, order_no, channel, order_status
+            FROM "order"
+            WHERE user_id = ?
+              AND is_deleted = 0
+              AND TRIM(COALESCE(game_account, '')) <> ''
+              AND (
+                COALESCE(order_status, '') IN ('租赁中', '出租中')
+                OR (
+                  COALESCE(order_status, '') = '已完成'
+                  AND COALESCE(end_time, '') >= ?
+                )
+              )
+        `, [uid, sinceText]);
+        return rows.map((row) => ({
+            game_account: String(row.game_account || '').trim(),
+            game_id: String(row.game_id || '1').trim() || '1',
+            game_name: String(row.game_name || 'WZRY').trim() || 'WZRY',
+            start_time: String(row.start_time || '').trim(),
+            end_time: String(row.end_time || '').trim(),
+            order_no: String(row.order_no || '').trim(),
+            channel: String(row.channel || '').trim(),
+            order_status: String(row.order_status || '').trim()
+        })).filter((row) => row.game_account);
+    } finally {
+        db.close();
+    }
+}
+
 async function getOrderStatusByOrderNo(userId, orderNo, channel = '') {
     const uid = Number(userId || 0);
     const no = String(orderNo || '').trim();
@@ -381,6 +418,7 @@ module.exports = {
     listRentingOrderWindowByAccounts: listRentingWindowByAccounts,
     listOrdersForUser,
     listActiveRentingOrdersByUser,
+    listCooldownCandidateOrdersByUser,
     listLatestEndedOrderSnapshotByAccounts,
     listActiveOrderSnapshotByAccounts,
     listLinkedOrderAccountsByUser,
