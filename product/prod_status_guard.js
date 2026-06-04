@@ -38,7 +38,6 @@ const {
 
 const ONLINE_PROBE_WINDOW_SEC = 90;
 const ONLINE_PROBE_INTERVAL_SEC = Math.max(60, Number(process.env.ONLINE_PROBE_INTERVAL_SEC || 600));
-const ONLINE_PROBE_FORCE = ['1', 'true', 'yes', 'on'].includes(String(process.env.ONLINE_PROBE_FORCE || 'false').toLowerCase());
 const RECENT_ORDER_END_SUPPRESS_SEC = Math.max(60, Number(process.env.ONLINE_ALERT_RECENT_END_SUPPRESS_SEC || 1200));
 
 const RISK_TYPE_ONLINE_NON_RENTING = 'online_non_renting';
@@ -288,10 +287,6 @@ async function resolveProdGuardEnabledByUserId(userId, userCache = new Map()) {
 
 async function probeProdOnlineStatus(user, accounts = [], options = {}) {
     const logger = options.logger && typeof options.logger.log === 'function' ? options.logger : console;
-    const forceProbe = Boolean(options.force_probe);
-    if (!forceProbe && !ONLINE_PROBE_FORCE && !shouldProbeOnlineNow()) {
-        return { ok: true, skipped: true, reason: 'out_of_probe_window' };
-    }
 
     const inputList = (Array.isArray(accounts) ? accounts : [])
         .filter((x) => String(x && x.asset_status || 'active').trim() !== 'sold')

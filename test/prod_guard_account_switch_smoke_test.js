@@ -79,7 +79,6 @@ async function main() {
             }
         }
     ], {
-        force_probe: true,
         include_rows: true,
         logger: { log() {}, warn() {}, error() {} }
     });

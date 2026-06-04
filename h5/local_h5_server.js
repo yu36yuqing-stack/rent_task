@@ -8,6 +8,7 @@ const { initUserDb, verifyUserLogin, getActiveUserById, updateUserNotifyConfigBy
 const {
     initUserGameAccountDb,
     listUserGameAccounts,
+    getAliveUserGameAccountByUserAndAccount,
     updateUserGameAccountSwitchByUserAndAccount,
     updateUserGameAccountSoldByUserAndAccount,
     normalizeAccountSwitch: normalizeAccountSwitchDb
@@ -2157,6 +2158,8 @@ async function handleProductAccountSwitchToggle(req, res) {
         return json(res, 400, { ok: false, message: 'enabled 不能为空' });
     }
     const enabled = enabledRaw === true || String(enabledRaw).trim().toLowerCase() === 'true';
+    const currentAccount = await getAliveUserGameAccountByUserAndAccount(user.id, gameAccount);
+    const beforeProdGuard = resolveProdGuardSwitch(currentAccount ? currentAccount.switch : {});
     const nextSwitch = await updateUserGameAccountSwitchByUserAndAccount(user.id, gameAccount, {
         prod_guard: {
             label: '在线风控',
@@ -2171,6 +2174,12 @@ async function handleProductAccountSwitchToggle(req, res) {
         });
     }
     const prodGuard = resolveProdGuardSwitch(nextSwitch);
+    console.log(
+        `[H5][ProdGuardSwitch] user_id=${Number(user.id || 0)} ` +
+        `game_account=${gameAccount} game_id=${normalizedGame.game_id} game_name=${normalizedGame.game_name} ` +
+        `before=${Boolean(beforeProdGuard.enabled)} after=${Boolean(prodGuard.enabled)} ` +
+        `changed=${Boolean(beforeProdGuard.enabled) !== Boolean(prodGuard.enabled)} source=h5`
+    );
     return json(res, 200, {
         ok: true,
         data: {
