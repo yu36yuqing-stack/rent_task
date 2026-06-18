@@ -896,7 +896,8 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const target3RateOverall = configuredCount > 0
         ? Number((summaryHitDaysByAccount / (configuredCount * periodDays)).toFixed(4))
         : 0;
-    const totalRecAmountAllTime = toMoney2(by_account.reduce((sum, x) => sum + Number(x.total_rec_amount_all_time || 0), 0));
+    const totalRecAmountAllTime = toMoney2(Array.from(historicalTotalMap.values())
+        .reduce((sum, amount) => sum + Number(amount || 0), 0));
 
     return {
         period: periodInfo.period,
