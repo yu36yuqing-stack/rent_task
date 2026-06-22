@@ -295,7 +295,7 @@
       renderOnlinePart(identityKey);
       renderForbiddenPart(identityKey);
       try {
-        const [onlineRes, forbiddenRes] = await Promise.all([
+        const [onlineRet, forbiddenRet] = await Promise.allSettled([
           prodGuardEnabled
             ? request('/api/products/online', {
               method: 'POST',
@@ -307,22 +307,50 @@
             body: JSON.stringify({ game_account: account, game_name: gameName })
           })
         ]);
-        const forbiddenEnabled = Boolean(forbiddenRes && forbiddenRes.data && forbiddenRes.data.enabled);
+        const onlineRes = onlineRet.status === 'fulfilled' ? onlineRet.value : null;
+        const forbiddenRes = forbiddenRet.status === 'fulfilled' ? forbiddenRet.value : null;
+        const onlineErr = onlineRet.status === 'rejected' ? onlineRet.reason : null;
+        const forbiddenErr = forbiddenRet.status === 'rejected' ? forbiddenRet.reason : null;
         const hit = findProductItemByIdentity(gameId, account);
         if (hit) {
           if (prodGuardEnabled) {
-            const online = Boolean(onlineRes && onlineRes.data && onlineRes.data.online);
-            const tag = online ? '在线' : '离线';
-            state.onlineStatusMap[identityKey] = tag;
-            hit.online_tag = tag;
-            hit.online_query_time = String((onlineRes && onlineRes.data && onlineRes.data.query_time) || '').trim();
+            if (onlineErr) {
+              state.onlineStatusMap[identityKey] = '查询失败';
+              hit.online_tag = '查询失败';
+              hit.online_query_time = '';
+              hit.online_query_error = String(onlineErr && onlineErr.message ? onlineErr.message : '在线查询失败').trim();
+            } else {
+              const online = Boolean(onlineRes && onlineRes.data && onlineRes.data.online);
+              const tag = online ? '在线' : '离线';
+              state.onlineStatusMap[identityKey] = tag;
+              hit.online_tag = tag;
+              hit.online_query_time = String((onlineRes && onlineRes.data && onlineRes.data.query_time) || '').trim();
+              hit.online_query_error = '';
+            }
           } else {
             delete state.onlineStatusMap[identityKey];
             hit.online_tag = '';
             hit.online_query_time = '';
+            hit.online_query_error = '';
           }
-          hit.forbidden_status = forbiddenEnabled ? '禁玩中' : '未禁玩';
-          hit.forbidden_query_time = String((forbiddenRes && forbiddenRes.data && forbiddenRes.data.query_time) || '').trim();
+          if (forbiddenErr) {
+            hit.forbidden_status = '查询失败';
+            hit.forbidden_query_time = '';
+            hit.forbidden_query_error = String(forbiddenErr && forbiddenErr.message ? forbiddenErr.message : '禁玩查询失败').trim();
+          } else {
+            const forbiddenEnabled = Boolean(forbiddenRes && forbiddenRes.data && forbiddenRes.data.enabled);
+            hit.forbidden_status = forbiddenEnabled ? '禁玩中' : '未禁玩';
+            hit.forbidden_query_time = String((forbiddenRes && forbiddenRes.data && forbiddenRes.data.query_time) || '').trim();
+            hit.forbidden_query_error = '';
+          }
+        }
+        const failed = [];
+        if (onlineErr) failed.push(`在线查询失败：${String(onlineErr && onlineErr.message ? onlineErr.message : onlineErr || '').trim() || '未知错误'}`);
+        if (forbiddenErr) failed.push(`禁玩查询失败：${String(forbiddenErr && forbiddenErr.message ? forbiddenErr.message : forbiddenErr || '').trim() || '未知错误'}`);
+        if (failed.length >= 2 || (failed.length === 1 && !hit)) {
+          alert(failed.join('\n'));
+        } else if (failed.length === 1) {
+          showToast(failed[0]);
         }
       } catch (e) {
         alert(e.message || '状态查询失败');
@@ -390,9 +418,12 @@
       const rowText = String((hit && hit.online_tag) || '').trim();
       const onlineText = mapText || rowText;
       if (!onlineText) return '';
-      const onlineClass = onlineText === '在线' ? 'chip-online' : 'chip-offline';
+      const onlineClass = onlineText === '在线' ? 'chip-online' : (onlineText === '查询失败' ? 'chip-black' : 'chip-offline');
       const queryTime = String((hit && hit.online_query_time) || '').trim();
-      const title = queryTime ? ` title="查询时间：${escapeAttr(queryTime)}"` : '';
+      const queryError = String((hit && hit.online_query_error) || '').trim();
+      const title = queryError
+        ? ` title="${escapeAttr(queryError)}"`
+        : (queryTime ? ` title="查询时间：${escapeAttr(queryTime)}"` : '');
       return `<span class="chip ${onlineClass}"${title}>${onlineText}</span>`;
     }
 
@@ -403,8 +434,11 @@
       const txt = String((hit && hit.forbidden_status) || '').trim();
       if (!txt) return '';
       const queryTime = String((hit && hit.forbidden_query_time) || '').trim();
-      const title = queryTime ? ` title="查询时间：${escapeAttr(queryTime)}"` : '';
-      const cls = txt === '禁玩中' ? 'chip-black' : 'chip-offline';
+      const queryError = String((hit && hit.forbidden_query_error) || '').trim();
+      const title = queryError
+        ? ` title="${escapeAttr(queryError)}"`
+        : (queryTime ? ` title="查询时间：${escapeAttr(queryTime)}"` : '');
+      const cls = txt === '禁玩中' || txt === '查询失败' ? 'chip-black' : 'chip-offline';
       return `<span class="chip ${cls}"${title}>${txt}</span>`;
     }
 
