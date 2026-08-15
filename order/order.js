@@ -49,7 +49,7 @@ const {
 } = require('./order_mapping');
 const { normalizeGameProfile } = require('../common/game_profile');
 const {
-    buildAuthRevokeCandidate,
+    buildAuthRevokeCandidateOnStatusChange,
     enqueueAuthRevokeTasks,
     startAuthRevokeTaskWorker
 } = require('./auth_revoke_task_service');
@@ -1114,12 +1114,12 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
         if (!mapped.order_no) continue;
         if (ref.game_account || ref.role_name) linked += 1;
         else unlinked += 1;
-        await upsertOrder({
+        const orderWrite = await upsertOrder({
             user_id: uid,
             ...mapped,
             desc: String(options.desc || 'sync by order/uuzuhao')
         });
-        const authRevokeCandidate = buildAuthRevokeCandidate(uid, mapped);
+        const authRevokeCandidate = buildAuthRevokeCandidateOnStatusChange(uid, mapped, orderWrite);
         if (authRevokeCandidate) authRevokeCandidates.push(authRevokeCandidate);
         upserted += 1;
 
@@ -1282,12 +1282,12 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
         if (!mapped.order_no) continue;
         if (ref.game_account || ref.role_name) linked += 1;
         else unlinked += 1;
-        await upsertOrder({
+        const orderWrite = await upsertOrder({
             user_id: uid,
             ...mapped,
             desc: String(options.desc || 'sync by order/uhaozu')
         });
-        const authRevokeCandidate = buildAuthRevokeCandidate(uid, mapped);
+        const authRevokeCandidate = buildAuthRevokeCandidateOnStatusChange(uid, mapped, orderWrite);
         if (authRevokeCandidate) authRevokeCandidates.push(authRevokeCandidate);
         if (shouldSyncUhaozuOrderDetailByStatus(mapped.order_status)) completedOrderNos.push(mapped.order_no);
         upserted += 1;
@@ -1419,12 +1419,12 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
         if (!mapped.order_no) continue;
         if (ref.role_name) linked += 1;
         else unlinked += 1;
-        await upsertOrder({
+        const orderWrite = await upsertOrder({
             user_id: uid,
             ...mapped,
             desc: String(options.desc || 'sync by order/zuhaowang')
         });
-        const authRevokeCandidate = buildAuthRevokeCandidate(uid, mapped);
+        const authRevokeCandidate = buildAuthRevokeCandidateOnStatusChange(uid, mapped, orderWrite);
         if (authRevokeCandidate) authRevokeCandidates.push(authRevokeCandidate);
         upserted += 1;
     }

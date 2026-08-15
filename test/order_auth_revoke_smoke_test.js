@@ -18,6 +18,7 @@ const { upsertUserGameAccount } = require('../database/user_game_account_db');
 const {
     AUTH_REVOKE_TASK_TYPE,
     buildAuthRevokeCandidate,
+    buildAuthRevokeCandidateOnStatusChange,
     enqueueAuthRevokeTasks,
     enqueueManualAuthRevokeTask,
     listLatestAuthRevokeTaskViewsByUser,
@@ -117,6 +118,20 @@ async function main() {
 
     assert.strictEqual(buildAuthRevokeCandidate(8, order('uuzuhao', 'ACTIVE', '租赁中')), null, '进行中订单不触发任务');
     assert.ok(buildAuthRevokeCandidate(8, order('uuzuhao', 'CANCELLED', '已撤单')), '撤单同样属于订单结束');
+    assert.strictEqual(
+        buildAuthRevokeCandidateOnStatusChange(8, order('uuzuhao', 'UNCHANGED', '已完成'), { status_changed: false }),
+        null,
+        '订单状态未变化时不触发解除授权'
+    );
+    assert.ok(
+        buildAuthRevokeCandidateOnStatusChange(8, order('uuzuhao', 'CHANGED', '已完成'), { status_changed: true }),
+        '订单状态变化且新状态已结束时触发解除授权'
+    );
+    assert.strictEqual(
+        buildAuthRevokeCandidateOnStatusChange(8, order('uuzuhao', 'ACTIVE_CHANGED', '租赁中'), { status_changed: true }),
+        null,
+        '订单状态变化但新状态未结束时不触发解除授权'
+    );
 
     const firstCandidates = [
         order('uuzuhao', 'ORDER_UU', '已完成'),

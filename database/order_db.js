@@ -456,7 +456,7 @@ async function upsertOrder(input = {}) {
     const db = openOrderDatabase();
     try {
         const existed = await get(db, `
-            SELECT id
+            SELECT id, order_status
             FROM "order"
             WHERE user_id = ? AND channel = ? AND order_no = ? AND is_deleted = 0
             LIMIT 1
@@ -511,6 +511,13 @@ async function upsertOrder(input = {}) {
                 Number(existed.id)
             ]);
         }
+        const previousStatus = existed ? String(existed.order_status || '').trim() : '';
+        return {
+            created: !existed,
+            previous_status: previousStatus,
+            current_status: row.order_status,
+            status_changed: !existed || previousStatus !== row.order_status
+        };
     } finally {
         db.close();
     }

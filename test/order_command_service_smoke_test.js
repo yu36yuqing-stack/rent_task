@@ -48,7 +48,7 @@ function assertEqual(actual, expected, msg) {
 async function main() {
     await initOrderCommandService();
 
-    await upsertOrder({
+    const firstOrderWrite = await upsertOrder({
         user_id: 201,
         channel: 'uhaozu',
         order_no: 'CMD_ORDER_1',
@@ -65,6 +65,31 @@ async function main() {
         create_date: '2026-04-10 07:59:00',
         desc: 'command smoke order'
     });
+    assertEqual(firstOrderWrite.created, true, '首次写入订单应标记为新订单');
+    assertEqual(firstOrderWrite.status_changed, true, '新订单应标记为状态变化');
+    assertEqual(firstOrderWrite.previous_status, '', '新订单没有旧状态');
+    assertEqual(firstOrderWrite.current_status, '已完成', '新订单返回当前状态');
+
+    const unchangedOrderWrite = await upsertOrder({
+        user_id: 201,
+        channel: 'uhaozu',
+        order_no: 'CMD_ORDER_1',
+        game_id: '1',
+        game_name: 'WZRY',
+        game_account: 'cmd_acc',
+        role_name: 'CmdRole',
+        order_status: '已完成',
+        order_amount: 66.6,
+        rent_hour: 6,
+        rec_amount: 0,
+        start_time: '2026-04-10 08:00:00',
+        end_time: '2026-04-10 10:00:00',
+        create_date: '2026-04-10 07:59:00',
+        desc: 'command smoke order'
+    });
+    assertEqual(unchangedOrderWrite.created, false, '重复同步不应标记为新订单');
+    assertEqual(unchangedOrderWrite.status_changed, false, '重复同步相同状态应标记为未变化');
+    assertEqual(unchangedOrderWrite.previous_status, '已完成', '重复同步返回数据库旧状态');
     let orderRow = await getOrderByKey(201, 'uhaozu', 'CMD_ORDER_1');
     assertEqual(String(orderRow.game_account || ''), 'cmd_acc', '命令服务可写入并读取订单');
 

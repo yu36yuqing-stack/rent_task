@@ -72,6 +72,11 @@ function buildAuthRevokeCandidate(userId, order = {}) {
     };
 }
 
+function buildAuthRevokeCandidateOnStatusChange(userId, order = {}, upsertResult = {}) {
+    if (upsertResult.status_changed !== true) return null;
+    return buildAuthRevokeCandidate(userId, order);
+}
+
 function buildAuthRevokeTaskPrefix(candidate = {}) {
     const uid = Number(candidate.user_id || 0);
     const gameId = Number(candidate.game_id || 0);
@@ -460,6 +465,7 @@ module.exports = {
     FINISHED_ORDER_STATUSES,
     isAuthRevokeTriggerOrder,
     buildAuthRevokeCandidate,
+    buildAuthRevokeCandidateOnStatusChange,
     buildAuthRevokeTaskPrefix,
     buildAuthRevokeTaskId,
     buildAuthRevokeTaskView,
