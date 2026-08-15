@@ -10,6 +10,7 @@ REMOTE_DIR="${REMOTE_DIR:-/Users/mac/.openclaw/workspace/rent_task/}"
 SSH_PASS="${REMOTE_SSH_PASS:-12345}"
 WAIT_SEC="${WAIT_SEC:-45}"
 REMOTE_NODE_BIN="${REMOTE_NODE_BIN:-/usr/local/bin/node}"
+SYNC_LOGS_BACK="${SYNC_LOGS_BACK:-1}"
 
 if [[ -z "$SSH_PASS" ]]; then
   echo "[ERR] REMOTE_SSH_PASS 未设置"
@@ -35,7 +36,7 @@ EOF
 }
 
 echo "[Step 1/4] rsync 新代码到宿主机（排除本地DB和日志）..."
-RSYNC_CMD="rsync -az --delete --exclude '.git' --exclude 'node_modules' --exclude '.DS_Store' --exclude '*.db' --exclude 'database/rent_robot_runtime.db*' --exclude 'log/' --exclude 'coverage/' --exclude '*.log' -e 'ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new' '${SRC_DIR}' '${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}'"
+RSYNC_CMD="rsync -az --delete --exclude '.git' --exclude 'node_modules' --exclude '.DS_Store' --exclude '*.db' --exclude 'database/rent_robot_runtime.db*' --exclude 'config/cloudinfo.md' --exclude 'config/CloudInfo.md' --exclude 'log/' --exclude 'coverage/' --exclude '*.log' -e 'ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new' '${SRC_DIR}' '${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}'"
 run_expect "$RSYNC_CMD"
 echo "[OK] 宿主机代码已更新"
 
@@ -94,13 +95,17 @@ REMOTE_EXEC_CMD="ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o P
 run_expect "$REMOTE_EXEC_CMD"
 echo "[OK] 宿主机迁移与切换完成"
 
-echo "[Step 3/4] 从宿主机回拉 DB 和日志..."
+echo "[Step 3/4] 从宿主机回拉 DB${SYNC_LOGS_BACK:+ 和可选日志}..."
 PULL_DB_CMD="rsync -az -e 'ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new' '${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}database/' '${REPO_DIR}/database/' --include '*/' --include '*.db' --exclude '*'"
 run_expect "$PULL_DB_CMD"
 
-PULL_LOG_CMD="rsync -az -e 'ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new' '${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}log/' '${REPO_DIR}/log/'"
-run_expect "$PULL_LOG_CMD"
-echo "[OK] 本地已同步生产 DB 和日志"
+if [[ "$SYNC_LOGS_BACK" == "1" ]]; then
+  PULL_LOG_CMD="rsync -az -e 'ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new' '${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}log/' '${REPO_DIR}/log/'"
+  run_expect "$PULL_LOG_CMD"
+  echo "[OK] 本地已同步生产 DB 和日志"
+else
+  echo "[OK] 本地已同步生产 DB，按要求跳过日志回拉"
+fi
 
 echo "[Step 4/4] 本地结果摘要..."
 sqlite3 -header -csv "${REPO_DIR}/database/rent_robot_runtime.db" "SELECT COUNT(*) AS total FROM user_session; SELECT '---'; SELECT COUNT(*) AS total FROM order_sync_state; SELECT '---'; SELECT COUNT(*) AS total FROM order_stats_job_state; SELECT '---'; SELECT COUNT(*) AS total FROM lock_db;"

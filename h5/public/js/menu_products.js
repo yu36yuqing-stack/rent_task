@@ -42,10 +42,16 @@
     function buildAuthRevokeStatusHtml(item) {
       const task = item && item.auth_revoke && typeof item.auth_revoke === 'object' ? item.auth_revoke : null;
       const status = String(task && task.status || '').trim();
-      const statusText = String(task && task.status_text || '').trim() || '未执行';
+      const stage = String(task && task.stage || '').trim();
+      const waitingForOrder = status === 'pending' && stage === 'waiting_active_order';
+      const statusText = waitingForOrder
+        ? '待执行'
+        : (String(task && task.status_text || '').trim() || '未执行');
       const time = formatAuthRevokeTime(task && (task.finished_at || task.modify_date || task.started_at));
       const error = status === 'failed' ? compactAuthRevokeError(task && task.last_error) : '';
-      const detail = [statusText, error, time].filter(Boolean).join(' · ');
+      const detail = waitingForOrder
+        ? statusText
+        : [statusText, error, time].filter(Boolean).join(' · ');
       const cls = status === 'success'
         ? 'auth-revoke-success'
         : status === 'failed'
