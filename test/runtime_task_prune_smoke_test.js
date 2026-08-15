@@ -60,11 +60,16 @@ async function countTasks() {
     }
 }
 
+function sqlDateDaysAgo(days) {
+    const date = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
 (async () => {
     await initRuntimeTaskDb();
-    await insertTask({ task_id: 'old_success', status: 'success', create_date: '2026-05-01 00:00:00' });
-    await insertTask({ task_id: 'old_running', status: 'running', create_date: '2026-05-01 00:00:00' });
-    await insertTask({ task_id: 'new_success', status: 'success', create_date: '2026-05-18 00:00:00' });
+    await insertTask({ task_id: 'old_success', status: 'success', create_date: sqlDateDaysAgo(10) });
+    await insertTask({ task_id: 'old_running', status: 'running', create_date: sqlDateDaysAgo(10) });
+    await insertTask({ task_id: 'new_success', status: 'success', create_date: sqlDateDaysAgo(2) });
 
     const out = await runRuntimeTaskPrune({
         trigger_type: 'manual',

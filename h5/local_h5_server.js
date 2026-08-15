@@ -147,9 +147,9 @@ const { initUserPriceRuleDb } = require('../database/user_price_rule_db');
 const { initPricePublishLogDb } = require('../database/price_publish_log_db');
 const { initMaintenanceTaskLogDb } = require('../database/maintenance_task_log_db');
 const {
-    getRuntimeTaskPruneDashboard,
-    runRuntimeTaskPrune
-} = require('../maintenance/runtime_task_prune_service');
+    getSystemRetentionDashboard,
+    runSystemRetention
+} = require('../maintenance/system_retention_service');
 const { ensureMigrationsReady } = require('../database/migration_runner');
 
 const HOST = process.env.H5_HOST || '0.0.0.0';
@@ -1601,13 +1601,13 @@ async function handleGetProfile(req, res) {
 async function handleMaintenanceRuntimeCleanup(req, res, urlObj) {
     await requireAdmin(req);
     const limit = Math.max(1, Math.min(50, Number(urlObj.searchParams.get('limit') || 20)));
-    const dashboard = await getRuntimeTaskPruneDashboard({ limit });
+    const dashboard = await getSystemRetentionDashboard({ limit });
     return json(res, 200, { ok: true, dashboard });
 }
 
 async function handleMaintenanceRuntimeCleanupRun(req, res) {
     const user = await requireAdmin(req);
-    const result = await runRuntimeTaskPrune({
+    const result = await runSystemRetention({
         trigger_type: 'manual',
         trigger_user_id: user.id,
         retention_days: 7

@@ -151,10 +151,16 @@ async function finishMaintenanceTaskLog(id, patch = {}) {
 async function listMaintenanceTaskLogs(options = {}) {
     await initMaintenanceTaskLogDb();
     const taskType = String(options.task_type || '').trim();
+    const taskTypes = Array.isArray(options.task_types)
+        ? options.task_types.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
     const limit = Math.max(1, Math.min(100, Number(options.limit || 20)));
     const where = ['is_deleted = 0'];
     const params = [];
-    if (taskType) {
+    if (taskTypes.length > 0) {
+        where.push(`task_type IN (${taskTypes.map(() => '?').join(',')})`);
+        params.push(...taskTypes);
+    } else if (taskType) {
         where.push('task_type = ?');
         params.push(taskType);
     }

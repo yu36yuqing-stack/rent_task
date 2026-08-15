@@ -229,6 +229,7 @@ module.exports = {
     JOB_KEY_RUNTIME_TASK_PRUNE,
     DEFAULT_RETENTION_DAYS,
     TERMINAL_STATUSES,
+    pruneRuntimeTaskRows,
     runRuntimeTaskPrune,
     runScheduledRuntimeTaskPruneIfDue,
     getRuntimeTaskPruneDashboard

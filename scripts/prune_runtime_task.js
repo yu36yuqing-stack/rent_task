@@ -2,10 +2,12 @@
 'use strict';
 
 const {
-    DEFAULT_RETENTION_DAYS,
-    runRuntimeTaskPrune,
-    getRuntimeTaskPruneDashboard
+    DEFAULT_RETENTION_DAYS
 } = require('../maintenance/runtime_task_prune_service');
+const {
+    runSystemRetention,
+    getSystemRetentionDashboard
+} = require('../maintenance/system_retention_service');
 
 function parseArgs(argv = []) {
     const out = {
@@ -33,11 +35,11 @@ function parseArgs(argv = []) {
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (args.list) {
-        const dashboard = await getRuntimeTaskPruneDashboard({ limit: 20 });
+        const dashboard = await getSystemRetentionDashboard({ limit: 20 });
         process.stdout.write(JSON.stringify({ ok: true, dashboard }, null, 2));
         return;
     }
-    const out = await runRuntimeTaskPrune({
+    const out = await runSystemRetention({
         trigger_type: args.trigger_type,
         trigger_user_id: args.trigger_user_id,
         retention_days: args.retention_days

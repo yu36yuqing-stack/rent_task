@@ -133,6 +133,25 @@ async function releaseLock(lockKey, owner = '') {
     }
 }
 
+async function releaseOwnedLock(lockKey, expectedOwner = '', releaseDesc = '') {
+    await initLockDb();
+    const key = String(lockKey || '').trim();
+    const owner = String(expectedOwner || '').trim();
+    if (!key || !owner) return false;
+
+    const db = openRuntimeDatabase();
+    try {
+        const r = await run(db, `
+            UPDATE ${LOCK_TABLE}
+            SET lease_until = 0, modify_date = ?, desc = ?
+            WHERE lock_key = ? AND is_deleted = 0 AND desc = ?
+        `, [nowText(), String(releaseDesc || `release ${owner}`), key, owner]);
+        return Number(r.changes || 0) > 0;
+    } finally {
+        db.close();
+    }
+}
+
 async function touchLock(lockKey, leaseSec = 1800, owner = '') {
     await initLockDb();
     const key = String(lockKey || '').trim();
@@ -159,5 +178,6 @@ module.exports = {
     initLockDb,
     tryAcquireLock,
     releaseLock,
+    releaseOwnedLock,
     touchLock
 };

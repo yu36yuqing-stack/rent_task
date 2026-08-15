@@ -12,7 +12,7 @@ const {
     TASK_STATUS_PARTIAL_FAILED,
     TASK_STATUS_FAILED
 } = require('../database/runtime_task_db');
-const { runScheduledRuntimeTaskPruneIfDue } = require('../maintenance/runtime_task_prune_service');
+const { runScheduledSystemRetentionIfDue } = require('../maintenance/system_retention_service');
 
 const TASK_DIR = path.join(__dirname, '..');
 const LOG_DIR = path.join(TASK_DIR, 'log');
@@ -54,14 +54,14 @@ async function main() {
     let runtimeTask = null;
     try {
         try {
-            const pruneResult = await runScheduledRuntimeTaskPruneIfDue({});
+            const pruneResult = await runScheduledSystemRetentionIfDue({});
             if (pruneResult && pruneResult.skipped) {
-                console.log(`[OrderWorker] runtime_task 清理跳过 reason=${pruneResult.reason || ''}`);
+                console.log(`[OrderWorker] 系统数据清理跳过 reason=${pruneResult.reason || ''}`);
             } else if (pruneResult && pruneResult.result) {
-                console.log(`[OrderWorker] runtime_task 清理完成 deleted=${Number(pruneResult.result.deleted_rows || 0)}`);
+                console.log(`[OrderWorker] 系统数据清理完成 deleted=${Number(pruneResult.result.deleted_rows || 0)} freed_bytes=${Number(pruneResult.result.freed_bytes || 0)}`);
             }
         } catch (e) {
-            console.warn(`[OrderWorker] runtime_task 清理失败，不阻断订单同步: ${e.message}`);
+            console.warn(`[OrderWorker] 系统数据清理失败，不阻断订单同步: ${e.message}`);
         }
 
         runtimeTask = await createRuntimeTask({

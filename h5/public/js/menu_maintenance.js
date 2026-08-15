@@ -31,6 +31,32 @@ function maintenanceTriggerLabel(triggerType) {
   return t || '-';
 }
 
+function maintenanceResult(row) {
+  if (row && row.result && typeof row.result === 'object') return row.result;
+  try {
+    return JSON.parse(String(row && row.result_json || '{}'));
+  } catch (_) {
+    return {};
+  }
+}
+
+function renderMaintenanceTargets(row) {
+  const result = maintenanceResult(row);
+  const runtime = result && result.runtime_task;
+  const applicationLogs = result && result.application_logs;
+  if (!runtime && !applicationLogs) return '';
+  const files = applicationLogs && Array.isArray(applicationLogs.files)
+    ? applicationLogs.files.filter((item) => item && !item.skipped)
+    : [];
+  return `
+    <div class="maintenance-log-grid">
+      ${runtime ? `<span>runtime_task：删除 ${Number(runtime.deleted_rows || 0)} 条</span>` : ''}
+      ${applicationLogs ? `<span>应用日志：释放 ${formatMaintenanceBytes(applicationLogs.freed_bytes)}</span>` : ''}
+      ${files.map((item) => `<span>${escapeMaintenanceHtml(item.file_name || '-')}：${formatMaintenanceBytes(item.before_bytes)} → ${formatMaintenanceBytes(item.after_bytes)}</span>`).join('')}
+    </div>
+  `;
+}
+
 async function loadMaintenanceCleanup() {
   state.maintenanceCleanup.loading = true;
   state.maintenanceCleanup.error = '';
@@ -91,7 +117,7 @@ function renderMaintenanceCleanup() {
           <strong class="maintenance-status-${escapeMaintenanceHtml(latest && latest.status || 'none')}">${escapeMaintenanceHtml(maintenanceStatusLabel(latest && latest.status))}</strong>
         </div>
         <div class="maintenance-kpi-card">
-          <span>清理条数</span>
+          <span>清理记录/日志行</span>
           <strong>${Number(latest && latest.deleted_rows || 0)}</strong>
         </div>
         <div class="maintenance-kpi-card">
@@ -130,9 +156,9 @@ function renderMaintenanceCleanup() {
         <span class="maintenance-status-pill maintenance-status-${escapeMaintenanceHtml(row.status)}">${escapeMaintenanceHtml(maintenanceStatusLabel(row.status))}</span>
       </div>
       <div class="maintenance-log-grid">
-        <span>清理表：${escapeMaintenanceHtml(row.target_table || '-')}</span>
+        <span>清理目标：${escapeMaintenanceHtml(row.target_table || '-')}</span>
         <span>保留：${Number(row.retention_days || 0)} 天</span>
-        <span>删除：${Number(row.deleted_rows || 0)} 条</span>
+        <span>删除：${Number(row.deleted_rows || 0)} 条/行</span>
         <span>耗时：${Number(row.duration_ms || 0)} ms</span>
         <span>清理前：${formatMaintenanceBytes(row.before_bytes)}</span>
         <span>清理后：${formatMaintenanceBytes(row.after_bytes)}</span>
@@ -140,6 +166,7 @@ function renderMaintenanceCleanup() {
         <span>实际释放：${formatMaintenanceBytes(row.freed_bytes)}</span>
         <span>触发人：${Number(row.trigger_user_id || 0) || '-'}</span>
       </div>
+      ${renderMaintenanceTargets(row)}
       ${String(row.error_message || '').trim() ? `<p class="maintenance-log-error">${escapeMaintenanceHtml(row.error_message)}</p>` : ''}
     </div>
   `).join('');
