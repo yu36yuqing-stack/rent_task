@@ -13,8 +13,8 @@ const ACTIVE_STATUSES = [
     TASK_STATUS_RUNNING
 ];
 
-function nowText() {
-    const d = new Date();
+function nowText(input = new Date()) {
+    const d = input instanceof Date ? input : new Date(input);
     const p = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
@@ -94,6 +94,16 @@ function safeJsonText(input, fallback = '{}') {
     }
 }
 
+function safeJsonObject(input) {
+    if (input && typeof input === 'object' && !Array.isArray(input)) return input;
+    try {
+        const parsed = JSON.parse(String(input || ''));
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
 async function createRuntimeTask(input = {}) {
     await initRuntimeTaskDb();
     const taskType = String(input.task_type || input.taskType || '').trim();
@@ -123,6 +133,129 @@ async function createRuntimeTask(input = {}) {
     }
 }
 
+async function createRuntimeTaskIfAbsent(input = {}) {
+    const taskId = String(input.task_id || input.taskId || '').trim();
+    if (!taskId) throw new Error('幂等创建任务必须提供 task_id');
+    try {
+        return {
+            created: true,
+            task: await createRuntimeTask({ ...input, task_id: taskId })
+        };
+    } catch (error) {
+        if (!String(error && error.code || '').startsWith('SQLITE_CONSTRAINT')) throw error;
+        const existed = await getRuntimeTaskByTaskId(taskId);
+        if (!existed) throw error;
+        return { created: false, task: existed };
+    }
+}
+
+async function createOrReuseRuntimeTaskByPrefix(input = {}, options = {}) {
+    await initRuntimeTaskDb();
+    const taskType = String(input.task_type || input.taskType || '').trim();
+    const taskId = String(input.task_id || input.taskId || '').trim();
+    const taskIdPrefix = String(options.task_id_prefix || options.taskIdPrefix || '').trim();
+    const userId = Number(input.user_id || input.userId || 0);
+    if (!taskType) throw new Error('task_type 不能为空');
+    if (!taskId) throw new Error('创建任务必须提供 task_id');
+    if (!taskIdPrefix || !taskId.startsWith(taskIdPrefix)) throw new Error('task_id_prefix 不合法');
+    if (!userId) throw new Error('user_id 不合法');
+
+    const now = nowText(options.now || new Date());
+    const recentSuccessSec = Math.max(0, Number(options.recent_success_sec ?? options.recentSuccessSec ?? 60));
+    const recentSuccessSince = nowText(new Date(new Date(options.now || Date.now()).getTime() - recentSuccessSec * 1000));
+    const trigger = safeJsonObject(options.trigger);
+    const db = openRuntimeDatabase();
+    try {
+        await run(db, 'BEGIN IMMEDIATE TRANSACTION');
+        const existing = await get(db, `
+            SELECT *
+            FROM runtime_task
+            WHERE user_id = ?
+              AND task_type = ?
+              AND is_deleted = 0
+              AND substr(task_id, 1, length(?)) = ?
+              AND (
+                status IN (?, ?, ?)
+                OR (status = ? AND finished_at >= ?)
+              )
+            ORDER BY
+              CASE WHEN status IN (?, ?, ?) THEN 0 ELSE 1 END,
+              id DESC
+            LIMIT 1
+        `, [
+            userId,
+            taskType,
+            taskIdPrefix,
+            taskIdPrefix,
+            TASK_STATUS_PENDING,
+            TASK_STATUS_RUNNING,
+            TASK_STATUS_FAILED,
+            TASK_STATUS_SUCCESS,
+            recentSuccessSince,
+            TASK_STATUS_PENDING,
+            TASK_STATUS_RUNNING,
+            TASK_STATUS_FAILED
+        ]);
+
+        if (existing) {
+            const state = safeJsonObject(existing.result_json);
+            const previousTriggers = Array.isArray(state.triggers) ? state.triggers : [];
+            const triggerKey = String(trigger.trigger_key || '').trim();
+            const triggerText = safeJsonText(trigger, '{}');
+            const hasTrigger = previousTriggers.some((item) => {
+                if (triggerKey) return String(item && item.trigger_key || '').trim() === triggerKey;
+                return safeJsonText(item, '{}') === triggerText;
+            });
+            const triggers = (hasTrigger ? previousTriggers : [...previousTriggers, trigger]).slice(-20);
+            const isManual = String(trigger.source || '').trim() === 'manual_product_action';
+            const attachedManualCount = Math.max(0, Number(existing.attached_manual_count || 0)) + (isManual ? 1 : 0);
+            const resultJson = {
+                ...state,
+                triggers,
+                last_trigger: trigger,
+                coalesced_trigger_count: Math.max(0, Number(state.coalesced_trigger_count || 0)) + 1
+            };
+            await run(db, `
+                UPDATE runtime_task
+                SET result_json = ?, attached_manual_count = ?, modify_date = ?
+                WHERE id = ? AND is_deleted = 0
+            `, [safeJsonText(resultJson, '{}'), attachedManualCount, now, existing.id]);
+            const task = await get(db, 'SELECT * FROM runtime_task WHERE id = ? LIMIT 1', [existing.id]);
+            await run(db, 'COMMIT');
+            return {
+                created: false,
+                reused: true,
+                reuse_reason: existing.status === TASK_STATUS_SUCCESS ? 'recent_success' : 'active_task',
+                task
+            };
+        }
+
+        const triggerSource = String(input.trigger_source || input.triggerSource || '').trim() || 'system';
+        const status = String(input.status || '').trim() || TASK_STATUS_PENDING;
+        const stage = String(input.stage || '').trim();
+        const progressText = String(input.progress_text || input.progressText || '').trim();
+        const resultJson = safeJsonText(input.result_json ?? input.resultJson ?? {}, '{}');
+        const errorJson = safeJsonText(input.error_json ?? input.errorJson ?? [], '[]');
+        const attachedManualCount = Math.max(0, Number(input.attached_manual_count || input.attachedManualCount || 0));
+        const startedAt = String(input.started_at || input.startedAt || '').trim();
+        const finishedAt = String(input.finished_at || input.finishedAt || '').trim();
+        const desc = String(input.desc || '').trim();
+        await run(db, `
+            INSERT INTO runtime_task
+            (task_id, user_id, task_type, trigger_source, status, stage, progress_text, result_json, error_json, attached_manual_count, started_at, finished_at, create_date, modify_date, is_deleted, desc)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+        `, [taskId, userId, taskType, triggerSource, status, stage, progressText, resultJson, errorJson, attachedManualCount, startedAt, finishedAt, now, now, desc]);
+        const task = await get(db, 'SELECT * FROM runtime_task WHERE task_id = ? AND is_deleted = 0 LIMIT 1', [taskId]);
+        await run(db, 'COMMIT');
+        return { created: true, reused: false, reuse_reason: '', task };
+    } catch (error) {
+        await run(db, 'ROLLBACK').catch(() => {});
+        throw error;
+    } finally {
+        db.close();
+    }
+}
+
 async function getRuntimeTaskByTaskId(taskId) {
     await initRuntimeTaskDb();
     const key = String(taskId || '').trim();
@@ -135,6 +268,34 @@ async function getRuntimeTaskByTaskId(taskId) {
             WHERE task_id = ? AND is_deleted = 0
             LIMIT 1
         `, [key]);
+    } finally {
+        db.close();
+    }
+}
+
+async function listRuntimeTasksByUserAndType(userId, taskType, options = {}) {
+    await initRuntimeTaskDb();
+    const uid = Number(userId || 0);
+    const type = String(taskType || '').trim();
+    if (!uid) throw new Error('user_id 不合法');
+    if (!type) throw new Error('task_type 不能为空');
+    const limit = Math.max(1, Math.min(5000, Number(options.limit || 2000)));
+    const db = openRuntimeDatabase();
+    try {
+        return await new Promise((resolve, reject) => {
+            db.all(`
+                SELECT *
+                FROM runtime_task
+                WHERE user_id = ?
+                  AND task_type = ?
+                  AND is_deleted = 0
+                ORDER BY id DESC
+                LIMIT ?
+            `, [uid, type, limit], (error, rows) => {
+                if (error) return reject(error);
+                resolve(rows || []);
+            });
+        });
     } finally {
         db.close();
     }
@@ -157,6 +318,98 @@ async function findLatestActiveRuntimeTask(userId, taskType) {
             ORDER BY id DESC
             LIMIT 1
         `, [uid, type, ...ACTIVE_STATUSES]);
+    } finally {
+        db.close();
+    }
+}
+
+function dateTimeBefore(seconds) {
+    const sec = Math.max(0, Number(seconds || 0));
+    return nowText(new Date(Date.now() - sec * 1000));
+}
+
+async function listRunnableRuntimeTasks(taskType, options = {}) {
+    await initRuntimeTaskDb();
+    const type = String(taskType || '').trim();
+    if (!type) throw new Error('task_type 不能为空');
+    const limit = Math.max(1, Math.min(500, Number(options.limit || 100)));
+    const staleBefore = String(options.stale_before || options.staleBefore || '').trim()
+        || dateTimeBefore(options.stale_after_sec || options.staleAfterSec || 300);
+    const db = openRuntimeDatabase();
+    try {
+        return await new Promise((resolve, reject) => {
+            db.all(`
+                SELECT *
+                FROM runtime_task
+                WHERE task_type = ?
+                  AND is_deleted = 0
+                  AND (
+                    status IN (?, ?)
+                    OR (status = ? AND COALESCE(NULLIF(started_at, ''), modify_date) <= ?)
+                  )
+                ORDER BY id ASC
+                LIMIT ?
+            `, [type, TASK_STATUS_PENDING, TASK_STATUS_FAILED, TASK_STATUS_RUNNING, staleBefore, limit], (error, rows) => {
+                if (error) return reject(error);
+                resolve(rows || []);
+            });
+        });
+    } finally {
+        db.close();
+    }
+}
+
+async function claimRuntimeTask(taskId, taskType, options = {}) {
+    await initRuntimeTaskDb();
+    const key = String(taskId || '').trim();
+    const type = String(taskType || '').trim();
+    if (!key) throw new Error('task_id 不能为空');
+    if (!type) throw new Error('task_type 不能为空');
+    const staleBefore = String(options.stale_before || options.staleBefore || '').trim()
+        || dateTimeBefore(options.stale_after_sec || options.staleAfterSec || 300);
+    const stage = String(options.stage || '').trim() || 'executing';
+    const progressText = String(options.progress_text || options.progressText || '').trim() || '任务执行中';
+    const now = nowText();
+    const db = openRuntimeDatabase();
+    try {
+        await run(db, 'BEGIN IMMEDIATE TRANSACTION');
+        const ret = await run(db, `
+            UPDATE runtime_task
+            SET status = ?, stage = ?, progress_text = ?,
+                started_at = ?,
+                finished_at = '', modify_date = ?
+            WHERE task_id = ?
+              AND task_type = ?
+              AND is_deleted = 0
+              AND (
+                status IN (?, ?)
+                OR (status = ? AND COALESCE(NULLIF(started_at, ''), modify_date) <= ?)
+              )
+        `, [
+            TASK_STATUS_RUNNING,
+            stage,
+            progressText,
+            now,
+            now,
+            key,
+            type,
+            TASK_STATUS_PENDING,
+            TASK_STATUS_FAILED,
+            TASK_STATUS_RUNNING,
+            staleBefore
+        ]);
+        const row = Number(ret.changes || 0) > 0
+            ? await get(db, `
+                SELECT * FROM runtime_task
+                WHERE task_id = ? AND is_deleted = 0
+                LIMIT 1
+            `, [key])
+            : null;
+        await run(db, 'COMMIT');
+        return row;
+    } catch (error) {
+        await run(db, 'ROLLBACK').catch(() => {});
+        throw error;
     } finally {
         db.close();
     }
@@ -239,8 +492,13 @@ module.exports = {
     TASK_STATUS_SKIPPED,
     initRuntimeTaskDb,
     createRuntimeTask,
+    createRuntimeTaskIfAbsent,
+    createOrReuseRuntimeTaskByPrefix,
     getRuntimeTaskByTaskId,
+    listRuntimeTasksByUserAndType,
     findLatestActiveRuntimeTask,
+    listRunnableRuntimeTasks,
+    claimRuntimeTask,
     updateRuntimeTask,
     markRuntimeTaskRunning,
     markRuntimeTaskFinished,

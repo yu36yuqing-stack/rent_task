@@ -9,6 +9,7 @@ const {
     markRuntimeTaskRunning,
     markRuntimeTaskFinished,
     TASK_STATUS_SUCCESS,
+    TASK_STATUS_PARTIAL_FAILED,
     TASK_STATUS_FAILED
 } = require('../database/runtime_task_db');
 const { runScheduledRuntimeTaskPruneIfDue } = require('../maintenance/runtime_task_prune_service');
@@ -77,14 +78,17 @@ async function main() {
             progress_text: '开始执行订单同步任务'
         });
         console.log(`[OrderWorker] 启动 pid=${process.pid}`);
-        const result = await syncOrdersForAllUsers({});
+        const result = await syncOrdersForAllUsers({
+            trigger_task_id: runtimeTask.task_id
+        });
+        const hasPartialFailure = Number(result && result.failed_users || 0) > 0;
         await markRuntimeTaskFinished(runtimeTask.task_id, {
-            status: TASK_STATUS_SUCCESS,
+            status: hasPartialFailure ? TASK_STATUS_PARTIAL_FAILED : TASK_STATUS_SUCCESS,
             stage: 'done',
-            progress_text: '订单同步完成',
+            progress_text: hasPartialFailure ? '订单同步完成，存在部分失败' : '订单同步完成',
             result_json: result,
-            error_json: [],
-            desc: `order worker success pid=${process.pid}`
+            error_json: hasPartialFailure ? [`failed_users=${Number(result.failed_users || 0)}`] : [],
+            desc: `order worker ${hasPartialFailure ? 'partial_failed' : 'success'} pid=${process.pid}`
         });
         console.log(`[OrderWorker] 完成 users=${result.total_users} ok=${result.ok_users} failed=${result.failed_users}`);
     } catch (e) {

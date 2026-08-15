@@ -82,6 +82,11 @@ const { startProdRiskTaskWorker } = require('../product/prod_status_guard');
 const { resolveDisplayNameByRow } = require('../product/display_name');
 const { normalizeGameProfile } = require('../common/game_profile');
 const { syncOrdersByUser } = require('../order/order');
+const {
+    enqueueManualAuthRevokeTask,
+    listLatestAuthRevokeTaskViewsByUser,
+    getAuthRevokeTaskViewByUser
+} = require('../order/auth_revoke_task_service');
 const { getSteamGuardCode } = require('../uuzuhao/uuzuhao_api');
 const {
     savePurchaseCostByUserAndAccount,
@@ -694,9 +699,12 @@ async function handleProducts(req, res, urlObj) {
         }
     }
 
-    const orderOffRule = await getOrderOffRuleByUser(user.id);
-    const cooldownRule = await getCooldownConfigByUser(user.id);
-    const allRows = await listAllAccountsByUser(user.id);
+    const [orderOffRule, cooldownRule, allRows, authRevokeMap] = await Promise.all([
+        getOrderOffRuleByUser(user.id),
+        getCooldownConfigByUser(user.id),
+        listAllAccountsByUser(user.id),
+        assetStatus === 'sold' ? Promise.resolve({}) : listLatestAuthRevokeTaskViewsByUser(user.id)
+    ]);
     const scopedAllRows = isAllGame
         ? allRows.list
         : allRows.list.filter((x) => String((x && x.game_name) || '').trim() === gameName);
@@ -874,6 +882,7 @@ async function handleProducts(req, res, urlObj) {
             cooldown_release_delay_min: cooldownDelayMin,
             cooldown_release_delay_label: cooldownReleaseDelayLabel(cooldownDelayMin),
             cooldown_config_source: String(accountCooldown.source || 'global'),
+            auth_revoke: authRevokeMap[identityKey] || null,
             blacklisted: Boolean(bl),
             blacklist_reason: bl ? bl.reason : '',
             blacklist_create_date: bl ? bl.create_date : '',
@@ -1267,6 +1276,7 @@ async function handleOrderSyncNow(req, res) {
         try {
             out = await syncOrdersByUser(user.id, {
                 user,
+                trigger_task_id: runtimeTask.task_id,
                 uuzuhao: { maxPages: 20 },
                 uhaozu: { maxPages: 20 },
                 zuhaowang: { maxPages: 20 }
@@ -1908,6 +1918,50 @@ async function handleProductSteamGuardCode(req, res) {
             seconds_remaining: Number(result.seconds_remaining || 0)
         }
     });
+}
+
+async function handleProductAuthRevoke(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const gameAccount = String(body.game_account || '').trim();
+    const normalizedGame = normalizeGameProfile(body.game_id, body.game_name, { preserveUnknown: true });
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    try {
+        const result = await enqueueManualAuthRevokeTask(user.id, {
+            game_account: gameAccount,
+            game_id: normalizedGame.game_id,
+            game_name: normalizedGame.game_name
+        }, {
+            task_dir: path.join(__dirname, '..')
+        });
+        return json(res, 202, {
+            ok: true,
+            data: {
+                task_id: String(result.task && result.task.task_id || ''),
+                status: String(result.task && result.task.status || 'pending'),
+                created: Boolean(result.created),
+                reused: Boolean(result.reused),
+                reuse_reason: String(result.reuse_reason || ''),
+                task: result.task_view,
+                worker: result.worker
+            }
+        });
+    } catch (error) {
+        const message = String(error && error.message ? error.message : error || '创建解除授权任务失败');
+        if (/找不到账号|game_id 不合法|game_account 不能为空/.test(message)) {
+            return json(res, 422, { ok: false, message });
+        }
+        throw error;
+    }
+}
+
+async function handleProductAuthRevokeStatus(req, res, urlObj) {
+    const user = await requireAuth(req);
+    const taskId = String(urlObj.searchParams.get('task_id') || '').trim();
+    if (!taskId) return json(res, 400, { ok: false, message: 'task_id 不能为空' });
+    const task = await getAuthRevokeTaskViewByUser(user.id, taskId);
+    if (!task) return json(res, 404, { ok: false, message: '解除授权任务不存在' });
+    return json(res, 200, { ok: true, data: { task } });
 }
 
 async function handleProductForbiddenPlay(req, res) {
@@ -2695,6 +2749,8 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/user-rules/order-off-threshold') return await handleSetOrderOffThreshold(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/online') return await handleProductOnlineQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/steam-guard-code') return await handleProductSteamGuardCode(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/products/auth-revoke') return await handleProductAuthRevoke(req, res);
+            if (req.method === 'GET' && urlObj.pathname === '/api/products/auth-revoke/status') return await handleProductAuthRevokeStatus(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/play') return await handleProductForbiddenPlay(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/forbidden/query') return await handleProductForbiddenQuery(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/products/purchase-config') return await handleProductPurchaseConfig(req, res);

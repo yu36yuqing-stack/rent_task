@@ -48,6 +48,11 @@ const {
     mapZuhaowangOrderToOrder
 } = require('./order_mapping');
 const { normalizeGameProfile } = require('../common/game_profile');
+const {
+    buildAuthRevokeCandidate,
+    enqueueAuthRevokeTasks,
+    startAuthRevokeTaskWorker
+} = require('./auth_revoke_task_service');
 
 const CHANNEL_UHAOZU = 'uhaozu';
 const CHANNEL_ZHW = 'zuhaowang';
@@ -1095,6 +1100,7 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
     let complaint_detail_fail = 0;
     let complaint_notify_sent = 0;
     let complaint_notify_fail = 0;
+    const authRevokeCandidates = [];
     const complaintNotifyDedup = new Set();
     const needComplaintDetail = (raw = {}) => {
         const complaintStatus = Number(raw && raw.complaintStatus);
@@ -1113,6 +1119,8 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
             ...mapped,
             desc: String(options.desc || 'sync by order/uuzuhao')
         });
+        const authRevokeCandidate = buildAuthRevokeCandidate(uid, mapped);
+        if (authRevokeCandidate) authRevokeCandidates.push(authRevokeCandidate);
         upserted += 1;
 
         if (!needComplaintDetail(raw)) continue;
@@ -1204,6 +1212,7 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
             notify_sent: complaint_notify_sent,
             notify_fail: complaint_notify_fail
         },
+        _auth_revoke_candidates: authRevokeCandidates,
         mapping: UUZUHAO_ORDER_FIELD_MAPPING
     };
 }
@@ -1265,6 +1274,7 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
     let linked = 0;
     let unlinked = 0;
     const completedOrderNos = [];
+    const authRevokeCandidates = [];
     for (const raw of orderList) {
         const goodsId = String(raw.goodsId || '').trim();
         const ref = productIndex.get(goodsId) || { game_account: '', role_name: '' };
@@ -1277,6 +1287,8 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
             ...mapped,
             desc: String(options.desc || 'sync by order/uhaozu')
         });
+        const authRevokeCandidate = buildAuthRevokeCandidate(uid, mapped);
+        if (authRevokeCandidate) authRevokeCandidates.push(authRevokeCandidate);
         if (shouldSyncUhaozuOrderDetailByStatus(mapped.order_status)) completedOrderNos.push(mapped.order_no);
         upserted += 1;
     }
@@ -1301,6 +1313,7 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
         linked,
         unlinked,
         detail_sync: detailSync,
+        _auth_revoke_candidates: authRevokeCandidates,
         mapping: UHAOZU_ORDER_FIELD_MAPPING
     };
 }
@@ -1395,6 +1408,7 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
     let upserted = 0;
     let linked = 0;
     let unlinked = 0;
+    const authRevokeCandidates = [];
     for (const raw of orderList) {
         const acc = String(raw.accountNo || '').trim();
         const ref = accountIndex.get(acc) || { role_name: '' };
@@ -1410,6 +1424,8 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
             ...mapped,
             desc: String(options.desc || 'sync by order/zuhaowang')
         });
+        const authRevokeCandidate = buildAuthRevokeCandidate(uid, mapped);
+        if (authRevokeCandidate) authRevokeCandidates.push(authRevokeCandidate);
         upserted += 1;
     }
     await setLastSyncTimestamp(uid, CHANNEL_ZHW, nowSec, 'order sync watermark');
@@ -1429,6 +1445,7 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
         upserted,
         linked,
         unlinked,
+        _auth_revoke_candidates: authRevokeCandidates,
         mapping: ZUHAOWANG_ORDER_FIELD_MAPPING
     };
 }
@@ -1558,6 +1575,15 @@ async function syncOrdersByUser(userId, options = {}) {
         result.platforms.zuhaowang = { skipped: true, reason: 'channel_disabled_or_auth_missing' };
     }
 
+    const authRevokeCandidates = [];
+    for (const platformResult of Object.values(result.platforms)) {
+        if (!platformResult || typeof platformResult !== 'object') continue;
+        if (Array.isArray(platformResult._auth_revoke_candidates)) {
+            authRevokeCandidates.push(...platformResult._auth_revoke_candidates);
+        }
+        delete platformResult._auth_revoke_candidates;
+    }
+
     const successPlatforms = listSuccessfulOrderPlatforms(result.platforms);
     const missingPlatforms = expectedPlatforms.filter((p) => !successPlatforms.includes(p));
     const canReconcileOrder3Off = expectedPlatforms.length > 0 && missingPlatforms.length === 0;
@@ -1569,10 +1595,10 @@ async function syncOrdersByUser(userId, options = {}) {
     };
 
     if (canReconcileOrder3Off) {
+        const currentUser = options.user && Number(options.user.id) === uid
+            ? options.user
+            : { id: uid, switch: { order_3_off: true } };
         try {
-            const currentUser = options.user && Number(options.user.id) === uid
-                ? options.user
-                : { id: uid, switch: { order_3_off: true } };
             result.order_off = await reconcileOrderOffByUser(currentUser);
             result.order_cooldown = result.order_off.cooldown;
             result.order_3_off = result.order_off.n_off;
@@ -1581,6 +1607,20 @@ async function syncOrdersByUser(userId, options = {}) {
             result.order_off = error;
             result.order_cooldown = error;
             result.order_3_off = error;
+            result.ok = false;
+        }
+        try {
+            result.auth_revoke = await enqueueAuthRevokeTasks(uid, authRevokeCandidates, {
+                trigger_task_id: String(options.trigger_task_id || '').trim()
+            });
+            if (options.defer_auth_revoke_worker !== true
+                && Number(result.auth_revoke.created || 0) + Number(result.auth_revoke.existing || 0) > 0) {
+                result.auth_revoke.worker = startAuthRevokeTaskWorker({
+                    task_dir: path.join(__dirname, '..')
+                });
+            }
+        } catch (e) {
+            result.auth_revoke = { error: String(e.message || e) };
             result.ok = false;
         }
     } else {
@@ -1600,6 +1640,7 @@ async function syncOrdersByUser(userId, options = {}) {
         };
         result.order_cooldown = skipped;
         result.order_3_off = skipped;
+        result.auth_revoke = skipped;
     }
 
     result.finished_at = new Date().toISOString();
@@ -1625,6 +1666,7 @@ async function syncOrdersForAllUsers(options = {}) {
         console.log(`[OrderSync] all_users begin user_id=${user.id} account=${user.account}`);
         const one = await syncOrdersByUser(user.id, {
             ...options,
+            defer_auth_revoke_worker: true,
             user
         });
         summary.results.push({
@@ -1638,6 +1680,9 @@ async function syncOrdersForAllUsers(options = {}) {
         console.log(`[OrderSync] all_users end user_id=${user.id} ok=${one.ok}`);
     }
 
+    summary.auth_revoke_worker = options.start_auth_revoke_worker === false
+        ? { triggered: false, reason: 'disabled', pid: 0 }
+        : startAuthRevokeTaskWorker({ task_dir: path.join(__dirname, '..') });
     summary.finished_at = new Date().toISOString();
     console.log(`[OrderSync] all_users summary=${JSON.stringify({
         total_users: summary.total_users,

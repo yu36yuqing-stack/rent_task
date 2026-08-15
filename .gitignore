@@ -3,6 +3,10 @@ log/
 coverage/
 *.log
 /database/rent_robot_runtime.db*
+database/*.db
+database/*.db-*
+database/*.db.*
 rent_robot.lock
 rent_robot_history.jsonl
 uhaozu/uhaozu_goods_account_cache.json
+.DS_Store

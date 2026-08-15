@@ -320,6 +320,7 @@
       steamGuardLoadingMap: {},
       steamGuardTimer: 0,
       forbiddenLoadingMap: {},
+      authRevokePollTokenMap: {},
       forbiddenSheet: {
         open: false,
         account: '',
@@ -333,7 +334,7 @@
         query_status: '',
         query_text: ''
       },
-      moreOpsSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '', cooldown_summary: '' },
+      moreOpsSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, auth_revoke_loading: false, order_off_summary: '', cooldown_summary: '' },
       soldSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', sold_price: '', sold_at: '', total_cost_amount: 0, lifecycle_income_amount: 0, lifecycle_profit_amount: 0, read_only: false, result_text: '', result_type: '', loading: false },
       accountOrderOffSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, threshold: '', mode: ORDER_OFF_MODE_NATURAL_DAY, global_threshold: 3, global_mode: ORDER_OFF_MODE_NATURAL_DAY, loading: false, result_text: '', result_type: '' },
       accountCooldownSheet: { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, release_delay_min: '', global_release_delay_min: 10, loading: false, result_text: '', result_type: '' },
@@ -596,6 +597,7 @@
       moreOpsMaintenanceBtn: document.getElementById('moreOpsMaintenanceBtn'),
       moreOpsPurchaseBtn: document.getElementById('moreOpsPurchaseBtn'),
       moreOpsCostBtn: document.getElementById('moreOpsCostBtn'),
+      moreOpsAuthRevokeBtn: document.getElementById('moreOpsAuthRevokeBtn'),
       moreOpsSoldBtn: document.getElementById('moreOpsSoldBtn'),
       moreOpsCloseBtn: document.getElementById('moreOpsCloseBtn'),
       soldSheet: document.getElementById('soldSheet'),
@@ -1639,7 +1641,7 @@
         query_status: '',
         query_text: ''
       };
-      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '', cooldown_summary: '' };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, auth_revoke_loading: false, order_off_summary: '', cooldown_summary: '' };
       state.soldSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', sold_price: '', sold_at: '', total_cost_amount: 0, lifecycle_income_amount: 0, lifecycle_profit_amount: 0, read_only: false, result_text: '', result_type: '', loading: false };
       state.accountOrderOffSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, threshold: '', mode: ORDER_OFF_MODE_NATURAL_DAY, global_threshold: 3, global_mode: ORDER_OFF_MODE_NATURAL_DAY, loading: false, result_text: '', result_type: '' };
       state.accountCooldownSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, release_delay_min: '', global_release_delay_min: 10, loading: false, result_text: '', result_type: '' };
@@ -2090,6 +2092,13 @@
         if (!item) return;
         closeMoreOpsSheet();
         openCostSheet(item);
+      });
+    }
+    if (els.moreOpsAuthRevokeBtn) {
+      els.moreOpsAuthRevokeBtn.addEventListener('click', () => {
+        const item = findCurrentProductItem();
+        if (!item) return;
+        void submitManualAuthRevoke(item);
       });
     }
     if (els.moreOpsSoldBtn) {

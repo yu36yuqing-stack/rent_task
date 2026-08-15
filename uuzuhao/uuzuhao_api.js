@@ -10,6 +10,7 @@ const PATH_OFF = '/api/youpin/rent-connector/product/v1/off';
 const PATH_GAME_ONLINE = '/api/youpin/rent-connector/product/v1/game/online';
 const PATH_FORBIDDEN_PLAY = '/api/youpin/rent-connector/product/v1/forbidden/play';
 const PATH_STEAM_GUARD_CODE = '/api/youpin/rent-connector/product/v1/steamGuardCode';
+const PATH_AUTH_REVOKE = '/api/youpin/rent-connector/product/v1/interconnect/auth/revoke';
 const PATH_ORDER_LIST = '/api/youpin/rent-connector/order/v1/list';
 const PATH_ORDER_DETAIL = '/api/youpin/rent-connector/order/v1/detail';
 
@@ -414,6 +415,31 @@ async function getSteamGuardCode(accountId, options = {}) {
     };
 }
 
+// 解除账号在 U 租号侧的游戏授权。
+// accountNo 是游戏账号，不是商品 ID；game_id 必须由调用方根据订单明确传入。
+async function revokeAccountAuth(accountNo, options = {}) {
+    const auth = options.auth || {};
+    const account = String(accountNo || '').trim();
+    if (!account) throw new Error('accountNo 不能为空');
+
+    const gameId = Number(options.game_id);
+    if (!Number.isInteger(gameId) || gameId <= 0) {
+        throw new Error('game_id 必填且必须是正整数');
+    }
+
+    const json = await postSigned(PATH_AUTH_REVOKE, {
+        accountNo: account,
+        gameId
+    }, auth);
+
+    return {
+        account_no: account,
+        game_id: gameId,
+        revoked: true,
+        raw: json
+    };
+}
+
 function sanitizeOrderListParams(params = {}) {
     const orderStatus = Number(params.orderStatus);
     if (!Number.isFinite(orderStatus)) {
@@ -508,6 +534,7 @@ module.exports = {
     enableForbiddenPlay,
     disableForbiddenPlay,
     getSteamGuardCode,
+    revokeAccountAuth,
     listOrders,
     listAllOrders,
     getOrderDetail,
@@ -526,6 +553,7 @@ module.exports = {
         sanitizeOrderListParams,
         sanitizeOrderDetailParams,
         normalizeForbiddenEnabled,
-        getSteamGuardCode
+        getSteamGuardCode,
+        revokeAccountAuth
     }
 };

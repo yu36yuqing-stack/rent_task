@@ -26,6 +26,42 @@
       });
     }
 
+    function formatAuthRevokeTime(value) {
+      const text = String(value || '').trim();
+      if (!text) return '';
+      const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(text);
+      return match ? `${match[2]}-${match[3]} ${match[4]}:${match[5]}` : text.slice(0, 16);
+    }
+
+    function compactAuthRevokeError(value) {
+      const text = String(value || '').trim();
+      if (!text) return '';
+      return text.length > 12 ? `${text.slice(0, 12)}...` : text;
+    }
+
+    function buildAuthRevokeStatusHtml(item) {
+      const task = item && item.auth_revoke && typeof item.auth_revoke === 'object' ? item.auth_revoke : null;
+      const status = String(task && task.status || '').trim();
+      const statusText = String(task && task.status_text || '').trim() || '未执行';
+      const time = formatAuthRevokeTime(task && (task.finished_at || task.modify_date || task.started_at));
+      const error = status === 'failed' ? compactAuthRevokeError(task && task.last_error) : '';
+      const detail = [statusText, error, time].filter(Boolean).join(' · ');
+      const cls = status === 'success'
+        ? 'auth-revoke-success'
+        : status === 'failed'
+          ? 'plat-abnormal'
+          : (status === 'pending' || status === 'running')
+            ? 'plat-renting'
+            : '';
+      const title = String(task && task.last_error || task && task.progress_text || detail).trim();
+      return `
+        <div class="auth-revoke-row" data-slot="auth-revoke"${title ? ` title="${escapeAttr(title)}"` : ''}>
+          <span class="auth-revoke-label">最近解除</span>
+          <span class="plat auth-revoke-status ${cls}">${escapeAttr(detail || '未执行')}</span>
+        </div>
+      `;
+    }
+
     function isDangerStatusCode(code) {
       const c = String(code || '').trim();
       return c === 'auth_abnormal' || c === 'review_fail' || c === 'restricted';
@@ -230,6 +266,96 @@
       } finally {
         state.moreOpsSheet.maintenance_loading = false;
         renderMoreOpsSheet();
+      }
+    }
+
+    async function submitManualAuthRevoke(item) {
+      const account = String(item && item.game_account || '').trim();
+      const gameId = String(item && item.game_id || '1').trim() || '1';
+      const gameName = String(item && item.game_name || 'WZRY').trim() || 'WZRY';
+      if (!account) return;
+      const confirmed = window.confirm('确认发起解除授权任务？');
+      if (!confirmed) return;
+      try {
+        state.moreOpsSheet.auth_revoke_loading = true;
+        renderMoreOpsSheet();
+        const response = await request('/api/products/auth-revoke', {
+          method: 'POST',
+          body: JSON.stringify({
+            game_account: account,
+            game_id: gameId,
+            game_name: gameName
+          })
+        });
+        closeMoreOpsSheet();
+        const result = response && response.data || {};
+        const task = result.task && typeof result.task === 'object' ? result.task : null;
+        if (task) applyAuthRevokeTaskView(item, task);
+        if (result.reused && result.reuse_reason === 'recent_success') {
+          showToast('账号刚完成解除授权，无需重复执行');
+        } else if (result.reused) {
+          showToast('已有解除授权任务，已合并处理');
+        } else {
+          showToast('解除授权任务已创建');
+        }
+        const taskId = String(result.task_id || task && task.task_id || '').trim();
+        if (taskId && String(task && task.status || '') !== 'success') {
+          void pollAuthRevokeTask(item, taskId);
+        }
+      } catch (e) {
+        alert(e.message || '解除授权任务创建失败');
+      } finally {
+        state.moreOpsSheet.auth_revoke_loading = false;
+        renderMoreOpsSheet();
+      }
+    }
+
+    function applyAuthRevokeTaskView(item, task) {
+      if (!task || typeof task !== 'object') return;
+      const gameId = String(task.game_id || item && item.game_id || '1').trim() || '1';
+      const account = String(task.game_account || item && item.game_account || '').trim();
+      if (!account) return;
+      const hit = findProductItemByIdentity(gameId, account);
+      if (hit) hit.auth_revoke = task;
+      renderAuthRevokePart(productIdentityKey({ game_id: gameId, game_account: account }));
+    }
+
+    async function pollAuthRevokeTask(item, taskId) {
+      const identityKey = productIdentityKey(item);
+      if (!identityKey || !taskId) return;
+      const token = `${taskId}:${Date.now()}`;
+      state.authRevokePollTokenMap[identityKey] = token;
+      let failedCount = 0;
+      for (let attempt = 0; attempt < 15; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 800 : 2000));
+        if (state.authRevokePollTokenMap[identityKey] !== token) return;
+        try {
+          const response = await request(`/api/products/auth-revoke/status?task_id=${encodeURIComponent(taskId)}`);
+          const task = response && response.data && response.data.task;
+          if (!task) continue;
+          applyAuthRevokeTaskView(item, task);
+          const status = String(task.status || '').trim();
+          if (status === 'success') {
+            delete state.authRevokePollTokenMap[identityKey];
+            showToast('解除授权成功');
+            return;
+          }
+          if (status === 'failed') {
+            failedCount += 1;
+            if (failedCount >= 2) {
+              delete state.authRevokePollTokenMap[identityKey];
+              showToast('解除授权失败，已进入重试');
+              return;
+            }
+          } else {
+            failedCount = 0;
+          }
+        } catch {
+          // 短暂查询失败不改变任务结果，下一轮继续读取。
+        }
+      }
+      if (state.authRevokePollTokenMap[identityKey] === token) {
+        delete state.authRevokePollTokenMap[identityKey];
       }
     }
 
@@ -568,6 +694,19 @@
       }
     }
 
+    function renderAuthRevokePart(identityKey) {
+      const key = String(identityKey || '').trim();
+      if (!key) return;
+      const card = state.cardNodeMap[key];
+      if (!card) return;
+      const slot = card.querySelector('[data-slot="auth-revoke"]');
+      if (!slot) return;
+      const [gameId, account] = key.split('::');
+      const item = findProductItemByIdentity(gameId, account);
+      if (!item) return;
+      slot.outerHTML = buildAuthRevokeStatusHtml(item).trim();
+    }
+
     function startSteamGuardTicker() {
       if (state.steamGuardTimer) return;
       state.steamGuardTimer = setInterval(() => {
@@ -627,39 +766,44 @@
       const maintenanceLoading = Boolean(state.moreOpsSheet.maintenance_loading);
       const maintenanceEnabled = Boolean(state.moreOpsSheet.maintenance_enabled);
       const prodGuardLoading = Boolean(state.moreOpsSheet.prod_guard_loading);
+      const authRevokeLoading = Boolean(state.moreOpsSheet.auth_revoke_loading);
       const prodGuardEnabled = state.moreOpsSheet.prod_guard_enabled === undefined ? true : Boolean(state.moreOpsSheet.prod_guard_enabled);
       const orderOffSummary = String(state.moreOpsSheet.order_off_summary || '').trim() || 'X单下架';
       const cooldownSummary = String(state.moreOpsSheet.cooldown_summary || '').trim() || '冷却期配置';
       els.moreOpsSheetTitle.textContent = `更多操作 · ${name || '当前账号'}`;
-      els.moreOpsForbiddenBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+      els.moreOpsForbiddenBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
       if (els.moreOpsOrderOffBtn) {
-        els.moreOpsOrderOffBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+        els.moreOpsOrderOffBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
         els.moreOpsOrderOffBtn.textContent = orderOffSummary;
       }
       if (els.moreOpsCooldownBtn) {
-        els.moreOpsCooldownBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+        els.moreOpsCooldownBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
         els.moreOpsCooldownBtn.textContent = cooldownSummary;
       }
       if (els.moreOpsProdGuardBtn) {
-        els.moreOpsProdGuardBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+        els.moreOpsProdGuardBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
         els.moreOpsProdGuardBtn.textContent = prodGuardLoading
           ? '处理中...'
           : (prodGuardEnabled ? '关闭在线风控' : '开启在线风控');
       }
       if (els.moreOpsMaintenanceBtn) {
-        els.moreOpsMaintenanceBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+        els.moreOpsMaintenanceBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
         els.moreOpsMaintenanceBtn.textContent = maintenanceLoading
           ? '处理中...'
           : (maintenanceEnabled ? '结束维护' : '开启维护');
       }
-      els.moreOpsPurchaseBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+      els.moreOpsPurchaseBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
       if (els.moreOpsCostBtn) {
-        els.moreOpsCostBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+        els.moreOpsCostBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
+      }
+      if (els.moreOpsAuthRevokeBtn) {
+        els.moreOpsAuthRevokeBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
+        els.moreOpsAuthRevokeBtn.textContent = authRevokeLoading ? '处理中...' : '解除授权';
       }
       if (els.moreOpsSoldBtn) {
-        els.moreOpsSoldBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+        els.moreOpsSoldBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
       }
-      els.moreOpsCloseBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading;
+      els.moreOpsCloseBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
       els.moreOpsForbiddenBtn.textContent = handling ? '处理中...' : '处理禁玩';
     }
 
@@ -717,7 +861,7 @@
 
     function closeActionSheets() {
       state.activeActionSheet = '';
-      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '', cooldown_summary: '' };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, auth_revoke_loading: false, order_off_summary: '', cooldown_summary: '' };
       state.soldSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', sold_price: '', sold_at: '', total_cost_amount: 0, lifecycle_income_amount: 0, lifecycle_profit_amount: 0, result_text: '', result_type: '', loading: false };
       state.accountOrderOffSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, threshold: '', mode: ORDER_OFF_MODE_NATURAL_DAY, global_threshold: 3, global_mode: ORDER_OFF_MODE_NATURAL_DAY, loading: false, result_text: '', result_type: '' };
       state.accountCooldownSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', follow_global: true, release_delay_min: '', global_release_delay_min: 10, loading: false, result_text: '', result_type: '' };
@@ -744,7 +888,7 @@
     function openForbiddenSheet(item) {
       const account = String(item && item.game_account || '').trim();
       if (!account) return;
-      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '', cooldown_summary: '' };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, auth_revoke_loading: false, order_off_summary: '', cooldown_summary: '' };
       state.activeActionSheet = 'forbidden';
       renderMoreOpsSheet();
       state.forbiddenSheet = {
@@ -810,6 +954,7 @@
         maintenance_loading: false,
         prod_guard_enabled: item && item.prod_guard_enabled === undefined ? true : Boolean(item && item.prod_guard_enabled),
         prod_guard_loading: false,
+        auth_revoke_loading: false,
         order_off_summary: buildOrderOffSummaryText(item && item.order_off_config_source, item && item.order_off_threshold, item && item.order_off_mode),
         cooldown_summary: buildCooldownSummaryText(item && item.cooldown_config_source, item && item.cooldown_release_delay_min)
       };
@@ -823,7 +968,7 @@
 
     function closeMoreOpsSheet() {
       if (state.activeActionSheet === 'more') state.activeActionSheet = '';
-      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, order_off_summary: '', cooldown_summary: '' };
+      state.moreOpsSheet = { open: false, account: '', game_id: '1', game_name: 'WZRY', role_name: '', maintenance_enabled: false, maintenance_loading: false, prod_guard_enabled: true, prod_guard_loading: false, auth_revoke_loading: false, order_off_summary: '', cooldown_summary: '' };
       renderMoreOpsSheet();
     }
 
@@ -1756,6 +1901,7 @@
               <div class="info-square channel-square">
                 <p class="square-title">渠道状态</p>
                 <div class="platforms">${plat}</div>
+                ${soldView ? '' : buildAuthRevokeStatusHtml(item)}
               </div>
             </div>
             <div class="ops">

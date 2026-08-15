@@ -788,6 +788,36 @@
       white-space: nowrap;
     }
 
+    #listView .auth-revoke-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+      padding-top: 4px;
+      border-top: 1px solid #e5ebf2;
+    }
+
+    #listView .auth-revoke-label {
+      flex: 0 0 auto;
+      color: #6f8094;
+      font-size: 10px;
+      line-height: 1.3;
+    }
+
+    #listView .auth-revoke-status {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #listView .auth-revoke-success {
+      color: #287452;
+      border-color: #b9dfcc;
+      background: #eef9f3;
+      font-weight: 600;
+    }
+
     @media (max-width: 640px) {
       .sheet-inline-fields {
         grid-template-columns: 1fr;
@@ -1224,6 +1254,10 @@
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
+    }
+
+    #moreOpsCloseBtn {
+      grid-column: 1 / -1;
     }
 
     .sheet-actions-4 {

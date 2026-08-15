@@ -12,7 +12,7 @@ process.env.ORDER_DB_FILE_PATH = path.join(tempDir, 'rent_robot_order.db');
 
 const { openMainDatabase, openOrderDatabase } = require('../database/sqlite_client');
 const { initOrderDb } = require('../database/order_db');
-const { runPendingMigrations, listPendingMigrations } = require('../database/migration_runner');
+const { runPendingMigrations, listPendingMigrations, loadRegisteredMigrations } = require('../database/migration_runner');
 const { listAppliedSchemaMigrations } = require('../database/schema_migration_db');
 
 function run(db, sql, params = []) {
@@ -135,9 +135,11 @@ async function main() {
 
     const pendingBefore = await listPendingMigrations();
     assertTrue(pendingBefore.length > 0, '初始状态存在待执行 migration');
+    const registered = loadRegisteredMigrations();
+    const registeredCount = registered.length;
 
     const summary = await runPendingMigrations({ logger: console });
-    assertEqual(summary.pending_before, 8, '首次执行应命中全部 pending migrations');
+    assertEqual(summary.pending_before, registeredCount, '首次执行应命中全部 pending migrations');
     assertEqual(summary.pending_after, 0, '首次执行后不应残留 pending migration');
 
     const db2 = openMainDatabase();
@@ -176,9 +178,9 @@ async function main() {
     }
 
     const applied = await listAppliedSchemaMigrations();
-    assertEqual(applied.length, 8, 'schema_migration 记录全部已执行 migrations');
+    assertEqual(applied.length, registeredCount, 'schema_migration 记录全部已执行 migrations');
     assertEqual(String(applied[0].version || ''), '20260411_001', '首个 migration 版本正确');
-    assertEqual(String(applied[7].version || ''), '20260412_008', '最后一个 migration 版本正确');
+    assertEqual(String(applied[applied.length - 1].version || ''), String(registered[registered.length - 1].version || ''), '最后一个 migration 版本正确');
 
     const summarySecond = await runPendingMigrations({ logger: console });
     assertEqual(summarySecond.pending_before, 0, '重复执行 migration 不应重复跑');
