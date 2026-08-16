@@ -53,12 +53,24 @@
         clearTimeout(toastTimer);
         toastTimer = null;
       }
+      if (toastCleanupTimer) {
+        clearTimeout(toastCleanupTimer);
+        toastCleanupTimer = null;
+      }
       const centered = String(variant || '').trim() === 'detail';
       const hide = () => {
-        if (toastTimer) clearTimeout(toastTimer);
-        node.classList.remove('show', 'toast-detail');
+        if (toastTimer) {
+          clearTimeout(toastTimer);
+          toastTimer = null;
+        }
+        node.classList.remove('show');
         node.onclick = null;
-        toastTimer = null;
+        if (centered) {
+          toastCleanupTimer = setTimeout(() => {
+            node.classList.remove('toast-detail');
+            toastCleanupTimer = null;
+          }, 180);
+        }
       };
       node.textContent = String(msg || '');
       node.classList.toggle('toast-detail', centered);
@@ -387,6 +399,7 @@
     const API_BASE = window.location.pathname.startsWith('/h5local') ? '/h5local' : '';
     let refreshPromise = null;
     let toastTimer = null;
+    let toastCleanupTimer = null;
     const GLOBAL_LOADING_MIN_MS = 250;
     let requestInFlightCount = 0;
     let requestLoadingShownAt = 0;

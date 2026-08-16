@@ -40,6 +40,9 @@ assert.ok(failedDetail.includes('错误：code=500, msg=解除授权接口超时
 assert.ok(failedDetail.includes('更新时间：2026-08-16 02:05:11'), '失败详情应展示完整更新时间');
 
 assert.ok(appCoreSource.includes("function showToast(msg, durationMs = 1200, variant = '')"), 'Toast 应支持自定义展示时长和类型');
+assert.ok(appCoreSource.includes("node.classList.remove('show');"), 'Toast 关闭时应先原地淡出');
+assert.ok(!appCoreSource.includes("node.classList.remove('show', 'toast-detail');"), '居中 Toast 淡出时不应立即跳回底部');
+assert.ok(appCoreSource.includes('toastCleanupTimer = setTimeout'), 'Toast 淡出完成后应延迟清理居中定位');
 assert.ok(productsSource.includes("showToast(buildAuthRevokeDetailText(item), 3000, 'detail')"), '解除授权详情应使用居中 Toast');
 assert.ok(cssSource.includes('white-space: pre-line'), 'Toast 应支持多行展示');
 assert.ok(cssSource.includes('max-width: calc(100vw - 32px)'), 'Toast 宽度不应超出手机视口');
