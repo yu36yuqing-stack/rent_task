@@ -33,10 +33,37 @@
       return match ? `${match[2]}-${match[3]} ${match[4]}:${match[5]}` : text.slice(0, 16);
     }
 
+    function formatAuthRevokeFullTime(value) {
+      const text = String(value || '').trim();
+      if (!text) return '';
+      const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/.exec(text);
+      return match ? `${match[1]} ${match[2]}` : text;
+    }
+
     function compactAuthRevokeError(value) {
       const text = String(value || '').trim();
       if (!text) return '';
       return text.length > 12 ? `${text.slice(0, 12)}...` : text;
+    }
+
+    function buildAuthRevokeDetailText(item) {
+      const task = item && item.auth_revoke && typeof item.auth_revoke === 'object' ? item.auth_revoke : null;
+      if (!task) return '解除授权\n状态：未执行';
+      const status = String(task.status || '').trim();
+      const stage = String(task.stage || '').trim();
+      const waitingForOrder = status === 'pending' && stage === 'waiting_active_order';
+      const statusText = waitingForOrder
+        ? '待执行'
+        : (String(task.status_text || '').trim() || '未执行');
+      const lines = ['解除授权', `状态：${statusText}`];
+      const error = String(task.last_error || '').trim();
+      const progress = String(task.progress_text || '').trim();
+      if (error) lines.push(`错误：${error}`);
+      else if (progress && status !== 'success') lines.push(`进度：${progress}`);
+      const timeValue = task.finished_at || task.modify_date || task.started_at;
+      const time = formatAuthRevokeFullTime(timeValue);
+      if (time) lines.push(`${task.finished_at ? '完成时间' : '更新时间'}：${time}`);
+      return lines.join('\n');
     }
 
     function buildAuthRevokeStatusHtml(item) {
@@ -59,11 +86,12 @@
           : (status === 'pending' || status === 'running')
             ? 'plat-renting'
             : '';
-      const title = String(task && task.last_error || task && task.progress_text || detail).trim();
+      const fullDetail = buildAuthRevokeDetailText(item);
+      const title = fullDetail.replace(/\n/g, '；');
       return `
         <div class="auth-revoke-row" data-slot="auth-revoke"${title ? ` title="${escapeAttr(title)}"` : ''}>
-          <span class="auth-revoke-label">最近解除</span>
-          <span class="plat auth-revoke-status ${cls}">${escapeAttr(detail || '未执行')}</span>
+          <span class="auth-revoke-label">解除授权</span>
+          <button type="button" class="plat auth-revoke-status ${cls}" data-op="auth-revoke-detail" aria-label="查看解除授权详情">${escapeAttr(detail || '未执行')}</button>
         </div>
       `;
     }
@@ -1938,6 +1966,14 @@
               copyAccount(v);
             });
           }
+          node.addEventListener('click', (e) => {
+            const target = e.target && typeof e.target.closest === 'function'
+              ? e.target.closest('[data-op="auth-revoke-detail"]')
+              : null;
+            if (!target || !node.contains(target)) return;
+            e.stopPropagation();
+            showToast(buildAuthRevokeDetailText(item), 3000, 'detail');
+          });
           if (soldView) {
             node.querySelector('[data-op=\"sold-maintenance\"]').addEventListener('click', () => openSoldSheetReadonly(item));
             node.querySelector('[data-op=\"cost-detail\"]').addEventListener('click', () => openCostDetailForProduct(item));

@@ -46,19 +46,25 @@
       sessionStorage.removeItem(LEGACY_USER_KEY);
     }
 
-    function showToast(msg) {
+    function showToast(msg, durationMs = 1200, variant = '') {
       const node = document.getElementById('toast');
       if (!node) return;
       if (toastTimer) {
         clearTimeout(toastTimer);
         toastTimer = null;
       }
-      node.textContent = String(msg || '');
-      node.classList.add('show');
-      toastTimer = setTimeout(() => {
-        node.classList.remove('show');
+      const centered = String(variant || '').trim() === 'detail';
+      const hide = () => {
+        if (toastTimer) clearTimeout(toastTimer);
+        node.classList.remove('show', 'toast-detail');
+        node.onclick = null;
         toastTimer = null;
-      }, 1200);
+      };
+      node.textContent = String(msg || '');
+      node.classList.toggle('toast-detail', centered);
+      node.onclick = centered ? hide : null;
+      node.classList.add('show');
+      toastTimer = setTimeout(hide, Math.max(800, Number(durationMs || 1200)));
     }
 
     const initialAuth = loadInitialAuth();
