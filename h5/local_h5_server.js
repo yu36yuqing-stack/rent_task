@@ -448,7 +448,28 @@ async function acquireOrderSyncLockWithWait(options = {}) {
 
 function isRentingByChannelStatus(channelStatus) {
     const s = channelStatus && typeof channelStatus === 'object' ? channelStatus : {};
-    return ['uuzuhao', 'uhaozu', 'zuhaowang'].some((k) => String(s[k] || '').trim() === '租赁中');
+    return ['uuzuhao', 'uhaozu', 'zuhaowang', '5e'].some((k) => String(s[k] || '').trim() === '租赁中');
+}
+
+function buildFiveECardInfo(channelPrdInfo = {}) {
+    const source = channelPrdInfo && typeof channelPrdInfo === 'object'
+        && channelPrdInfo['5e'] && typeof channelPrdInfo['5e'] === 'object'
+        ? channelPrdInfo['5e']
+        : null;
+    if (!source || !String(source.prd_id || source.account_no || '').trim()) return null;
+    return {
+        account_no: String(source.account_no || source.prd_id || '').trim(),
+        steam_id: String(source.steam_id || '').trim(),
+        steam_account: String(source.steam_account || '').trim(),
+        remark: String(source.remark || '').trim(),
+        channel_divide: Number(source.channel_divide || 0),
+        account_value: String(source.account_value || '').trim(),
+        finished_order_count: Number(source.finished_order_count || 0),
+        income_amount: String(source.income_amount || '').trim(),
+        created_at: String(source.created_at || '').trim(),
+        expire_at: String(source.expire_at || '').trim(),
+        mafile_expire_at: String(source.mafile_expire_at || '').trim()
+    };
 }
 
 function normalizeAccountSwitch(raw) {
@@ -653,6 +674,7 @@ async function handleProducts(req, res, urlObj) {
         if (key === 'uuzuhao') return '悠悠';
         if (key === 'uhaozu') return 'U号租';
         if (key === 'zuhaowang') return '租号王';
+        if (key === '5e') return '5E';
         return key || '未知平台';
     };
     const legacyMap = {};
@@ -863,6 +885,7 @@ async function handleProducts(req, res, urlObj) {
             channel_status: channelStatus,
             platform_status_norm: platformStatusNorm,
             overall_status_norm: overallStatusNorm,
+            five_e_info: buildFiveECardInfo(channelPrdInfo),
             today_paid_count: Number(paidMap[identityKey] || 0),
             renting_order_start_time: String(((rentingWindowMap[identityKey] || {}).start_time) || '').trim(),
             renting_order_end_time: String(((rentingWindowMap[identityKey] || {}).end_time) || '').trim(),

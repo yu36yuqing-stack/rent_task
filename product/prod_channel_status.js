@@ -18,7 +18,7 @@ const NORM_CODE_LEVEL_MAP = {
     unknown: 0
 };
 
-const PLATFORM_STATUS_KEYS = ['uuzuhao', 'uhaozu', 'zuhaowang'];
+const PLATFORM_STATUS_KEYS = ['uuzuhao', 'uhaozu', 'zuhaowang', '5e'];
 const UUZUHAO_REAUTHORIZE_OFF_TYPE_REASON_MAP = {
     ACCOUNT_ERROR: '账号授权异常',
     AUTHORIZE_ERROR: '授权失效',
@@ -168,6 +168,15 @@ function normalizeOnePlatformStatus(platform, channelStatus = {}, channelPrdInfo
         if (rawStatus === 2) return buildNormalizedStatus('renting');
         if (rawStatus === 1) return buildNormalizedStatus('listed');
         if (rawStatus === -1) return buildNormalizedStatus('off_shelf');
+        return buildNormalizedStatus(codeByText);
+    }
+
+    if (p === '5e') {
+        const rentStatus = String(prd.rent_status || '').trim();
+        const shelfStatus = String(prd.shelf_status || '').trim();
+        if (rentStatus === 'renting' || Number(prd.rent_status_raw) === 1) return buildNormalizedStatus('renting');
+        if (shelfStatus === 'on_shelf' || Number(prd.shelf_status_raw) === 1) return buildNormalizedStatus('listed');
+        if (shelfStatus === 'off_shelf' || Number(prd.shelf_status_raw) === 0) return buildNormalizedStatus('off_shelf');
         return buildNormalizedStatus(codeByText);
     }
 

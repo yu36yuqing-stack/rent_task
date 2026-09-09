@@ -117,6 +117,11 @@ async function main() {
     });
 
     assert.strictEqual(buildAuthRevokeCandidate(8, order('uuzuhao', 'ACTIVE', '租赁中')), null, '进行中订单不触发任务');
+    assert.strictEqual(buildAuthRevokeCandidate(8, {
+        ...order('5e', 'CS2_DONE', '已完成', 'steam_account'),
+        game_id: '4',
+        game_name: 'CSGO'
+    }), null, 'CS2订单不触发解除授权任务');
     assert.ok(buildAuthRevokeCandidate(8, order('uuzuhao', 'CANCELLED', '已撤单')), '撤单同样属于订单结束');
     assert.strictEqual(
         buildAuthRevokeCandidateOnStatusChange(8, order('uuzuhao', 'UNCHANGED', '已完成'), { status_changed: false }),

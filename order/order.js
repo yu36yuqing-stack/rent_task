@@ -33,6 +33,7 @@ const { buildComplaintFirstHitText } = require('../report/dingding/ding_style');
 const { listAllOrders, getOrderDetail } = require('../uuzuhao/uuzuhao_api');
 const { listAllOrderPages, getOrderDetailPage, parseUhaozuOrderDetailHtml } = require('../uhaozu/uhaozu_api');
 const { getOrderListByEncryptedPayload } = require('../zuhaowang/zuhaowang_api');
+const { listAllRentOrders } = require('../5e_platfrom/5e_api');
 const { listAllUserGameAccountsByUser } = require('../product/product');
 const { listActiveUsers, USER_STATUS_ENABLED } = require('../database/user_db');
 const { openOrderDatabase } = require('../database/sqlite_client');
@@ -40,12 +41,15 @@ const { normalizeZuhaowangAuthPayload } = require('../user/user');
 const { normalizeAccountSwitch } = require('../database/user_game_account_db');
 const {
     CHANNEL_UUZUHAO,
+    CHANNEL_5E,
     UUZUHAO_ORDER_FIELD_MAPPING,
     UHAOZU_ORDER_FIELD_MAPPING,
     ZUHAOWANG_ORDER_FIELD_MAPPING,
+    FIVE_E_ORDER_FIELD_MAPPING,
     mapUuzuhaoOrderToUserOrder,
     mapUhaozuOrderToOrder,
-    mapZuhaowangOrderToOrder
+    mapZuhaowangOrderToOrder,
+    mapFiveEOrderToOrder
 } = require('./order_mapping');
 const { normalizeGameProfile } = require('../common/game_profile');
 const {
@@ -70,6 +74,7 @@ const ORDER_COMPENSATE_LOOKBACK_SEC = 30 * 3600;
 const ORDER_ZHW_DAILY_COMPENSATION_CHANNEL = 'zuhaowang-daily-compensation';
 const ORDER_ZHW_DAILY_COMPENSATION_AFTER_HOUR = 4;
 const ORDER_ZHW_DAILY_COMPENSATION_LOOKBACK_SEC = 8 * 24 * 3600;
+const FIVE_E_ORDER_DEFAULT_LOOKBACK_SEC = 24 * 3600;
 
 function normalizeOrderOffThreshold(v, fallback = ORDER_3_OFF_THRESHOLD) {
     const n = Number(v);
@@ -527,6 +532,7 @@ function normalizeOrderPlatform(platform) {
     if (p === CHANNEL_UUZUHAO) return CHANNEL_UUZUHAO;
     if (p === CHANNEL_UHAOZU) return CHANNEL_UHAOZU;
     if (p === CHANNEL_ZHW || p === CHANNEL_ZHW_YUANBAO) return CHANNEL_ZHW;
+    if (p === CHANNEL_5E) return CHANNEL_5E;
     return '';
 }
 
@@ -642,6 +648,7 @@ function listSuccessfulOrderPlatforms(syncResult = {}) {
     if (p.uuzuhao && !p.uuzuhao.error && !p.uuzuhao.skipped) out.push(CHANNEL_UUZUHAO);
     if (p.uhaozu && !p.uhaozu.error && !p.uhaozu.skipped) out.push(CHANNEL_UHAOZU);
     if (p.zuhaowang && !p.zuhaowang.error && !p.zuhaowang.skipped) out.push(CHANNEL_ZHW);
+    if (p['5e'] && !p['5e'].error && !p['5e'].skipped) out.push(CHANNEL_5E);
     return out;
 }
 
@@ -678,6 +685,17 @@ async function resolveZuhaowangAuthByUser(userId) {
         throw new Error(`user_id=${uid} 缺少可用 ${CHANNEL_ZHW_YUANBAO}/${CHANNEL_ZHW} 授权`);
     }
     return normalizeZuhaowangAuthPayload(resolved.auth_payload || {});
+}
+
+async function resolveFiveEAuthByUser(userId) {
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+    const rows = await listUserPlatformAuth(uid, { with_payload: true });
+    const hit = rows.find((r) => String(r.platform || '') === CHANNEL_5E && isAuthUsable(r));
+    if (!hit || !hit.auth_payload || typeof hit.auth_payload !== 'object') {
+        throw new Error(`user_id=${uid} 缺少可用 ${CHANNEL_5E} 授权`);
+    }
+    return hit.auth_payload;
 }
 
 async function buildUuzuhaoProductIndex(userId) {
@@ -739,6 +757,32 @@ async function buildZuhaowangAccountIndex(userId) {
             const prev = index.get(acc) || {};
             index.set(acc, { role_name: prev.role_name || roleName });
         }
+    }
+    return index;
+}
+
+async function buildFiveEProductIndex(userId) {
+    const rows = await listAllUserGameAccountsByUser(userId);
+    const index = new Map();
+    for (const row of rows) {
+        const info = (((row || {}).channel_prd_info || {})[CHANNEL_5E] || {});
+        const accountNo = String(info.account_no || info.prd_id || '').trim();
+        if (!accountNo) continue;
+        const ref = {
+            account_no: accountNo,
+            game_account: String(row.game_account || '').trim(),
+            role_name: String(row.account_remark || '').trim()
+        };
+        if (!index.has(accountNo)) {
+            index.set(accountNo, ref);
+            continue;
+        }
+        const prev = index.get(accountNo) || {};
+        index.set(accountNo, {
+            account_no: accountNo,
+            game_account: prev.game_account || ref.game_account,
+            role_name: prev.role_name || ref.role_name
+        });
     }
     return index;
 }
@@ -1450,6 +1494,120 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
     };
 }
 
+// 5E 日常同步按支付时间回看最近一天；首次初始化可显式传 full_sync=true 做全量同步。
+// 写入使用 orderChildNo 作为渠道订单唯一键，以支持同一父订单下的续租子单。
+async function syncFiveEOrdersToDb(userId, options = {}) {
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+    const auth = await resolveFiveEAuthByUser(uid);
+    const inputNowSec = Number(options.now_sec ?? options.nowSec);
+    const nowSec = Number.isFinite(inputNowSec) && inputNowSec > 0
+        ? Math.floor(inputNowSec)
+        : Math.floor(Date.now() / 1000);
+    const fullSync = options.full_sync === true || options.fullSync === true;
+    const lookbackInput = Number(options.lookback_sec ?? options.lookbackSec);
+    const lookbackSec = Number.isFinite(lookbackInput) && lookbackInput > 0
+        ? Math.floor(lookbackInput)
+        : FIVE_E_ORDER_DEFAULT_LOOKBACK_SEC;
+    const explicitPayStartAt = Number(options.pay_start_at ?? options.payStartAt);
+    const explicitPayEndAt = Number(options.pay_end_at ?? options.payEndAt);
+    const payStartAt = fullSync
+        ? 0
+        : (Number.isFinite(explicitPayStartAt) && explicitPayStartAt > 0
+            ? Math.floor(explicitPayStartAt)
+            : nowSec - lookbackSec);
+    const payEndAt = fullSync
+        ? 0
+        : (Number.isFinite(explicitPayEndAt) && explicitPayEndAt > 0
+            ? Math.floor(explicitPayEndAt)
+            : nowSec);
+    if (!fullSync && payEndAt <= payStartAt) {
+        throw new Error('5E 订单同步 pay_end_at 必须大于 pay_start_at');
+    }
+    const lastSyncTs = await getLastSyncTimestamp(uid, CHANNEL_5E);
+    const productIndex = await buildFiveEProductIndex(uid);
+    const accountNos = Array.from(productIndex.keys());
+    console.log(`[OrderSync][5e] user_id=${uid} begin accounts=${accountNos.length} mode=${fullSync ? 'full' : 'incremental'} pay_start_at=${payStartAt || ''} pay_end_at=${payEndAt || ''} last_sync_ts=${lastSyncTs}`);
+
+    await initOrderCommandService();
+    let pulledCount = 0;
+    let upserted = 0;
+    let linked = 0;
+    let unlinked = 0;
+    let pages = 0;
+    const seenOrderIds = new Set();
+    const traceIds = [];
+
+    for (const accountNo of accountNos) {
+        const pulled = await listAllRentOrders(
+            {
+                accountNo,
+                pageSize: Number(options.pageSize || options.page_size || 100),
+                payStartAt,
+                payEndAt
+            },
+            auth,
+            {
+                max_pages: Number(options.maxPages || options.max_pages || 100),
+                fetch_impl: options.fetch_impl
+            }
+        );
+        const orderList = Array.isArray(pulled.list) ? pulled.list : [];
+        pulledCount += orderList.length;
+        pages += Number(pulled.pages || 0);
+        if (pulled.trace_id) traceIds.push(String(pulled.trace_id));
+
+        for (const raw of orderList) {
+            const refAccountNo = String(raw.account_id || accountNo).trim();
+            const ref = productIndex.get(refAccountNo) || productIndex.get(accountNo) || {};
+            const mapped = mapFiveEOrderToOrder(raw, {
+                game_account: ref.game_account,
+                role_name: ref.role_name,
+                now_sec: nowSec
+            });
+            if (!mapped.order_no || seenOrderIds.has(mapped.order_no)) continue;
+            seenOrderIds.add(mapped.order_no);
+            if (mapped.game_account) linked += 1;
+            else unlinked += 1;
+            await upsertOrder({
+                user_id: uid,
+                ...mapped,
+                desc: String(options.desc || [
+                    'sync by order/5e',
+                    `parent_order_no=${mapped.parent_order_no || ''}`,
+                    `raw_status=${Number.isFinite(mapped.raw_order_status) ? mapped.raw_order_status : ''}`,
+                    `cash_status=${Number.isFinite(mapped.raw_cash_status) ? mapped.raw_cash_status : ''}`
+                ].join(' '))
+            });
+            upserted += 1;
+        }
+    }
+
+    await setLastSyncTimestamp(uid, CHANNEL_5E, nowSec, 'order sync watermark');
+    console.log(`[OrderSync][5e] user_id=${uid} pulled=${pulledCount} upserted=${upserted} linked=${linked} unlinked=${unlinked} pages=${pages} set_last_sync_ts=${nowSec}`);
+    return {
+        user_id: uid,
+        channel: CHANNEL_5E,
+        window: {
+            mode: fullSync ? 'full_by_account' : 'pay_time_range_by_account',
+            last_sync_ts: lastSyncTs,
+            current_sync_ts: nowSec,
+            pay_start_at: payStartAt,
+            pay_end_at: payEndAt,
+            lookback_sec: fullSync ? 0 : lookbackSec
+        },
+        account_count: accountNos.length,
+        pulled: pulledCount,
+        total_count: seenOrderIds.size,
+        upserted,
+        linked,
+        unlinked,
+        pages,
+        trace_ids: Array.from(new Set(traceIds)),
+        mapping: FIVE_E_ORDER_FIELD_MAPPING
+    };
+}
+
 async function syncOrdersByUser(userId, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
@@ -1514,6 +1672,9 @@ async function syncOrdersByUser(userId, options = {}) {
             zhwDailyLookbackSec
         )
     };
+    const fiveEOptions = {
+        ...(options['5e'] || options.five_e || {})
+    };
 
     if (expectedPlatforms.includes(CHANNEL_UUZUHAO)) {
     try {
@@ -1575,6 +1736,24 @@ async function syncOrdersByUser(userId, options = {}) {
         result.platforms.zuhaowang = { skipped: true, reason: 'channel_disabled_or_auth_missing' };
     }
 
+    if (expectedPlatforms.includes(CHANNEL_5E)) {
+    try {
+        result.platforms['5e'] = await syncFiveEOrdersToDb(uid, fiveEOptions);
+        console.log(`[OrderSync] user_id=${uid} platform=5e done ${JSON.stringify({
+            accounts: result.platforms['5e'].account_count,
+            pulled: result.platforms['5e'].pulled,
+            upserted: result.platforms['5e'].upserted,
+            total_count: result.platforms['5e'].total_count
+        })}`);
+    } catch (e) {
+        result.platforms['5e'] = { error: String(e.message || e) };
+        console.error(`[OrderSync] user_id=${uid} platform=5e error=${result.platforms['5e'].error}`);
+        result.ok = false;
+    }
+    } else {
+        result.platforms['5e'] = { skipped: true, reason: 'channel_disabled_or_auth_missing' };
+    }
+
     const authRevokeCandidates = [];
     for (const platformResult of Object.values(result.platforms)) {
         if (!platformResult || typeof platformResult !== 'object') continue;
@@ -1594,6 +1773,16 @@ async function syncOrdersByUser(userId, options = {}) {
         can_reconcile: canReconcileOrder3Off
     };
 
+    const authRevokeExpectedPlatforms = expectedPlatforms.filter((p) => p !== CHANNEL_5E);
+    const authRevokeMissingPlatforms = authRevokeExpectedPlatforms.filter((p) => !successPlatforms.includes(p));
+    const canEnqueueAuthRevoke = authRevokeExpectedPlatforms.length > 0 && authRevokeMissingPlatforms.length === 0;
+    result.auth_revoke_gate = {
+        expected: authRevokeExpectedPlatforms,
+        success: successPlatforms.filter((p) => p !== CHANNEL_5E),
+        missing: authRevokeMissingPlatforms,
+        can_enqueue: canEnqueueAuthRevoke
+    };
+
     if (canReconcileOrder3Off) {
         const currentUser = options.user && Number(options.user.id) === uid
             ? options.user
@@ -1607,20 +1796,6 @@ async function syncOrdersByUser(userId, options = {}) {
             result.order_off = error;
             result.order_cooldown = error;
             result.order_3_off = error;
-            result.ok = false;
-        }
-        try {
-            result.auth_revoke = await enqueueAuthRevokeTasks(uid, authRevokeCandidates, {
-                trigger_task_id: String(options.trigger_task_id || '').trim()
-            });
-            if (options.defer_auth_revoke_worker !== true
-                && Number(result.auth_revoke.created || 0) + Number(result.auth_revoke.existing || 0) > 0) {
-                result.auth_revoke.worker = startAuthRevokeTaskWorker({
-                    task_dir: path.join(__dirname, '..')
-                });
-            }
-        } catch (e) {
-            result.auth_revoke = { error: String(e.message || e) };
             result.ok = false;
         }
     } else {
@@ -1640,7 +1815,31 @@ async function syncOrdersByUser(userId, options = {}) {
         };
         result.order_cooldown = skipped;
         result.order_3_off = skipped;
-        result.auth_revoke = skipped;
+    }
+
+    if (canEnqueueAuthRevoke) {
+        try {
+            result.auth_revoke = await enqueueAuthRevokeTasks(uid, authRevokeCandidates, {
+                trigger_task_id: String(options.trigger_task_id || '').trim()
+            });
+            if (options.defer_auth_revoke_worker !== true
+                && Number(result.auth_revoke.created || 0) + Number(result.auth_revoke.existing || 0) > 0) {
+                result.auth_revoke.worker = startAuthRevokeTaskWorker({
+                    task_dir: path.join(__dirname, '..')
+                });
+            }
+        } catch (e) {
+            result.auth_revoke = { error: String(e.message || e) };
+            result.ok = false;
+        }
+    } else {
+        result.auth_revoke = {
+            skipped: true,
+            reason: authRevokeExpectedPlatforms.length === 0
+                ? 'no_auth_revoke_platform'
+                : 'auth_revoke_platform_sync_incomplete',
+            missing_platforms: authRevokeMissingPlatforms
+        };
     }
 
     result.finished_at = new Date().toISOString();
@@ -1701,6 +1900,7 @@ module.exports = {
     syncUuzuhaoOrdersToDb,
     syncUhaozuOrdersToDb,
     syncZuhaowangOrdersToDb,
+    syncFiveEOrdersToDb,
     syncOrdersByUser,
     syncOrdersForAllUsers,
     reconcileOrderOffByUser,
@@ -1710,14 +1910,17 @@ module.exports = {
     resolveUuzuhaoAuthByUser,
     resolveUhaozuAuthByUser,
     resolveZuhaowangAuthByUser,
+    resolveFiveEAuthByUser,
     buildUuzuhaoProductIndex,
     buildUhaozuProductIndex,
     buildZuhaowangAccountIndex,
+    buildFiveEProductIndex,
     isOrderProgressStatus,
     isOrderRefundStatus,
     isOrderDoneStatus,
     shouldSyncUhaozuOrderDetailByStatus,
     UUZUHAO_ORDER_FIELD_MAPPING,
     UHAOZU_ORDER_FIELD_MAPPING,
-    ZUHAOWANG_ORDER_FIELD_MAPPING
+    ZUHAOWANG_ORDER_FIELD_MAPPING,
+    FIVE_E_ORDER_FIELD_MAPPING
 };

@@ -103,6 +103,15 @@ async function seedUserAndOrders(now) {
         purchase_date: '2026-01-01',
         desc: 'stats smoke account'
     });
+    await upsertUserGameAccount({
+        user_id: userId,
+        game_account: 'acc_hpj_y_1',
+        game_id: '2',
+        game_name: '和平精英',
+        purchase_price: 200,
+        purchase_date: '2026-01-01',
+        desc: 'stats smoke hpjy account'
+    });
 
     for (let i = 0; i < 30; i += 1) {
         const day = addDays(now, -i);
@@ -125,6 +134,26 @@ async function seedUserAndOrders(now) {
             desc: `smoke order day-${i}`
         });
     }
+
+    const currentDay = new Date();
+    await upsertOrder({
+        user_id: userId,
+        channel: 'zuhaowang',
+        order_no: `SMOKE_HPJY_${Date.now()}`,
+        game_id: '2',
+        game_name: '和平精英',
+        game_account: 'acc_hpj_y_1',
+        role_name: 'HPJYSmokeRole',
+        order_status: '已完成',
+        order_amount: 12,
+        rent_hour: 2,
+        ren_way: 'hour',
+        rec_amount: 9.9,
+        start_time: toDateTimeText(currentDay, 10),
+        end_time: toDateTimeText(currentDay, 12),
+        create_date: toDateTimeText(currentDay, 9),
+        desc: 'worker all-games smoke order'
+    });
     return { userId };
 }
 
@@ -168,6 +197,20 @@ async function main() {
     assertEqual((outBackfill.touched || []).length, 21, '单用户 backfill 21 实际重算 21 天');
     assertEqual(String((outBackfill.touched || [])[20].stat_date || ''), '2026-03-05', 'backfill 21 天起点正确');
 
+    const beforeRepeatRows = await listOrderStatsRows(userId, '2026-03-05', '2026-03-25', 'WZRY');
+    const beforeRepeatIncome = beforeRepeatRows.reduce((sum, row) => sum + Number(row.amount_rec_sum || 0), 0);
+    await refreshOrderStatsDailyByUser(userId, {
+        mode: 'backfill',
+        days: 21,
+        game_name: 'WZRY',
+        now,
+        desc: 'smoke backfill 21 repeated'
+    });
+    const afterRepeatRows = await listOrderStatsRows(userId, '2026-03-05', '2026-03-25', 'WZRY');
+    const afterRepeatIncome = afterRepeatRows.reduce((sum, row) => sum + Number(row.amount_rec_sum || 0), 0);
+    assertEqual(afterRepeatRows.length, beforeRepeatRows.length, '重复补算不会增加统计行数');
+    assertEqual(afterRepeatIncome, beforeRepeatIncome, '重复补算不会重复累计收益');
+
     const rows14 = await listOrderStatsRows(userId, '2026-03-12', '2026-03-25', 'WZRY');
     assertTrue(rows14.length > 0, 'normal/backfill 后统计表可读');
     const weeklyRows = await listWeeklySnapshotsByUser(userId, 'WZRY', '2026-03-25');
@@ -192,6 +235,10 @@ async function main() {
         encoding: 'utf8'
     });
     assertTrue(workerOut.includes('recalc_days=14 requested_days=60'), 'worker 会把 60 天请求截断到 14');
+    const currentDate = toDateText(new Date());
+    const hpjyWorkerRows = await listOrderStatsRows(userId, currentDate, currentDate, '和平精英');
+    assertEqual(hpjyWorkerRows.length, 1, 'worker 自动统计和平精英');
+    assertEqual(Number(hpjyWorkerRows[0].amount_rec_sum || 0), 9.9, 'worker 保留和平精英实收金额');
 
     const rebuildOut = execFileSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'rebuild_order_stats.js'), '--user_id', String(userId), '--game_name', 'WZRY', '--days', '21'], {
         cwd: path.join(__dirname, '..'),

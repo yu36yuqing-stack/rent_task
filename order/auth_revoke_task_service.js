@@ -60,6 +60,7 @@ function buildAuthRevokeCandidate(userId, order = {}) {
     const gameId = Number(order.game_id);
     const gameAccount = String(order.game_account || '').trim();
     if (!uid || !channel || !orderNo || !Number.isInteger(gameId) || gameId <= 0 || !gameAccount) return null;
+    if (gameId === 4) return null;
     if (!isAuthRevokeTriggerOrder(order)) return null;
     return {
         user_id: uid,

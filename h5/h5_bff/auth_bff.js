@@ -113,10 +113,15 @@ function createAuthBff(deps = {}) {
         const includePayload = toBool(urlObj.searchParams.get('with_payload'));
         const rows = await listUserPlatformAuth(user.id, { with_payload: true });
         const channels = toChannelView(rows);
+        const clientRows = rows.map((row) => {
+            if (String((row && row.platform) || '').trim() !== '5e') return row;
+            const { auth_payload: _authPayload, ...safeRow } = row;
+            return safeRow;
+        });
         return json(res, 200, {
             ok: true,
             data: channels,
-            rows: includePayload ? rows : undefined,
+            rows: includePayload ? clientRows : undefined,
             options: {
                 platform: PLATFORM_OPTIONS,
                 auth_type: AUTH_TYPE_OPTIONS,

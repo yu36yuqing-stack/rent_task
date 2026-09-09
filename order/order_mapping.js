@@ -1,4 +1,5 @@
 const CHANNEL_UUZUHAO = 'uuzuhao';
+const CHANNEL_5E = '5e';
 const { normalizeGameProfile } = require('../common/game_profile');
 
 // 渠道 -> 平台订单表 字段映射定义（后续可按渠道继续扩展）
@@ -51,6 +52,23 @@ const ZUHAOWANG_ORDER_FIELD_MAPPING = {
     create_date: { from: 'startTime -> yyyy-MM-dd HH:mm:ss' },
     start_time: { from: 'startTime -> yyyy-MM-dd HH:mm:ss' },
     end_time: { from: 'endTime -> yyyy-MM-dd HH:mm:ss' }
+};
+
+const FIVE_E_ORDER_FIELD_MAPPING = {
+    channel: { from: '(fixed)', value: CHANNEL_5E },
+    order_no: { from: 'orderChildNo (fallback orderNo)' },
+    game_id: { from: '(fixed)', value: '4' },
+    game_name: { from: '(fixed)', value: 'CSGO' },
+    game_account: { from: '(lookup accountNo -> user_game_account.channel_prd_info.5e.account_no)' },
+    role_name: { from: '(lookup accountNo -> user_game_account.account_remark)' },
+    order_status: { from: 'isRefund + rentExpireTime' },
+    order_amount: { from: 'realAmount' },
+    rent_hour: { from: 'totalTimeLength / 3600' },
+    ren_way: { from: 'buyTimeType', value: '时租' },
+    rec_amount: { from: 'isRefund ? 0 : channelRevenue' },
+    create_date: { from: 'orderCreateTime' },
+    start_time: { from: 'paySuccessTime' },
+    end_time: { from: 'rentExpireTime' }
 };
 
 function toNumberSafe(value, defaultValue = 0) {
@@ -218,12 +236,47 @@ function mapZuhaowangOrderToOrder(raw = {}, options = {}) {
     };
 }
 
+function mapFiveEOrderToOrder(raw = {}, options = {}) {
+    const nowSec = toNumberSafe(options.now_sec, Math.floor(Date.now() / 1000));
+    const expireSec = toNumberSafe(raw.rent_expire_time ?? raw.rentExpireTime, 0);
+    const refunded = raw.is_refund === true || Number(raw.is_refund_raw ?? raw.isRefund) === 1;
+    const rawStatus = Number(raw.order_status ?? raw.orderStatus);
+    let orderStatus = '';
+    if (refunded) orderStatus = '已退款';
+    else if (expireSec > nowSec) orderStatus = '租赁中';
+    else if (expireSec > 0 || rawStatus === 2) orderStatus = '已完成';
+    else orderStatus = Number.isFinite(rawStatus) ? String(rawStatus) : '';
+
+    return {
+        channel: CHANNEL_5E,
+        order_no: String(raw.order_id || raw.order_child_no || raw.orderChildNo || raw.order_no || raw.orderNo || '').trim(),
+        parent_order_no: String(raw.order_no || raw.orderNo || '').trim(),
+        game_id: '4',
+        game_name: 'CSGO',
+        game_account: String(options.game_account || '').trim(),
+        role_name: String(options.role_name || '').trim(),
+        order_status: orderStatus,
+        create_date: toNumberSafe(raw.order_create_time ?? raw.orderCreateTime, 0),
+        order_amount: roundTo2(toNumberSafe(raw.paid_amount ?? raw.realAmount, 0)),
+        rent_hour: toNumberSafe(raw.duration_hours, toNumberSafe(raw.totalTimeLength, 0) / 3600),
+        ren_way: '时租',
+        rec_amount: refunded ? 0 : roundTo2(toNumberSafe(raw.income_amount ?? raw.channelRevenue, 0)),
+        start_time: toNumberSafe(raw.pay_success_time ?? raw.paySuccessTime, 0),
+        end_time: expireSec,
+        raw_order_status: rawStatus,
+        raw_cash_status: Number(raw.cash_status ?? raw.cashStatus)
+    };
+}
+
 module.exports = {
     CHANNEL_UUZUHAO,
+    CHANNEL_5E,
     UUZUHAO_ORDER_FIELD_MAPPING,
     UHAOZU_ORDER_FIELD_MAPPING,
     ZUHAOWANG_ORDER_FIELD_MAPPING,
+    FIVE_E_ORDER_FIELD_MAPPING,
     mapUuzuhaoOrderToUserOrder,
     mapUhaozuOrderToOrder,
-    mapZuhaowangOrderToOrder
+    mapZuhaowangOrderToOrder,
+    mapFiveEOrderToOrder
 };

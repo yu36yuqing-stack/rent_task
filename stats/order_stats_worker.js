@@ -59,6 +59,7 @@ setupLogger();
         const summary = await refreshOrderStatsDailyForAllUsers({
             mode: 'normal',
             days: refreshRange.days,
+            game_name: '全部',
             desc: 'daily by order_stats_worker'
         });
         console.log(`[OrderStatsWorker] 完成 total=${summary.total_users} ok=${summary.ok_users} failed=${summary.failed_users}`);

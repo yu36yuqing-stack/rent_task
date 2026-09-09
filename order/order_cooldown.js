@@ -23,6 +23,7 @@ const CHANNEL_UUZUHAO = 'uuzuhao';
 const CHANNEL_UHAOZU = 'uhaozu';
 const CHANNEL_ZHW = 'zuhaowang';
 const CHANNEL_ZHW_YUANBAO = 'zuhaowang-yuanbao';
+const CHANNEL_5E = '5e';
 
 const COOLDOWN_REASON = '冷却期下架';
 const COOLDOWN_SOURCE = 'order_cooldown';
@@ -43,6 +44,7 @@ function normalizeOrderPlatform(platform) {
     if (p === CHANNEL_UUZUHAO) return CHANNEL_UUZUHAO;
     if (p === CHANNEL_UHAOZU) return CHANNEL_UHAOZU;
     if (p === CHANNEL_ZHW || p === CHANNEL_ZHW_YUANBAO) return CHANNEL_ZHW;
+    if (p === CHANNEL_5E) return CHANNEL_5E;
     return '';
 }
 

@@ -6,11 +6,12 @@
         { key: 'uhaozu', name: 'U号' },
         { key: 'zuhaowang', name: 'ZHW' }
       ];
+      if (isCs2Product(item)) defs.push({ key: '5e', name: '5E' });
       return defs.map((d) => {
         const one = norm[d.key] && typeof norm[d.key] === 'object' ? norm[d.key] : null;
         const label = one && String(one.label || '').trim()
           ? String(one.label || '').trim()
-          : (String(legacy[d.key] || '').trim() || '未');
+          : (String(legacy[d.key] || '').trim() || (d.key === '5e' ? '未发布' : '未'));
         const reason = one && String(one.reason || '').trim() ? String(one.reason || '').trim() : '';
         const code = one && String(one.code || '').trim() ? String(one.code || '').trim() : '';
         const shortReason = isDangerStatusCode(code) ? shortenDangerReason(reason) : '';
@@ -19,11 +20,36 @@
           ? shortReason
           : `${label}${suffix}`;
         return {
+          key: d.key,
           text: `${d.name}: ${display}`,
           code,
           reason
         };
       });
+    }
+
+    function buildFiveEDetailText(item) {
+      const info = item && item.five_e_info && typeof item.five_e_info === 'object' ? item.five_e_info : null;
+      if (!info) return '5E渠道详情\n状态：未发布';
+      const lines = ['5E渠道详情'];
+      const fields = [
+        ['账号ID', info.account_no],
+        ['SteamID', info.steam_id],
+        ['Steam账号', info.steam_account],
+        ['平台备注', info.remark],
+        ['分成比例', Number(info.channel_divide || 0) > 0 ? `${Number(info.channel_divide)}%` : ''],
+        ['账号价值', info.account_value],
+        ['完结订单', Number.isFinite(Number(info.finished_order_count)) ? String(Number(info.finished_order_count)) : ''],
+        ['累计收入', info.income_amount],
+        ['录入时间', info.created_at],
+        ['账号到期', info.expire_at],
+        ['MaFile到期', info.mafile_expire_at]
+      ];
+      fields.forEach(([label, value]) => {
+        const text = String(value || '').trim();
+        if (text) lines.push(`${label}：${text}`);
+      });
+      return lines.join('\n');
     }
 
     function formatAuthRevokeTime(value) {
@@ -203,6 +229,11 @@
 
     function isCs2Product(item) {
       return normalizeGameName(item && item.game_name, item && item.game_id) === 'CSGO';
+    }
+
+    function shouldShowMoreOpsAction(item, action) {
+      if (!isCs2Product(item)) return true;
+      return !['forbidden', 'prod_guard', 'maintenance', 'auth_revoke'].includes(String(action || '').trim());
     }
 
     function buildGameAvatarHtml(item) {
@@ -807,11 +838,13 @@
       const maintenanceEnabled = Boolean(state.moreOpsSheet.maintenance_enabled);
       const prodGuardLoading = Boolean(state.moreOpsSheet.prod_guard_loading);
       const authRevokeLoading = Boolean(state.moreOpsSheet.auth_revoke_loading);
+      const hideCsgoOnlyActions = isCs2Product(state.moreOpsSheet);
       const prodGuardEnabled = state.moreOpsSheet.prod_guard_enabled === undefined ? true : Boolean(state.moreOpsSheet.prod_guard_enabled);
       const orderOffSummary = String(state.moreOpsSheet.order_off_summary || '').trim() || 'X单下架';
       const cooldownSummary = String(state.moreOpsSheet.cooldown_summary || '').trim() || '冷却期配置';
       els.moreOpsSheetTitle.textContent = `更多操作 · ${name || '当前账号'}`;
-      els.moreOpsForbiddenBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
+      els.moreOpsForbiddenBtn.classList.toggle('hidden', hideCsgoOnlyActions);
+      els.moreOpsForbiddenBtn.disabled = hideCsgoOnlyActions || querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
       if (els.moreOpsOrderOffBtn) {
         els.moreOpsOrderOffBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
         els.moreOpsOrderOffBtn.textContent = orderOffSummary;
@@ -821,13 +854,15 @@
         els.moreOpsCooldownBtn.textContent = cooldownSummary;
       }
       if (els.moreOpsProdGuardBtn) {
-        els.moreOpsProdGuardBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
+        els.moreOpsProdGuardBtn.classList.toggle('hidden', hideCsgoOnlyActions);
+        els.moreOpsProdGuardBtn.disabled = hideCsgoOnlyActions || querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
         els.moreOpsProdGuardBtn.textContent = prodGuardLoading
           ? '处理中...'
           : (prodGuardEnabled ? '关闭在线风控' : '开启在线风控');
       }
       if (els.moreOpsMaintenanceBtn) {
-        els.moreOpsMaintenanceBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
+        els.moreOpsMaintenanceBtn.classList.toggle('hidden', hideCsgoOnlyActions);
+        els.moreOpsMaintenanceBtn.disabled = hideCsgoOnlyActions || querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
         els.moreOpsMaintenanceBtn.textContent = maintenanceLoading
           ? '处理中...'
           : (maintenanceEnabled ? '结束维护' : '开启维护');
@@ -837,7 +872,8 @@
         els.moreOpsCostBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
       }
       if (els.moreOpsAuthRevokeBtn) {
-        els.moreOpsAuthRevokeBtn.disabled = querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
+        els.moreOpsAuthRevokeBtn.classList.toggle('hidden', hideCsgoOnlyActions);
+        els.moreOpsAuthRevokeBtn.disabled = hideCsgoOnlyActions || querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
         els.moreOpsAuthRevokeBtn.textContent = authRevokeLoading ? '处理中...' : '解除授权';
       }
       if (els.moreOpsSoldBtn) {
@@ -1890,7 +1926,10 @@
             const isDanger = isDangerStatusCode(code);
             const cls = isDanger ? 'plat-abnormal' : (isRenting ? 'plat-renting' : '');
             const title = reason ? ` title="${escapeAttr(reason)}"` : '';
-            return `<span class="plat ${cls}"${title}>${text}</span>`;
+            const detailAttrs = x && x.key === '5e' && item.five_e_info
+              ? ` data-op="five-e-detail" role="button" tabindex="0" title="点击查看5E渠道详情"`
+              : title;
+            return `<span class="plat ${cls}"${detailAttrs}>${text}</span>`;
           }).join('');
           const account = String(item.game_account || '').trim();
           const identityKey = productIdentityKey(item);
@@ -1974,10 +2013,15 @@
           }
           node.addEventListener('click', (e) => {
             const target = e.target && typeof e.target.closest === 'function'
-              ? e.target.closest('[data-op="auth-revoke-detail"]')
+              ? e.target.closest('[data-op="auth-revoke-detail"], [data-op="five-e-detail"]')
               : null;
             if (!target || !node.contains(target)) return;
             e.stopPropagation();
+            const op = String(target.getAttribute('data-op') || '').trim();
+            if (op === 'five-e-detail') {
+              showToast(buildFiveEDetailText(item), 4000, 'detail');
+              return;
+            }
             showToast(buildAuthRevokeDetailText(item), 3000, 'detail');
           });
           if (soldView) {

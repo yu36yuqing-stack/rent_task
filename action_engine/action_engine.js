@@ -3,6 +3,7 @@ const { buildAuthMap } = require('../user/user');
 const { youpinOffShelf, youpinOnShelf } = require('../uuzuhao/uuzuhao_api');
 const { uhaozuOffShelf, uhaozuOnShelf, uhaozuReshelfByModify } = require('../uhaozu/uhaozu_api');
 const { changeStatus: changeZhwStatus } = require('../zuhaowang/zuhaowang_api');
+const { updateRentAccountShelf } = require('../5e_platfrom/5e_api');
 const {
     buildPlatformStatusNorm,
     isOnAllowedByCode,
@@ -50,6 +51,7 @@ function platformFromActionType(type = '') {
     if (text === 'off_y' || text === 'on_y') return 'uuzuhao';
     if (text === 'off_u' || text === 'on_u' || text === 'on_u_modify') return 'uhaozu';
     if (text === 'off_z' || text === 'on_z') return 'zuhaowang';
+    if (text === 'off_5e' || text === 'on_5e') return '5e';
     return '';
 }
 
@@ -117,10 +119,11 @@ async function clearPlatformRestrictReliable({
 }
 
 function detectConflictsAndBuildSnapshot({
-    youpinData,
-    uhaozuData,
-    zhwData,
-    blacklistAccounts,
+    youpinData = [],
+    uhaozuData = [],
+    zhwData = [],
+    fiveEData = [],
+    blacklistAccounts = new Set(),
     platformRestrictSet = new Set(),
     platformStatusNormMap = {}
 }) {
@@ -143,16 +146,19 @@ function detectConflictsAndBuildSnapshot({
             game_name: String(item.game_name || 'WZRY').trim() || 'WZRY',
             youpin: null,
             uhaozu: null,
-            zhw: null
+            zhw: null,
+            five_e: null
         };
         if (platform === 'uuzuhao') cur.youpin = item;
         else if (platform === 'uhaozu') cur.uhaozu = item;
         else if (platform === 'zuhaowang') cur.zhw = item;
+        else if (platform === '5e') cur.five_e = item;
         identityMap.set(key, cur);
     };
     for (const item of youpinData) upsertByIdentity(item, 'uuzuhao');
     for (const item of uhaozuData) upsertByIdentity(item, 'uhaozu');
     for (const item of zhwData) upsertByIdentity(item, 'zuhaowang');
+    for (const item of fiveEData) upsertByIdentity(item, '5e');
 
     console.log(`[Step] 账号合并完成，总账号数=${identityMap.size}`);
 
@@ -162,12 +168,14 @@ function detectConflictsAndBuildSnapshot({
         const y = one.youpin;
         const u = one.uhaozu;
         const z = one.zhw;
+        const fiveE = one.five_e;
 
         const statY = y ? y.status : '未找到';
         const statU = u ? u.status : '未找到';
         const statZ = z ? z.status : '未找到';
+        const statFiveE = fiveE ? fiveE.status : '未找到';
 
-        const remark = y ? y.remark : (z ? z.roleName : (u ? u.id : acc));
+        const remark = y ? y.remark : (z ? z.roleName : (u ? u.id : (fiveE ? fiveE.remark : acc)));
 
         snapshot.accounts.push({
             game_id: String(one.game_id || '1').trim() || '1',
@@ -177,6 +185,7 @@ function detectConflictsAndBuildSnapshot({
             youpin: statY,
             uhaozu: statU,
             zuhaowan: statZ,
+            five_e: statFiveE,
             uhaozu_debug: u ? u.reason : ''
         });
 
@@ -192,12 +201,15 @@ function detectConflictsAndBuildSnapshot({
             if (z && isActiveShelfStatus(statZ)) {
                 actions.push({ type: 'off_z', item: z, reason: '黑名单命中，强制下架租号王' });
             }
+            if (fiveE && isActiveShelfStatus(statFiveE)) {
+                actions.push({ type: 'off_5e', item: fiveE, reason: '黑名单命中，强制下架5E' });
+            }
             continue;
         }
 
         // 规则逻辑：
         // 1. 任意一个平台为 "租赁中"，则其他所有 "上架" 的平台必须 "下架"。
-        const anyRenting = (statY === '租赁中') || (statU === '租赁中') || (statZ === '租赁中');
+        const anyRenting = (statY === '租赁中') || (statU === '租赁中') || (statZ === '租赁中') || (statFiveE === '租赁中');
         const normByAcc = platformStatusNormMap && typeof platformStatusNormMap === 'object'
             ? (platformStatusNormMap[identityKey] || {})
             : {};
@@ -207,11 +219,13 @@ function detectConflictsAndBuildSnapshot({
         const canAutoOnY = isOnAllowedByCode(String(yNorm.code || '')) || resolveUuzuhaoReauthorizeState(yNorm).hit;
         const canAutoOnU = isOnAllowedByCode(String((uNorm && uNorm.code) || '')) || ignoreUhaozuOnlineDetect;
         const canAutoOnZ = isOnAllowedByCode(String((normByAcc.zuhaowang && normByAcc.zuhaowang.code) || ''));
+        const canAutoOnFiveE = isOnAllowedByCode(String((normByAcc['5e'] && normByAcc['5e'].code) || ''));
 
         if (anyRenting) {
             if (statY === '上架') actions.push({ type: 'off_y', item: y, reason: `检测到出租(U:${statU}/Z:${statZ})，下架悠悠` });
             if (statU === '上架') actions.push({ type: 'off_u', item: u, reason: `检测到出租(Y:${statY}/Z:${statZ})，下架U号租` });
             if (statZ === '上架') actions.push({ type: 'off_z', item: z, reason: `检测到出租(Y:${statY}/U:${statU})，下架租号王` });
+            if (statFiveE === '上架') actions.push({ type: 'off_5e', item: fiveE, reason: `检测到出租(Y:${statY}/U:${statU}/Z:${statZ})，下架5E` });
         } else {
             const isSystemOff = Boolean(y && y.reason && y.reason.includes('系统'));
 
@@ -224,6 +238,7 @@ function detectConflictsAndBuildSnapshot({
                 if (statY === '上架') actions.push({ type: 'off_y', item: y, reason: `${reasonMsg}，同步下架悠悠` });
                 if (statU === '上架') actions.push({ type: 'off_u', item: u, reason: `${reasonMsg}，同步下架U号租` });
                 if (statZ === '上架') actions.push({ type: 'off_z', item: z, reason: `${reasonMsg}，同步下架租号王` });
+                if (statFiveE === '上架') actions.push({ type: 'off_5e', item: fiveE, reason: `${reasonMsg}，同步下架5E` });
             } else {
                 // 正常状态下：无租赁，且无系统惩罚 -> 全部上架
                 if (statY === '下架' && !platformRestrictSet.has(`${identityKey}::uuzuhao`) && canAutoOnY) {
@@ -269,6 +284,13 @@ function detectConflictsAndBuildSnapshot({
                         reason: '无租赁，自动补上架租号王'
                     });
                 }
+                if (statFiveE === '下架' && !platformRestrictSet.has(`${identityKey}::5e`) && canAutoOnFiveE) {
+                    actions.push({
+                        type: 'on_5e',
+                        item: fiveE,
+                        reason: '无租赁，自动补上架5E'
+                    });
+                }
             }
         }
     }
@@ -288,6 +310,7 @@ async function executeActions({
     uhaozuOnShelf,
     uhaozuReshelfByModify,
     changeZhwStatus,
+    changeFiveEShelfStatus,
     readOnly = false
 }) {
     if (runRecord && !runRecord.action_timing) {
@@ -415,6 +438,17 @@ async function executeActions({
                 // type=1 上架
                 if (action.item.gameId) success = await changeZhwStatus(action.item.account, action.item.gameId, 1, action.item.dataId);
                 else console.error(`[Error] 缺少 gameId，无法上架租号王 ${action.item.account}`);
+            }
+
+            // 5E (API)
+            else if (action.type === 'off_5e' || action.type === 'on_5e') {
+                if (typeof changeFiveEShelfStatus !== 'function') throw new Error('5E上下架执行器未配置');
+                const shelfStatus = action.type === 'on_5e' ? 1 : 0;
+                const out = await changeFiveEShelfStatus(action.item, shelfStatus);
+                success = out && typeof out === 'object' ? out.ok !== false : Boolean(out);
+                detail = out && typeof out === 'object'
+                    ? { code: Number(out.code || 0), msg: String(out.message || out.msg || '') }
+                    : { code: 0, msg: '' };
             }
 
             if (success) {
@@ -552,6 +586,7 @@ function buildPlatformRowsFromUserAccounts(rows = []) {
     const youpinData = [];
     const uhaozuData = [];
     const zhwData = [];
+    const fiveEData = [];
 
     for (const row of rows) {
         const account = String(row.game_account || '').trim();
@@ -598,9 +633,24 @@ function buildPlatformRowsFromUserAccounts(rows = []) {
                 dataId: String((prd.zuhaowang && (prd.zuhaowang.prd_id || prd.zuhaowang.id)) || '').trim()
             });
         }
+
+        const fiveEStatus = String(status['5e'] || '').trim();
+        if (fiveEStatus) {
+            const fiveEPrd = prd && typeof prd['5e'] === 'object' ? prd['5e'] : {};
+            fiveEData.push({
+                account,
+                game_id: String((row && row.game_id) || '4').trim() || '4',
+                game_name: String((row && row.game_name) || 'CSGO').trim() || 'CSGO',
+                status: fiveEStatus,
+                remark: String(row.account_remark || account),
+                account_no: String(fiveEPrd.account_no || fiveEPrd.prd_id || '').trim(),
+                prd_id: String(fiveEPrd.prd_id || fiveEPrd.account_no || '').trim(),
+                steam_id: String(fiveEPrd.steam_id || '').trim()
+            });
+        }
     }
 
-    return { youpinData, uhaozuData, zhwData };
+    return { youpinData, uhaozuData, zhwData, fiveEData };
 }
 
 function buildPlatformStatusNormMapByAccount(rows = []) {
@@ -659,7 +709,7 @@ async function executeUserActionsIfNeeded({
     timing.auth_load_ms = elapsedMs(authStartedAt);
 
     const planStartedAt = nowMs();
-    const { youpinData, uhaozuData, zhwData } = buildPlatformRowsFromUserAccounts(rows);
+    const { youpinData, uhaozuData, zhwData, fiveEData } = buildPlatformRowsFromUserAccounts(rows);
     const platformStatusNormMap = buildPlatformStatusNormMapByAccount(rows);
     const accounts = Array.from(new Map((rows || [])
         .map((r) => {
@@ -689,6 +739,7 @@ async function executeUserActionsIfNeeded({
         const y = String(st.uuzuhao || '').trim();
         const u = String(st.uhaozu || '').trim();
         const z = String(st.zuhaowang || '').trim();
+        const fiveE = String(st['5e'] || '').trim();
         if (['上架', '租赁中', '出租中'].includes(y) && platformRestrictSet.has(`${gid}::${acc}::uuzuhao`)) {
             cleanupStats.attempted += 1;
             const out = await clearPlatformRestrictReliable({
@@ -746,6 +797,25 @@ async function executeUserActionsIfNeeded({
                 cleanupStats.failed += 1;
             }
         }
+        if (['上架', '租赁中', '出租中'].includes(fiveE) && platformRestrictSet.has(`${gid}::${acc}::5e`)) {
+            cleanupStats.attempted += 1;
+            const out = await clearPlatformRestrictReliable({
+                userId: user.id,
+                account: acc,
+                gameId: gid,
+                gameName: gname,
+                platform: '5e',
+                desc: `auto clear by status=${fiveE}`,
+                logger: console,
+                runErrors: preCleanupErrors
+            });
+            if (out.ok) {
+                cleanupStats.cleared += 1;
+                platformRestrictSet.delete(`${gid}::${acc}::5e`);
+            } else {
+                cleanupStats.failed += 1;
+            }
+        }
     }
     if (cleanupStats.attempted > 0) {
         console.log(`[RestrictClear] precheck user_id=${user.id} attempted=${cleanupStats.attempted} cleared=${cleanupStats.cleared} failed=${cleanupStats.failed}`);
@@ -755,6 +825,7 @@ async function executeUserActionsIfNeeded({
         youpinData,
         uhaozuData,
         zhwData,
+        fiveEData,
         blacklistAccounts: blacklistSet,
         platformRestrictSet,
         platformStatusNormMap
@@ -810,6 +881,15 @@ async function executeUserActionsIfNeeded({
             const auth = authMap.zuhaowang;
             if (!auth) return false;
             return changeZhwStatus(account, gameId, type, auth, { data_id: dataId, user_id: user && user.id });
+        },
+        changeFiveEShelfStatus: (item, shelfStatus) => {
+            const auth = authMap['5e'];
+            if (!auth) return false;
+            return updateRentAccountShelf({
+                account_no: item && (item.account_no || item.prd_id),
+                steam_id: item && item.steam_id,
+                shelf_status: shelfStatus
+            }, auth);
         },
         readOnly
     });

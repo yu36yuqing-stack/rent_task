@@ -60,6 +60,15 @@ async function main() {
         auth_status: 'valid',
         desc: 'seed uhaozu auth for h5'
     });
+    await upsertUserPlatformAuth({
+        user_id: user.id,
+        platform: '5e',
+        auth_type: 'token',
+        auth_payload: { token: 'five-e-secret-token' },
+        auth_status: 'valid',
+        expire_at: '2099-01-01 00:00:00',
+        desc: 'seed 5e auth for h5'
+    });
 
     const token = createAccessToken(user);
     const headers = {
@@ -76,6 +85,8 @@ async function main() {
         assertTrue(beforeRes.ok && beforeJson.ok, '获取授权列表失败');
         const before = (beforeJson.data || []).find((row) => String((row && row.platform) || '') === 'uhaozu');
         assertTrue(before && before.channel_enabled === true, '初始渠道应为启用');
+        const fiveERow = (beforeJson.rows || []).find((row) => String((row && row.platform) || '') === '5e');
+        assertTrue(fiveERow && !Object.prototype.hasOwnProperty.call(fiveERow, 'auth_payload'), 'H5授权接口不得返回5E token');
 
         const toggleRes = await fetch(`${baseUrl}/api/auth/platforms/toggle-channel`, {
             method: 'POST',

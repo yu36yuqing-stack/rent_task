@@ -38,6 +38,7 @@ function normalizeOrderPlatform(platform) {
     if (p === 'uuzuhao') return 'uuzuhao';
     if (p === 'uhaozu') return 'uhaozu';
     if (p === 'zuhaowang' || p === 'zuhaowang-yuanbao') return 'zuhaowang';
+    if (p === '5e') return '5e';
     return '';
 }
 

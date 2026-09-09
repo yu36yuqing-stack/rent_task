@@ -51,7 +51,8 @@ async function main() {
         { type: 'off_y', item: { account: 'acc_y1', game_id: '1', game_name: 'WZRY' }, reason: 'test off y 1' },
         { type: 'off_y', item: { account: 'acc_y2', game_id: '1', game_name: 'WZRY' }, reason: 'test off y' },
         { type: 'off_u', item: { account: 'acc_u1', game_id: '1', game_name: 'WZRY' }, reason: 'test off u' },
-        { type: 'off_z', item: { account: 'acc_z1', game_id: '1', game_name: 'WZRY', gameId: 1104466820, dataId: 'z1' }, reason: 'test off z' }
+        { type: 'off_z', item: { account: 'acc_z1', game_id: '1', game_name: 'WZRY', gameId: 1104466820, dataId: 'z1' }, reason: 'test off z' },
+        { type: 'off_5e', item: { account: 'acc_5e', game_id: '4', game_name: 'CSGO', account_no: 'CS1', steam_id: '7656119' }, reason: 'test off 5e' }
     ];
     const runRecord = { actions: [], errors: [] };
     const startedAt = Date.now();
@@ -70,6 +71,7 @@ async function main() {
         uhaozuOnShelf: makeStub('on_u', 80),
         uhaozuReshelfByModify: makeStub('on_u_modify', 10),
         changeZhwStatus: makeStub('off_z', 80),
+        changeFiveEShelfStatus: makeStub('off_5e', 80),
         readOnly: false
     });
     const elapsed = Date.now() - startedAt;
@@ -84,12 +86,14 @@ async function main() {
     assert.ok(at('off_y2', 'start') >= at('off_y1', 'end'), '同平台 uuzuhao 动作应串行');
     assert.ok(at('off_u', 'start') < at('off_y1', 'end'), 'uhaozu 队列应与 uuzuhao 并行');
     assert.ok(at('off_z', 'start') < at('off_y1', 'end'), 'zuhaowang 队列应与 uuzuhao 并行');
-    assert.deepStrictEqual(runRecord.actions.map((x) => x.plan_index), [0, 1, 2, 3], '动作结果应按原计划顺序回填');
+    assert.ok(at('off_5e', 'start') < at('off_y1', 'end'), '5E 队列应与 uuzuhao 并行');
+    assert.deepStrictEqual(runRecord.actions.map((x) => x.plan_index), [0, 1, 2, 3, 4], '动作结果应按原计划顺序回填');
     assert.strictEqual(runRecord.errors.length, 0, '不应产生执行错误');
     assert.strictEqual(runRecord.action_timing.mode, 'platform_parallel', '应记录平台并行模式');
     assert.strictEqual(runRecord.action_timing.queue_timing.uuzuhao.planned, 2, '应记录 uuzuhao 队列');
     assert.strictEqual(runRecord.action_timing.queue_timing.uhaozu.planned, 1, '应记录 uhaozu 队列');
     assert.strictEqual(runRecord.action_timing.queue_timing.zuhaowang.planned, 1, '应记录 zuhaowang 队列');
+    assert.strictEqual(runRecord.action_timing.queue_timing['5e'].planned, 1, '应记录 5E 队列');
 
     console.log(`[PASS] action_engine_platform_parallel_smoke_test temp_dir=${tempDir}`);
 }

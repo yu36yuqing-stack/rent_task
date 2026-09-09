@@ -1,6 +1,6 @@
 const { openDatabase } = require('./sqlite_client');
 
-const VALID_PLATFORMS = new Set(['uuzuhao', 'uhaozu', 'zuhaowang']);
+const VALID_PLATFORMS = new Set(['uuzuhao', 'uhaozu', 'zuhaowang', '5e']);
 
 function nowText() {
     const d = new Date();

@@ -12,3 +12,6 @@ uhaozu/uhaozu_goods_account_cache.json
 .DS_Store
 /config/cloudinfo.md
 /config/CloudInfo.md
+
+# AI Code Tracker
+.ai-generated-records/

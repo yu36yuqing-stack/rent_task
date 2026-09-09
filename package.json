@@ -6,6 +6,7 @@
     "h5:smoke": "node scripts/h5_smoke.js",
     "test:smoke": "node test/prod_channel_status_smoke_test.js",
     "test:stats-refresh-policy": "node test/order_stats_refresh_policy_smoke_test.js",
+    "coverage:stats-refresh": "c8 --all --include=stats/order_stats_worker.js --reporter=text --reporter=html --report-dir=coverage/stats-refresh --check-coverage --lines=90 node test/order_stats_refresh_policy_smoke_test.js",
     "test:game-identity": "node test/game_identity_smoke_test.js",
     "test:identity-regression": "node test/game_identity_smoke_test.js && node test/prod_guard_account_switch_smoke_test.js",
     "test:order-service-regression": "node test/order_query_service_smoke_test.js && node test/order_command_service_smoke_test.js && node test/order_rule_service_smoke_test.js && node test/product_order_service_regression_smoke_test.js && node test/order_cooldown_release_smoke_test.js && node test/order_stats_refresh_policy_smoke_test.js",
@@ -13,6 +14,7 @@
     "db:migrate": "node scripts/run_migrations.js",
     "test:schema-migration": "node test/schema_migration_smoke_test.js",
     "test:auth-revoke": "node test/uuzuhao_auth_revoke_smoke_test.js && node test/order_auth_revoke_smoke_test.js",
+    "test:five-e": "node test/five_e_api_smoke_test.js && node test/five_e_product_sync_smoke_test.js && node test/five_e_order_sync_smoke_test.js && node test/action_engine_five_e_shelf_smoke_test.js",
     "test:system-retention": "node test/runtime_task_prune_smoke_test.js && node test/log_retention_smoke_test.js && node test/system_retention_smoke_test.js"
   },
   "dependencies": {

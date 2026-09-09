@@ -108,6 +108,14 @@ function testProdChannelStatus() {
     );
     assertEqual(normYyzReauth.uuzuhao.label, '需重新授权', '悠悠重新授权失败也应提示需重新授权');
 
+    const normFiveE = buildPlatformStatusNorm(
+        { '5e': '租赁中' },
+        { '5e': { rent_status: 'renting', rent_status_raw: 1, shelf_status: 'on_shelf', shelf_status_raw: 1 } },
+        {}
+    );
+    assertEqual(normFiveE['5e'].code, 'renting', '5E租赁状态应归一化为 renting');
+    assertEqual(normFiveE['5e'].label, '租赁中', '5E租赁状态应展示租赁中');
+
     const overall = pickOverallStatusNorm({
         uuzuhao: buildNormalizedStatus('listed'),
         uhaozu: buildNormalizedStatus('auth_abnormal', '账号异常'),

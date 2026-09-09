@@ -38,7 +38,7 @@ function all(db, sql, params = []) {
 
 function normalizePlatform(v) {
     const p = String(v || '').trim().toLowerCase();
-    if (p === 'uuzuhao' || p === 'uhaozu' || p === 'zuhaowang') return p;
+    if (p === 'uuzuhao' || p === 'uhaozu' || p === 'zuhaowang' || p === '5e') return p;
     return '';
 }
 

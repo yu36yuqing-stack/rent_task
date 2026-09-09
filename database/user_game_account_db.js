@@ -5,7 +5,7 @@ const {
     canonicalGameNameById
 } = require('../common/game_profile');
 
-const PLATFORM_KEYS = new Set(['zuhaowang', 'uhaozu', 'uuzuhao']);
+const PLATFORM_KEYS = new Set(['zuhaowang', 'uhaozu', 'uuzuhao', '5e']);
 const ORDER_OFF_THRESHOLD_MAX = 50;
 
 function nowText() {

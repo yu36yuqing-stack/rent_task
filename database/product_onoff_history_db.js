@@ -124,6 +124,7 @@ function detectPlatformByActionType(actionType) {
     if (t.endsWith('_y')) return 'uuzuhao';
     if (t.endsWith('_u')) return 'uhaozu';
     if (t.endsWith('_z')) return 'zuhaowang';
+    if (t === 'off_5e' || t === 'on_5e') return '5e';
     return '';
 }
 

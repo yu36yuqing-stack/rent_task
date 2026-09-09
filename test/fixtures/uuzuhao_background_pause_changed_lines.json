@@ -1,6 +1,6 @@
 {
   "product/prod_channel_status.js": {
-    "hash": "679690179fc20b90695830cf97fdaf51b2d7ba2f8f0a46fad87a1b22f8fef20d",
+    "hash": "32f0532de1f9e82a0e7cfdda3f7f149d124bc8ed093652356f627dae5d95346d",
     "changed_lines": [
       23,
       51
@@ -92,22 +92,21 @@
     ]
   },
   "order/auth_revoke_task_service.js": {
-    "hash": "ff85512cababc554d7fc93b96b3e7c47eeb5535e2436f8bbc524f8b98230e70e",
+    "hash": "6aaf33a1510b4744fd79f325ab852ade8775c320bad870fd80124304dcca6f21",
     "changed_lines": [
       21,
-      135,
       136,
       137,
-      377,
+      138,
       378,
       379,
-      387,
+      380,
       388,
       389,
-      397,
-      417,
+      390,
+      398,
       418,
-      436,
+      419,
       437,
       438,
       439,
@@ -119,45 +118,46 @@
       445,
       446,
       447,
-      451,
-      452
+      448,
+      452,
+      453
     ]
   },
   "action_engine/action_engine.js": {
-    "hash": "b91a55768cc9ac212b8fdf8035ce5fc925037be52a6c508f83ba7aace77119cf",
+    "hash": "3029aa057b73297e1dd6b14e9fc86b6e465803563bcac71e6b75376b3f6c79e7",
     "changed_lines": [
-      9,
       10,
-      206,
-      207
+      11,
+      218,
+      219
     ]
   },
   "h5/local_h5_server.js": {
-    "hash": "1b0ac82f135fb47a7059cd3727f51eb9894a97603e28d8b48e85c8a01471b474",
+    "hash": "81556bb50adb1c349ff9a68c05864afc105b5a03179cd596e5b25d642eea27b6",
     "changed_lines": [
       77,
-      1765,
-      1822,
-      1855,
-      1856,
-      1980,
-      2016,
-      2017
+      1788,
+      1845,
+      1878,
+      1879,
+      2003,
+      2039,
+      2040
     ]
   },
   "h5/public/js/menu_products.js": {
-    "hash": "a1f24b2e0cf34fa8386ae19b2a7d883305e750b85dc158b64771c94def8b594e",
+    "hash": "3b914d832254ea20a3ef25d77083c268997ad1420947033b7b3e42f195f15b71",
     "changed_lines": [
-      62,
-      74,
-      80,
-      81,
-      373,
-      374,
-      375,
-      376,
-      377,
-      387
+      88,
+      100,
+      106,
+      107,
+      404,
+      405,
+      406,
+      407,
+      408,
+      418
     ]
   },
   "report/dingding/ding_style.js": {

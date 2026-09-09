@@ -1,13 +1,14 @@
 const { getGoodsList } = require('../zuhaowang/zuhaowang_api');
 const { collectUhaozuData } = require('../uhaozu/uhaozu_api');
 const { collectYoupinData } = require('../uuzuhao/uuzuhao_api');
+const { FiveEApiError, listAllRentAccounts } = require('../5e_platfrom/5e_api');
 const {
     upsertUserGameAccount,
     listUserGameAccounts,
     isUserGameAccountManuallyDeleted
 } = require('../database/user_game_account_db');
 const { openDatabase } = require('../database/sqlite_client');
-const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
+const { listUserPlatformAuth, markPlatformAuthExpired } = require('../database/user_platform_auth_db');
 const { releaseOrderCooldownBlacklistByUser } = require('../order/service/order_rule_service');
 const { listLinkedOrderAccountsByUser } = require('../order/service/order_query_service');
 const { normalizeZuhaowangAuthPayload } = require('../user/user');
@@ -20,6 +21,7 @@ const {
 const PLATFORM_ZHW = 'zuhaowang';
 const PLATFORM_UHZ = 'uhaozu';
 const PLATFORM_YYZ = 'uuzuhao';
+const PLATFORM_5E = '5e';
 const ORDER_MIRROR_RECOVER_MAX_AGE_MS = 3 * 24 * 3600 * 1000;
 
 function nowMs() {
@@ -95,7 +97,36 @@ function buildPlatformPrdInfo(platform, row = {}) {
             tab_key: String(raw._tabKey || '').trim().toUpperCase()
         };
     }
+    if (platform === PLATFORM_5E) {
+        return {
+            prd_id: String(row.account_id || row.id || ''),
+            account_no: String(row.account_id || ''),
+            steam_id: String(row.steam_id || ''),
+            steam_account: String(row.steam_account || ''),
+            remark: String(row.remark || ''),
+            shelf_status: String(row.shelf_status || 'unknown'),
+            shelf_status_raw: Number(row.shelf_status_raw),
+            rent_status: String(row.rent_status || 'unknown'),
+            rent_status_raw: Number(row.rent_status_raw),
+            shelf_remark: String(row.shelf_remark || ''),
+            channel_divide: Number(row.channel_divide || 0),
+            account_value: String(row.account_value || ''),
+            login_type: Number(row.login_type || 0),
+            finished_order_count: Number(row.finished_order_count || 0),
+            income_amount: String(row.income_amount || ''),
+            created_at: String(row.created_at || ''),
+            expire_at: String(row.expire_at || ''),
+            mafile_expire_at: String(row.mafile_expire_at || '')
+        };
+    }
     return {};
+}
+
+function mapFiveEChannelStatus(row = {}) {
+    if (String(row.rent_status || '') === 'renting') return '租赁中';
+    if (String(row.shelf_status || '') === 'on_shelf') return '上架';
+    if (String(row.shelf_status || '') === 'off_shelf') return '下架';
+    return '未知';
 }
 
 // Legacy path (hardcoded credentials) is intentionally disabled.
@@ -173,11 +204,11 @@ async function reconcileProductSyncAnomalies(userId, existingRows = [], pulledBy
     const errorPlatforms = new Set(
         (Array.isArray(errors) ? errors : [])
             .map((msg) => String(msg || '').trim().split(':')[0])
-            .filter((v) => v === PLATFORM_YYZ || v === PLATFORM_UHZ || v === PLATFORM_ZHW)
+            .filter((v) => v === PLATFORM_YYZ || v === PLATFORM_UHZ || v === PLATFORM_ZHW || v === PLATFORM_5E)
     );
 
     const enabledSet = new Set((Array.isArray(enabledPlatforms) ? enabledPlatforms : []).map((x) => String(x || '').trim()).filter(Boolean));
-    for (const platform of [PLATFORM_YYZ, PLATFORM_UHZ, PLATFORM_ZHW]) {
+    for (const platform of [PLATFORM_YYZ, PLATFORM_UHZ, PLATFORM_ZHW, PLATFORM_5E]) {
         if (enabledSet.size > 0 && !enabledSet.has(platform)) {
             await resolveOpenProductSyncAnomaly(uid, platform, {
                 desc: `resolved by disabled platform=${platform}`
@@ -366,6 +397,19 @@ async function pullPlatformDataByAuth(platform, authPayload = {}) {
         })).filter((x) => x.game_account);
     }
 
+    if (platform === PLATFORM_5E) {
+        const result = await listAllRentAccounts(authPayload);
+        const list = Array.isArray(result?.list) ? result.list : [];
+        return list.map((x) => ({
+            game_id: '4',
+            game_name: 'CSGO',
+            game_account: String(x.steam_account || '').trim(),
+            status: mapFiveEChannelStatus(x),
+            prd_info: buildPlatformPrdInfo(PLATFORM_5E, x),
+            account_remark: String(x.remark || '').trim()
+        })).filter((x) => x.game_account);
+    }
+
     throw new Error(`不支持的平台: ${platform}`);
 }
 
@@ -446,6 +490,9 @@ async function syncUserAccountsByAuth(userId) {
                 duration_ms: elapsedMs(startedAt)
             };
         } catch (e) {
+            if (platform === PLATFORM_5E && e instanceof FiveEApiError && [401, 403].includes(Number(e.http_status || 0))) {
+                await markPlatformAuthExpired(uid, PLATFORM_5E, `5E token invalid: HTTP ${Number(e.http_status || 0)}`).catch(() => {});
+            }
             return {
                 platform,
                 ok: false,
@@ -499,7 +546,7 @@ async function syncUserAccountsByAuth(userId) {
             };
             cur.channel_status[platform] = item.status;
             cur.channel_prd_info[platform] = item.prd_info || {};
-            if (platform === PLATFORM_YYZ) {
+            if (platform === PLATFORM_YYZ || platform === PLATFORM_5E) {
                 const remark = String(item.account_remark || '').trim();
                 if (remark) cur.account_remark = remark;
             }
@@ -577,6 +624,7 @@ module.exports = {
     listAllUserGameAccountsByUser,
     ensureLinkedGameAccountsByOrders,
     _internals: {
-        buildPlatformPrdInfo
+        buildPlatformPrdInfo,
+        mapFiveEChannelStatus
     }
 };
