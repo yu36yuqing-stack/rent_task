@@ -132,11 +132,13 @@ async function deleteBlacklistWithGuard(userId, gameAccount, options = {}) {
 
     try {
         const onlineRes = await queryOnlineStatusCached(uid, acc, {
+            manual: options.manual === true,
             game_id: gameId,
             game_name: gameName,
             desc: 'update by blacklist guard online'
         });
         const forbiddenRes = await queryForbiddenStatusCached(uid, acc, {
+            manual: options.manual === true,
             game_id: gameId,
             game_name: gameName,
             desc: 'update by blacklist guard forbidden'
@@ -146,6 +148,13 @@ async function deleteBlacklistWithGuard(userId, gameAccount, options = {}) {
         forbidden = Boolean(forbiddenRes && forbiddenRes.enabled);
     } catch (e) {
         guard_error = String(e && e.message ? e.message : e || '').trim();
+        return {
+            removed: false,
+            blocked: true,
+            blocked_reason: e.code === 'UUZUHAO_AUTHORIZATION_PAUSED' ? '等待授权恢复' : '状态查询失败',
+            guard_checked: false,
+            guard_error
+        };
     }
 
     const key = { game_account: acc, game_id: gameId, game_name: gameName };

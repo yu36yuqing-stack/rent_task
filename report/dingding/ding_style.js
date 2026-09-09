@@ -1,3 +1,5 @@
+const { resolveUuzuhaoReauthorizeState } = require('../../product/prod_channel_status');
+
 function shortState(s) {
     if (!s) return '未';
     return String(s)
@@ -75,6 +77,15 @@ function buildDingdingMessage(payload) {
 
     const syncAnomalies = Array.isArray(payload.sync_anomalies) ? payload.sync_anomalies : [];
     const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+    const authProblems = accounts.filter((account) => resolveUuzuhaoReauthorizeState(account).hit);
+    if (authProblems.length > 0) {
+        lines.push('悠悠授权异常，请号主在悠悠重新授权：');
+        for (const account of authProblems) {
+            lines.push(`• ${account.remark || account.account}（${account.account}）：${resolveUuzuhaoReauthorizeState(account).reason}`);
+        }
+        lines.push('后台在线、禁玩、解除授权已暂停；商品与订单同步、上下架及手工操作保持正常。');
+        lines.push('');
+    }
     const totalPaid = accounts.reduce((sum, acc) => sum + Number(acc && acc.today_order_count || 0), 0);
     const orderCountLabel = String(payload.order_count_label || '今日订单').trim() || '今日订单';
     lines.push(`📈 ${orderCountLabel}: ${totalPaid}`);
@@ -111,7 +122,7 @@ function buildDingdingMessage(payload) {
     });
 
     lines.push('');
-    lines.push(payload.allNormal ? '✅ 所有状态正常 (已授权平台一致或无冲突)' : '⚠️ 检测到待修复状态');
+    lines.push(payload.allNormal && authProblems.length === 0 ? '✅ 所有状态正常 (已授权平台一致或无冲突)' : '⚠️ 检测到待修复状态');
     lines.push(`版本: ${REPORT_VERSION}`);
     return lines.join('\n');
 }

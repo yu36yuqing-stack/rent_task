@@ -18,6 +18,7 @@ const { listRentingOrderWindowByAccounts } = require('../database/order_db');
 const { getLatestUserGameAccountByUserAndAccount } = require('../database/user_game_account_db');
 const { revokeAccountAuth } = require('../uuzuhao/uuzuhao_api');
 const { normalizeGameProfile } = require('../common/game_profile');
+const { assertUuzuhaoBackgroundOperationAllowed } = require('../product/prod_probe_cache_service');
 
 const AUTH_REVOKE_TASK_TYPE = 'uuzuhao_auth_revoke';
 const FINISHED_ORDER_STATUSES = new Set([
@@ -131,7 +132,9 @@ function buildAuthRevokeTaskView(task = {}) {
     const input = safeJsonObject(state.input, {});
     const status = String(task.status || '').trim();
     const stage = String(task.stage || '').trim();
-    const statusText = status === 'success'
+    const statusText = status === 'pending' && stage === 'waiting_authorization'
+        ? '等待授权恢复'
+        : status === 'success'
         ? '成功'
         : status === 'running'
             ? '解除中'
@@ -371,6 +374,9 @@ async function processAuthRevokeTasks(options = {}) {
         const input = safeJsonObject(state.input, {});
         const attemptCount = Math.max(0, Number(state.attempt_count || 0)) + 1;
         const errors = safeJsonArray(task.error_json);
+        const manualCount = Number(task.attached_manual_count || 0);
+        const consumedCount = Number(state.manual_consumed_count ?? (Number(state.attempt_count || 0) > 0 ? manualCount : 0));
+        const manualAttempt = manualCount > consumedCount;
         try {
             const uid = Number(input.user_id || task.user_id || 0);
             const gameId = Number(input.game_id || 0);
@@ -378,6 +384,9 @@ async function processAuthRevokeTasks(options = {}) {
             if (!uid || !Number.isInteger(gameId) || gameId <= 0 || !gameAccount) {
                 throw new Error('解除授权任务参数不完整');
             }
+            await assertUuzuhaoBackgroundOperationAllowed(uid, gameAccount, {
+                game_id: String(gameId), game_name: input.game_name, manual: manualAttempt
+            });
             const activeOrders = await listRentingOrderWindowByAccounts(uid, [{
                 game_id: String(gameId),
                 game_account: gameAccount
@@ -385,6 +394,7 @@ async function processAuthRevokeTasks(options = {}) {
             const accountKey = `${gameId}::${gameAccount}`;
             if (activeOrders[accountKey]) {
                 await updateRuntimeTask(task.task_id, {
+                    preserve_trigger_state: true,
                     status: 'pending',
                     stage: 'waiting_active_order',
                     progress_text: '账号仍有租赁中订单，等待下轮重试',
@@ -404,6 +414,8 @@ async function processAuthRevokeTasks(options = {}) {
             const auth = await authCache.get(uid);
             const response = await revokeAccountAuth(gameAccount, { game_id: gameId, auth });
             await markRuntimeTaskFinished(task.task_id, {
+                preserve_trigger_state: true,
+                consume_manual_attempt: true,
                 status: TASK_STATUS_SUCCESS,
                 stage: 'done',
                 progress_text: '解除账号授权成功',
@@ -421,9 +433,23 @@ async function processAuthRevokeTasks(options = {}) {
             out.results.push({ task_id: task.task_id, ok: true, attempt_count: attemptCount });
         } catch (error) {
             const message = String(error && error.message ? error.message : error || 'auth_revoke_failed');
+            if (error.code === 'UUZUHAO_AUTHORIZATION_PAUSED') {
+                await updateRuntimeTask(task.task_id, {
+                    status: 'pending', stage: 'waiting_authorization',
+                    progress_text: message, finished_at: '',
+                    preserve_trigger_state: true,
+                    result_json: { ...state, input },
+                    desc: 'auth revoke paused until product authorization recovers'
+                });
+                out.deferred += 1;
+                out.results.push({ task_id: task.task_id, ok: true, deferred: true, reason: 'authorization' });
+                continue;
+            }
             errors.push({ time: new Date().toISOString(), attempt: attemptCount, message });
             const recentErrors = errors.slice(-20);
             await markRuntimeTaskFinished(task.task_id, {
+                preserve_trigger_state: true,
+                consume_manual_attempt: true,
                 status: TASK_STATUS_FAILED,
                 stage: 'failed',
                 progress_text: '解除账号授权失败，等待重试',

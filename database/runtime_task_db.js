@@ -211,6 +211,8 @@ async function createOrReuseRuntimeTaskByPrefix(input = {}, options = {}) {
             const attachedManualCount = Math.max(0, Number(existing.attached_manual_count || 0)) + (isManual ? 1 : 0);
             const resultJson = {
                 ...state,
+                manual_consumed_count: state.manual_consumed_count
+                    ?? (Number(state.attempt_count || 0) > 0 ? Number(existing.attached_manual_count || 0) : 0),
                 triggers,
                 last_trigger: trigger,
                 coalesced_trigger_count: Math.max(0, Number(state.coalesced_trigger_count || 0)) + 1
@@ -347,7 +349,8 @@ async function listRunnableRuntimeTasks(taskType, options = {}) {
                     status IN (?, ?)
                     OR (status = ? AND COALESCE(NULLIF(started_at, ''), modify_date) <= ?)
                   )
-                ORDER BY id ASC
+                ORDER BY CASE WHEN COALESCE(started_at, '') = '' THEN 0 ELSE 1 END,
+                         COALESCE(NULLIF(started_at, ''), create_date) ASC, id ASC
                 LIMIT ?
             `, [type, TASK_STATUS_PENDING, TASK_STATUS_FAILED, TASK_STATUS_RUNNING, staleBefore, limit], (error, rows) => {
                 if (error) return reject(error);
@@ -440,6 +443,18 @@ async function updateRuntimeTask(taskId, patch = {}) {
         if (column === 'error_json') value = safeJsonText(value ?? [], '[]');
         if (column === 'attached_manual_count') value = Math.max(0, Number(value || 0));
         else value = String(value ?? '').trim();
+        if (column === 'result_json' && patch.preserve_trigger_state === true) {
+            // A click/order may attach while the worker is awaiting an API response.
+            sets.push(`result_json = json_set(?,
+                '$.triggers', json(COALESCE(json_extract(result_json, '$.triggers'), '[]')),
+                '$.last_trigger', json(COALESCE(json_extract(result_json, '$.last_trigger'), '{}')),
+                '$.coalesced_trigger_count', COALESCE(json_extract(result_json, '$.coalesced_trigger_count'), 0),
+                '$.manual_consumed_count', ${patch.consume_manual_attempt === true
+                    ? 'attached_manual_count'
+                    : "COALESCE(json_extract(result_json, '$.manual_consumed_count'), CASE WHEN COALESCE(json_extract(result_json, '$.attempt_count'), 0) > 0 THEN attached_manual_count ELSE 0 END)"})`);
+            params.push(value);
+            continue;
+        }
         sets.push(`${column} = ?`);
         params.push(value);
     }

@@ -6,7 +6,8 @@ const { changeStatus: changeZhwStatus } = require('../zuhaowang/zuhaowang_api');
 const {
     buildPlatformStatusNorm,
     isOnAllowedByCode,
-    isUhaozuOnlineDetectReason
+    isUhaozuOnlineDetectReason,
+    resolveUuzuhaoReauthorizeState
 } = require('../product/prod_channel_status');
 const { appendProductOnoffHistory } = require('../database/product_onoff_history_db');
 const {
@@ -202,7 +203,8 @@ function detectConflictsAndBuildSnapshot({
             : {};
         const uNorm = normByAcc.uhaozu && typeof normByAcc.uhaozu === 'object' ? normByAcc.uhaozu : {};
         const ignoreUhaozuOnlineDetect = isUhaozuOnlineDetectSoftBlock(uNorm);
-        const canAutoOnY = isOnAllowedByCode(String((normByAcc.uuzuhao && normByAcc.uuzuhao.code) || ''));
+        const yNorm = normByAcc.uuzuhao || {};
+        const canAutoOnY = isOnAllowedByCode(String(yNorm.code || '')) || resolveUuzuhaoReauthorizeState(yNorm).hit;
         const canAutoOnU = isOnAllowedByCode(String((uNorm && uNorm.code) || '')) || ignoreUhaozuOnlineDetect;
         const canAutoOnZ = isOnAllowedByCode(String((normByAcc.zuhaowang && normByAcc.zuhaowang.code) || ''));
 

@@ -150,11 +150,15 @@ async function manualRemoveBlacklistMode2(userId, gameAccount, options = {}) {
     } else if (clearSource === 'guard_online' || clearSource === 'guard_forbidden') {
         try {
             const onlineRes = await queryOnlineStatusCached(uid, acc, {
+                manual: true,
+                game_id: gameId,
                 game_name: gameName,
                 force_refresh: true,
                 desc: 'refresh guard_online by manual remove mode2'
             });
             const forbiddenRes = await queryForbiddenStatusCached(uid, acc, {
+                manual: true,
+                game_id: gameId,
                 game_name: gameName,
                 force_refresh: true,
                 desc: 'refresh guard_forbidden by manual remove mode2'

@@ -1,5 +1,7 @@
 {
   "scripts": {
+    "test:uuzuhao-background-pause": "node test/run_uuzuhao_background_pause_tests.js",
+    "coverage:uuzuhao-background-pause": "c8 --all --include=product/prod_channel_status.js --include=product/prod_probe_cache_service.js --include=product/prod_status_guard.js --include=blacklist/blacklist_release_guard.js --include=blacklist/blacklist_manual_remove_v2.js --include=database/runtime_task_db.js --include=order/auth_revoke_task_service.js --include=action_engine/action_engine.js --include=h5/local_h5_server.js --include=h5/public/js/menu_products.js --include=report/dingding/ding_style.js --reporter=text --reporter=json --reporter=html --report-dir=coverage/uuzuhao-background-pause node test/run_uuzuhao_background_pause_tests.js && node test/check_uuzuhao_background_pause_coverage.js",
     "h5:local": "node h5/local_h5_server.js",
     "h5:smoke": "node scripts/h5_smoke.js",
     "test:smoke": "node test/prod_channel_status_smoke_test.js",

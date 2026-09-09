@@ -11,7 +11,7 @@ const productsSource = fs.readFileSync(path.join(root, 'h5/public/js/menu_produc
 const appCoreSource = fs.readFileSync(path.join(root, 'h5/public/js/app_core.js'), 'utf8');
 const cssSource = fs.readFileSync(path.join(root, 'h5/public/css/app.css'), 'utf8');
 const context = vm.createContext({});
-vm.runInContext(productsSource, context, { filename: 'menu_products.js' });
+vm.runInContext(productsSource, context, { filename: path.join(root, 'h5/public/js/menu_products.js') });
 
 const successItem = {
     auth_revoke: {
@@ -48,4 +48,23 @@ assert.ok(cssSource.includes('white-space: pre-line'), 'Toast 应支持多行展
 assert.ok(cssSource.includes('max-width: calc(100vw - 32px)'), 'Toast 宽度不应超出手机视口');
 assert.ok(cssSource.includes('.toast.toast-detail'), '详情 Toast 应有独立居中样式');
 
-console.log('[PASS] h5_auth_revoke_card_smoke_test');
+async function checkPolling() {
+    const waiting = { status: 'pending', stage: 'waiting_authorization', status_text: '等待授权恢复',
+        last_error: 'code=500, msg=ACCOUNT_ERROR', progress_text: '请号主重新授权' };
+    assert.ok(context.buildAuthRevokeStatusHtml({ auth_revoke: waiting }).includes('>待授权</button>'));
+    const detail = context.buildAuthRevokeDetailText({ auth_revoke: waiting });
+    assert.ok(detail.includes('ACCOUNT_ERROR') && detail.includes('请号主重新授权'));
+    const toasts = [];
+    Object.assign(context, { state: { authRevokePollTokenMap: {} }, productIdentityKey: () => 'key',
+        setTimeout: (fn) => fn(), showToast: (msg) => toasts.push(msg), applyAuthRevokeTaskView: () => {} });
+    for (const task of [waiting, { status: 'failed' }, { status: 'success' }]) {
+        context.request = async () => ({ data: { task } });
+        await context.pollAuthRevokeTask({}, 'task');
+        assert.strictEqual(context.state.authRevokePollTokenMap.key, undefined);
+    }
+    assert.ok(toasts[0].includes('ACCOUNT_ERROR'));
+    assert.ok(toasts[1].includes('查看详情'));
+    assert.strictEqual(toasts[2], '解除授权成功');
+    console.log('[PASS] h5_auth_revoke_card_smoke_test');
+}
+checkPolling().catch((error) => { console.error(error); process.exitCode = 1; });

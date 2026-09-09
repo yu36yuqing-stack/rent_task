@@ -59,7 +59,7 @@
       const error = String(task.last_error || '').trim();
       const progress = String(task.progress_text || '').trim();
       if (error) lines.push(`错误：${error}`);
-      else if (progress && status !== 'success') lines.push(`进度：${progress}`);
+      if (progress && status !== 'success') lines.push(`进度：${progress}`);
       const timeValue = task.finished_at || task.modify_date || task.started_at;
       const time = formatAuthRevokeFullTime(timeValue);
       if (time) lines.push(`${task.finished_at ? '完成时间' : '更新时间'}：${time}`);
@@ -71,13 +71,14 @@
       const status = String(task && task.status || '').trim();
       const stage = String(task && task.stage || '').trim();
       const waitingForOrder = status === 'pending' && stage === 'waiting_active_order';
+      const waitingForAuth = status === 'pending' && stage === 'waiting_authorization';
       const statusText = waitingForOrder
         ? '待执行'
         : (String(task && task.status_text || '').trim() || '未执行');
       const time = formatAuthRevokeTime(task && (task.finished_at || task.modify_date || task.started_at));
       const error = status === 'failed' ? compactAuthRevokeError(task && task.last_error) : '';
-      const detail = waitingForOrder
-        ? statusText
+      const detail = waitingForOrder || waitingForAuth
+        ? (waitingForAuth ? '待授权' : statusText)
         : [statusText, error, time].filter(Boolean).join(' · ');
       const cls = status === 'success'
         ? 'auth-revoke-success'
@@ -369,6 +370,11 @@
           if (!task) continue;
           applyAuthRevokeTaskView(item, task);
           const status = String(task.status || '').trim();
+          if (status === 'pending' && task.stage === 'waiting_authorization') {
+            delete state.authRevokePollTokenMap[identityKey];
+            showToast(buildAuthRevokeDetailText({ auth_revoke: task }), 3000, 'detail');
+            return;
+          }
           if (status === 'success') {
             delete state.authRevokePollTokenMap[identityKey];
             showToast('解除授权成功');
@@ -378,7 +384,7 @@
             failedCount += 1;
             if (failedCount >= 2) {
               delete state.authRevokePollTokenMap[identityKey];
-              showToast('解除授权失败，已进入重试');
+              showToast('解除授权失败，点击状态查看详情');
               return;
             }
           } else {

@@ -1,0 +1,180 @@
+{
+  "product/prod_channel_status.js": {
+    "hash": "679690179fc20b90695830cf97fdaf51b2d7ba2f8f0a46fad87a1b22f8fef20d",
+    "changed_lines": [
+      23,
+      51
+    ]
+  },
+  "product/prod_probe_cache_service.js": {
+    "hash": "5f67c8b0b19b6856e27ab564785922f416cf6f53af13081061f6d528de7f7596",
+    "changed_lines": [
+      81,
+      82,
+      83,
+      84,
+      85,
+      86,
+      87,
+      88,
+      89,
+      90,
+      91,
+      100,
+      171,
+      224,
+      251
+    ]
+  },
+  "product/prod_status_guard.js": {
+    "hash": "eb2bb7c32bdfe85a0edba7aa8317d581a5967928bc34c68261acd2b9f1d529cd",
+    "changed_lines": [
+      382,
+      608,
+      609,
+      610,
+      611,
+      612,
+      613,
+      614,
+      615,
+      642,
+      723,
+      754,
+      864,
+      865,
+      866,
+      867
+    ]
+  },
+  "blacklist/blacklist_release_guard.js": {
+    "hash": "cc3196ee404b61f1f8bf0cc424d7354d002ce50412363883f1e224a90ec8e6d4",
+    "changed_lines": [
+      135,
+      141,
+      151,
+      152,
+      153,
+      154,
+      155,
+      156,
+      157
+    ]
+  },
+  "blacklist/blacklist_manual_remove_v2.js": {
+    "hash": "7dfa3a3ef362d69dca4dd3a7918e5f19bed10edd653af05151f5ef5bfd328328",
+    "changed_lines": [
+      153,
+      154,
+      160,
+      161
+    ]
+  },
+  "database/runtime_task_db.js": {
+    "hash": "6d804966886d0dcf03ed9228d299c6f410ae5f55be3c081a0d59e1290e3349c1",
+    "changed_lines": [
+      214,
+      215,
+      352,
+      353,
+      446,
+      447,
+      448,
+      449,
+      450,
+      451,
+      452,
+      453,
+      454,
+      455,
+      456,
+      457
+    ]
+  },
+  "order/auth_revoke_task_service.js": {
+    "hash": "ff85512cababc554d7fc93b96b3e7c47eeb5535e2436f8bbc524f8b98230e70e",
+    "changed_lines": [
+      21,
+      135,
+      136,
+      137,
+      377,
+      378,
+      379,
+      387,
+      388,
+      389,
+      397,
+      417,
+      418,
+      436,
+      437,
+      438,
+      439,
+      440,
+      441,
+      442,
+      443,
+      444,
+      445,
+      446,
+      447,
+      451,
+      452
+    ]
+  },
+  "action_engine/action_engine.js": {
+    "hash": "b91a55768cc9ac212b8fdf8035ce5fc925037be52a6c508f83ba7aace77119cf",
+    "changed_lines": [
+      9,
+      10,
+      206,
+      207
+    ]
+  },
+  "h5/local_h5_server.js": {
+    "hash": "1b0ac82f135fb47a7059cd3727f51eb9894a97603e28d8b48e85c8a01471b474",
+    "changed_lines": [
+      77,
+      1765,
+      1822,
+      1855,
+      1856,
+      1980,
+      2016,
+      2017
+    ]
+  },
+  "h5/public/js/menu_products.js": {
+    "hash": "a1f24b2e0cf34fa8386ae19b2a7d883305e750b85dc158b64771c94def8b594e",
+    "changed_lines": [
+      62,
+      74,
+      80,
+      81,
+      373,
+      374,
+      375,
+      376,
+      377,
+      387
+    ]
+  },
+  "report/dingding/ding_style.js": {
+    "hash": "d9b0aabc1595b1c349787734865d6225127b0d19997e1f6cb83c1f646e9ae65a",
+    "changed_lines": [
+      1,
+      2,
+      80,
+      81,
+      82,
+      83,
+      84,
+      85,
+      86,
+      87,
+      88,
+      125
+    ]
+  }
+}

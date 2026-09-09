@@ -78,13 +78,17 @@ async function resolveUuzuhaoAuthAbnormalByUserAndAccount(userId, gameAccount, o
     const acc = String(gameAccount || '').trim();
     const gameName = String(options.game_name || 'WZRY').trim() || 'WZRY';
     if (!uid || !acc) return { hit: false, off_type: '', reason: '', label: '' };
-    try {
-        const row = await getLatestUserGameAccountByUserAndAccount(uid, acc, options.game_id || '', gameName);
-        if (!row) return { hit: false, off_type: '', reason: '', label: '' };
-        return resolveUuzuhaoReauthorizeState(row);
-    } catch {
-        return { hit: false, off_type: '', reason: '', label: '' };
-    }
+    const row = await getLatestUserGameAccountByUserAndAccount(uid, acc, options.game_id || '', gameName);
+    return resolveUuzuhaoReauthorizeState(row || {});
+}
+
+async function assertUuzuhaoBackgroundOperationAllowed(userId, gameAccount, options = {}) {
+    if (options.manual === true) return;
+    const state = await resolveUuzuhaoAuthAbnormalByUserAndAccount(userId, gameAccount, options);
+    if (!state.hit) return;
+    const error = new Error(`悠悠授权异常（${state.reason}），等待号主重新授权`);
+    error.code = 'UUZUHAO_AUTHORIZATION_PAUSED';
+    throw error;
 }
 
 async function queryOnlineStatusCached(userId, gameAccount, options = {}) {
@@ -93,6 +97,7 @@ async function queryOnlineStatusCached(userId, gameAccount, options = {}) {
     const gameName = String(options.game_name || 'WZRY').trim() || 'WZRY';
     if (!uid) throw new Error('user_id 不合法');
     if (!acc) throw new Error('game_account 不能为空');
+    await assertUuzuhaoBackgroundOperationAllowed(uid, acc, options);
     const profile = await resolveAccountGameProfile(uid, acc, gameName, options);
     const finalGameName = String(profile.game_name || gameName).trim() || gameName;
     if (!ONLINE_SUPPORTED_GAME_IDS.has(String(profile.game_id || '').trim())) {
@@ -163,6 +168,7 @@ async function queryForbiddenStatusCached(userId, gameAccount, options = {}) {
     const gameName = String(options.game_name || 'WZRY').trim() || 'WZRY';
     if (!uid) throw new Error('user_id 不合法');
     if (!acc) throw new Error('game_account 不能为空');
+    await assertUuzuhaoBackgroundOperationAllowed(uid, acc, options);
     const ttlSec = Math.max(1, Number(options.ttl_sec || DEFAULT_PROBE_CACHE_TTL_SEC));
     const nowSec = Math.floor(Date.now() / 1000);
     const forceRefresh = Boolean(options.force_refresh);
@@ -215,6 +221,7 @@ async function setForbiddenPlayWithSnapshot(userId, gameAccount, enabled, option
     const gameName = String(options.game_name || 'WZRY').trim() || 'WZRY';
     if (!uid) throw new Error('user_id 不合法');
     if (!acc) throw new Error('game_account 不能为空');
+    await assertUuzuhaoBackgroundOperationAllowed(uid, acc, options);
     const profile = await resolveAccountGameProfile(uid, acc, gameName, options);
     const finalGameName = String(profile.game_name || gameName).trim() || gameName;
     const auth = options.auth && typeof options.auth === 'object'
@@ -241,6 +248,7 @@ module.exports = {
     DEFAULT_PROBE_CACHE_TTL_SEC,
     resolveUuzuhaoAuthByUser,
     resolveUuzuhaoAuthAbnormalByUserAndAccount,
+    assertUuzuhaoBackgroundOperationAllowed,
     queryOnlineStatusCached,
     queryForbiddenStatusCached,
     setForbiddenPlayWithSnapshot

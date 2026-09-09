@@ -51,7 +51,6 @@ const {
 const { createAccessToken, createOpaqueRefreshToken } = require('../user/auth_token');
 const { parseAccessTokenOrThrow } = require('../api/auth_middleware');
 const {
-    resolveUuzuhaoAuthAbnormalByUserAndAccount,
     resolveUuzuhaoAuthByUser,
     queryOnlineStatusCached,
     queryForbiddenStatusCached,
@@ -75,8 +74,7 @@ const {
 const {
     buildPlatformStatusNorm,
     pickOverallStatusNorm,
-    isRestrictedLikeStatus,
-    buildUuzuhaoReauthorizeMessage
+    isRestrictedLikeStatus
 } = require('../product/prod_channel_status');
 const { startProdRiskTaskWorker } = require('../product/prod_status_guard');
 const { resolveDisplayNameByRow } = require('../product/display_name');
@@ -1764,6 +1762,7 @@ async function handleBlacklistRemove(req, res) {
         source: 'h5',
         operator: user.account || 'h5_user',
         desc: 'manual remove by h5',
+        manual: true,
         game_id: String(normalizedGame.game_id || '1').trim() || '1',
         game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY'
     });
@@ -1820,6 +1819,7 @@ async function handleProductMaintenanceToggle(req, res) {
             source: 'h5_maintenance',
             operator: user.account || 'h5_user',
             desc: 'manual maintenance end by h5',
+            manual: true,
             reason_expected: MAINTENANCE_BLACKLIST_REASON,
             game_id: String(normalizedGame.game_id || '1').trim() || '1',
             game_name: String(normalizedGame.game_name || 'WZRY').trim() || 'WZRY'
@@ -1849,14 +1849,11 @@ async function handleProductOnlineQuery(req, res) {
     const gameAccount = String(body.game_account || '').trim();
     const gameName = String(body.game_name || 'WZRY').trim() || 'WZRY';
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
-    const authAbnormal = await resolveUuzuhaoAuthAbnormalByUserAndAccount(user.id, gameAccount, { game_name: gameName });
-    if (authAbnormal.hit) {
-        return json(res, 422, { ok: false, message: buildUuzuhaoReauthorizeMessage(authAbnormal) });
-    }
-
     let result;
     try {
         result = await queryOnlineStatusCached(user.id, gameAccount, {
+            manual: true,
+            force_refresh: true,
             game_name: gameName,
             ttl_sec: PROBE_CACHE_TTL_SEC,
             desc: 'update by h5 online query'
@@ -1977,13 +1974,10 @@ async function handleProductForbiddenPlay(req, res) {
     }
 
     const enabled = (enabledRaw === true) || String(enabledRaw).trim().toLowerCase() === 'true';
-    const authAbnormal = await resolveUuzuhaoAuthAbnormalByUserAndAccount(user.id, gameAccount, { game_name: gameName });
-    if (authAbnormal.hit) {
-        return json(res, 422, { ok: false, message: buildUuzuhaoReauthorizeMessage(authAbnormal) });
-    }
     let result;
     try {
         result = await setForbiddenPlayWithSnapshot(user.id, gameAccount, enabled, {
+            manual: true,
             game_name: gameName,
             desc: 'update by h5 forbidden play'
         });
@@ -2016,14 +2010,11 @@ async function handleProductForbiddenQuery(req, res) {
     const gameAccount = String(body.game_account || '').trim();
     const gameName = String(body.game_name || 'WZRY').trim() || 'WZRY';
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
-    const authAbnormal = await resolveUuzuhaoAuthAbnormalByUserAndAccount(user.id, gameAccount, { game_name: gameName });
-    if (authAbnormal.hit) {
-        return json(res, 422, { ok: false, message: buildUuzuhaoReauthorizeMessage(authAbnormal) });
-    }
-
     let result;
     try {
         result = await queryForbiddenStatusCached(user.id, gameAccount, {
+            manual: true,
+            force_refresh: true,
             game_name: gameName,
             ttl_sec: PROBE_CACHE_TTL_SEC,
             desc: 'update by h5 forbidden query'

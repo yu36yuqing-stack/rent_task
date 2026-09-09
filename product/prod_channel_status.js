@@ -20,6 +20,7 @@ const NORM_CODE_LEVEL_MAP = {
 
 const PLATFORM_STATUS_KEYS = ['uuzuhao', 'uhaozu', 'zuhaowang'];
 const UUZUHAO_REAUTHORIZE_OFF_TYPE_REASON_MAP = {
+    ACCOUNT_ERROR: '账号授权异常',
     AUTHORIZE_ERROR: '授权失效',
     REAUTHORIZE_ERROR: '重新授权失败'
 };
@@ -47,7 +48,7 @@ function resolveUuzuhaoReauthorizeState(input = {}) {
         };
     }
     const reason = String(prd.reason || '').trim();
-    if (reason === '授权失效' || reason === '重新授权失败') {
+    if (reason === '授权失效' || reason === '重新授权失败' || reason === '账号授权异常') {
         return {
             hit: true,
             off_type: offType,

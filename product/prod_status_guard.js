@@ -379,6 +379,7 @@ async function applyInitialControlForAccount(userId, account, auth, logger) {
             desc: 'prod guard init control enable forbidden'
         });
     } catch (e) {
+        if (e.code === 'UUZUHAO_AUTHORIZATION_PAUSED') throw e;
         return { ok: false, error: `forbidden_enable_failed:${e.message}` };
     }
     return {
@@ -604,6 +605,14 @@ function shouldMarkTaskFailed(task = {}, nextRetry = 1) {
     return retry >= maxRetry;
 }
 
+async function pauseGuardTaskForAuthorization(task, reason) {
+    await updateGuardTaskStatus(task.id, {
+        last_error: 'waiting_authorization',
+        next_check_at: nowSec() + SHEEP_FIX_SCAN_INTERVAL_SEC,
+        desc: `waiting_authorization:${reason}`
+    });
+}
+
 async function processOneSheepFixTask(task, authCache, userSwitchCache, logger) {
     const uid = Number(task.user_id || 0);
     const acc = String(task.game_account || '').trim();
@@ -630,19 +639,7 @@ async function processOneSheepFixTask(task, authCache, userSwitchCache, logger) 
     const identity = { account: acc, game_id: gid, game_name: gname };
     const abnormal = await resolveUuzuhaoAuthAbnormalByUserAndAccount(uid, acc, { game_id: gid, game_name: gname });
     if (abnormal.hit) {
-        const doneDesc = `skip_by_uuzuhao_auth_abnormal:${String(abnormal.reason || abnormal.off_type || 'unknown').trim()}`;
-        await updateGuardTaskStatus(task.id, {
-            status: TASK_STATUS_DONE,
-            last_error: '',
-            finished_at: toDateTimeText(),
-            desc: doneDesc
-        });
-        if (Number(task.event_id || 0) > 0) {
-            await resolveRiskEventById(Number(task.event_id || 0), {
-                status: 'ignored',
-                desc: doneDesc
-            });
-        }
+        await pauseGuardTaskForAuthorization(task, abnormal.reason);
         return;
     }
     const activeOrders = await listActiveOrderSnapshotByUser(uid, [identity]);
@@ -723,6 +720,7 @@ async function processOneSheepFixTask(task, authCache, userSwitchCache, logger) 
         });
         online = Boolean(probe && probe.online);
     } catch (e) {
+        if (e.code === 'UUZUHAO_AUTHORIZATION_PAUSED') throw e;
         const failed = shouldMarkTaskFailed(task, 1);
         await updateGuardTaskStatus(task.id, {
             status: failed ? TASK_STATUS_FAILED : TASK_STATUS_WATCHING,
@@ -753,6 +751,7 @@ async function processOneSheepFixTask(task, authCache, userSwitchCache, logger) 
             desc: 'update by prod_status_guard worker release'
         });
     } catch (e) {
+        if (e.code === 'UUZUHAO_AUTHORIZATION_PAUSED') throw e;
         const failed = shouldMarkTaskFailed(task, 1);
         await updateGuardTaskStatus(task.id, {
             status: failed ? TASK_STATUS_FAILED : TASK_STATUS_WATCHING,
@@ -862,6 +861,10 @@ async function runSheepFixWorkerOnce(options = {}) {
                 await processOneSheepFixTask(task, authCache, userSwitchCache, logger);
                 done += 1;
             } catch (e) {
+                if (e.code === 'UUZUHAO_AUTHORIZATION_PAUSED') {
+                    await pauseGuardTaskForAuthorization(task, e.message);
+                    continue;
+                }
                 logger.error(`[ProdStatusGuard] worker task_failed id=${task.id} err=${e.message}`);
             }
         }
