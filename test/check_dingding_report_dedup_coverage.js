@@ -15,6 +15,7 @@ const manifest = baseline ? {} : JSON.parse(fs.readFileSync(manifestPath, 'utf8'
 const coverage = createCoverageMap(JSON.parse(fs.readFileSync(path.join(coverageDir, 'coverage-final.json'), 'utf8')));
 const existingFiles = [
     'report/report_rent_status.js',
+    'report/dingding/ding_style.js',
     'pipeline/user_pipeline.js',
     'rent_robot_main.js',
     'h5/local_h5_server.js'

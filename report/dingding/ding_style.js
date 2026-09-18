@@ -55,6 +55,36 @@ function pickIcon(acc, authorizedPlatforms = []) {
     return '⚠️';
 }
 
+function accountIdentityKey(acc = {}) {
+    const gameId = String(acc.game_id || '1').trim() || '1';
+    const account = String(acc.account || '').trim();
+    return `${gameId}::${account}`;
+}
+
+function buildDingdingAccountLine(acc = {}, authorizedPlatforms = []) {
+    const y = shortState(acc.youpin);
+    const u = shortState(acc.uhaozu);
+    const z = shortState(acc.zuhaowan);
+    const icon = pickIcon(acc, authorizedPlatforms);
+    const todayCount = Number(acc.today_order_count || 0);
+    const onlineTag = String(acc.online_tag || '').trim();
+    const onlineBadge = onlineTag ? `(${onlineTag})` : '';
+    const tag = acc.suffix ? `${acc.suffix}` : '';
+    const hint = String(acc.hint || '');
+    return `${icon}[${todayCount}单]${onlineBadge} ${acc.remark || acc.account} Y${y}/U${u}/Z${z}${tag}${hint}`;
+}
+
+function getDingdingChanges(payload = {}) {
+    const changes = payload && payload.dingding_changes && typeof payload.dingding_changes === 'object'
+        ? payload.dingding_changes
+        : {};
+    return changes.available ? changes : {};
+}
+
+function changedPrefix(changed, fallback = '🔄 ') {
+    return changed ? fallback : '';
+}
+
 function buildDingdingMessage(payload) {
     if (!payload?.ok) {
         return payload?.message || '⚠️ 暂无状态数据 (任务可能未运行)';
@@ -62,12 +92,15 @@ function buildDingdingMessage(payload) {
 
     const owner = String(payload?.report_owner || '').trim();
     const title = owner ? `${owner} 租号状态汇报` : '租号状态汇报';
+    const changes = getDingdingChanges(payload);
+    const summaryChanges = changes.summary && typeof changes.summary === 'object' ? changes.summary : {};
+    const accountChanges = changes.accounts && typeof changes.accounts === 'object' ? changes.accounts : {};
 
     const lines = [];
-    lines.push(`📊 ${title} ${payload.hhmm}`);
+    lines.push(`${changedPrefix(summaryChanges.header_changed)}📊 ${title} ${payload.hhmm}`);
 
     const actions = Array.isArray(payload.recentActions) ? payload.recentActions : [];
-    lines.push('🛠️ 近半小时自动操作');
+    lines.push(`${changedPrefix(summaryChanges.recent_actions_changed)}🛠️ 近半小时自动操作`);
     if (actions.length > 0) {
         actions.slice(-6).forEach((v) => lines.push(v));
     } else {
@@ -79,7 +112,7 @@ function buildDingdingMessage(payload) {
     const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
     const authProblems = accounts.filter((account) => resolveUuzuhaoReauthorizeState(account).hit);
     if (authProblems.length > 0) {
-        lines.push('悠悠授权异常，请号主在悠悠重新授权：');
+        lines.push(`${changedPrefix(summaryChanges.auth_problems_changed)}悠悠授权异常，请号主在悠悠重新授权：`);
         for (const account of authProblems) {
             lines.push(`• ${account.remark || account.account}（${account.account}）：${resolveUuzuhaoReauthorizeState(account).reason}`);
         }
@@ -88,9 +121,17 @@ function buildDingdingMessage(payload) {
     }
     const totalPaid = accounts.reduce((sum, acc) => sum + Number(acc && acc.today_order_count || 0), 0);
     const orderCountLabel = String(payload.order_count_label || '今日订单').trim() || '今日订单';
-    lines.push(`📈 ${orderCountLabel}: ${totalPaid}`);
-    lines.push(`📦 商品主档总数: ${Number(payload.master_total || 0)}个`);
-    lines.push('⚠️ 同步异常');
+    if (summaryChanges.order_count) {
+        lines.push(`🔄 📈 ${orderCountLabel}: ${Number(summaryChanges.order_count.before || 0)} → ${totalPaid}`);
+    } else {
+        lines.push(`📈 ${orderCountLabel}: ${totalPaid}`);
+    }
+    if (summaryChanges.master_total) {
+        lines.push(`🔄 📦 商品主档总数: ${Number(summaryChanges.master_total.before || 0)} → ${Number(payload.master_total || 0)}个`);
+    } else {
+        lines.push(`📦 商品主档总数: ${Number(payload.master_total || 0)}个`);
+    }
+    lines.push(`${changedPrefix(summaryChanges.sync_anomalies_changed)}⚠️ 同步异常`);
     if (syncAnomalies.length > 0) {
         syncAnomalies.slice(0, 4).forEach((row) => {
             const platform = String(row.platform || '').trim();
@@ -109,20 +150,26 @@ function buildDingdingMessage(payload) {
     lines.push(`📋 商品主档明细 (${Number(payload.master_total || accounts.length || 0)}个)`);
     lines.push('');
     accounts.forEach((acc) => {
-        const y = shortState(acc.youpin);
-        const u = shortState(acc.uhaozu);
-        const z = shortState(acc.zuhaowan);
-        const icon = pickIcon(acc, authorizedPlatforms);
-        const todayCount = Number(acc.today_order_count || 0);
-        const onlineTag = String(acc.online_tag || '').trim();
-        const onlineBadge = onlineTag ? `(${onlineTag})` : '';
-        const tag = acc.suffix ? `${acc.suffix}` : '';
-        const hint = String(acc.hint || '');
-        lines.push(`${icon}[${todayCount}单]${onlineBadge} ${acc.remark || acc.account} Y${y}/U${u}/Z${z}${tag}${hint}`);
+        const change = accountChanges[accountIdentityKey(acc)] || null;
+        const prefix = change && change.type === 'added' ? '🆕 ' : (change ? '🔄 ' : '');
+        const detail = change && String(change.detail || '').trim() ? `〔${String(change.detail).trim()}〕` : '';
+        lines.push(`${prefix}${buildDingdingAccountLine(acc, authorizedPlatforms)}${detail}`);
     });
 
+    const removedAccounts = Array.isArray(changes.removed_accounts) ? changes.removed_accounts : [];
+    if (removedAccounts.length > 0) {
+        lines.push('');
+        lines.push('➖ 已移出商品主档');
+        removedAccounts.forEach((row) => {
+            const name = String((row && (row.display_name || row.account)) || '').trim() || '未知账号';
+            const account = String((row && row.account) || '').trim();
+            lines.push(`• ${name}${account ? `（${account}）` : ''}`);
+        });
+    }
+
     lines.push('');
-    lines.push(payload.allNormal && authProblems.length === 0 ? '✅ 所有状态正常 (已授权平台一致或无冲突)' : '⚠️ 检测到待修复状态');
+    const footer = payload.allNormal && authProblems.length === 0 ? '✅ 所有状态正常 (已授权平台一致或无冲突)' : '⚠️ 检测到待修复状态';
+    lines.push(`${changedPrefix(summaryChanges.footer_changed)}${footer}`);
     lines.push(`版本: ${REPORT_VERSION}`);
     return lines.join('\n');
 }
@@ -196,6 +243,11 @@ function buildBlacklistInspectorSummaryText(payload = {}) {
 
 module.exports = {
     buildDingdingMessage,
+    buildDingdingAccountLine,
+    normalizeAuthorizedPlatforms,
+    accountIdentityKey,
+    pickIcon,
+    shortState,
     buildComplaintFirstHitText,
     buildBlacklistInspectorMismatchText,
     buildBlacklistInspectorSummaryText

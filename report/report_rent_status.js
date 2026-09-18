@@ -458,10 +458,22 @@ async function notifyUserByPayload(user, payload) {
                 based_on_task_id: decision.previous && decision.previous.task_id
                     ? decision.previous.task_id
                     : '',
+                snapshot_task_id: decision.previous && decision.previous.snapshot_task_id
+                    ? decision.previous.snapshot_task_id
+                    : (decision.previous && decision.previous.snapshot && decision.previous.task_id
+                        ? decision.previous.task_id
+                        : ''),
                 ...dingChannelBase
             };
         } else {
-            const dingMsg = buildDingdingMessage(payloadWithAuth);
+            const sentCheckpoint = {
+                ...dingChannelBase,
+                snapshot: decision.snapshot
+            };
+            const dingMsg = buildDingdingMessage({
+                ...payloadWithAuth,
+                dingding_changes: decision.changes
+            });
             jobs.push({
                 channel: 'dingding',
                 promise: sendDingdingMessage(dingMsg, {
@@ -471,7 +483,7 @@ async function notifyUserByPayload(user, payload) {
                     let checkpointResult = null;
                     let checkpointError = '';
                     try {
-                        checkpointResult = await recordDingdingReportCheckpoint(uid, dingChannelBase);
+                        checkpointResult = await recordDingdingReportCheckpoint(uid, sentCheckpoint);
                     } catch (error) {
                         checkpointError = String(error && error.message ? error.message : error);
                         console.warn(`[Report] 钉钉通知指纹保存失败 user=${uid}: ${checkpointError}`);
@@ -482,7 +494,8 @@ async function notifyUserByPayload(user, payload) {
                         checkpoint_recorded: Boolean(checkpointResult && checkpointResult.recorded),
                         checkpoint_error: checkpointError,
                         dedup_error: decision.dedup_error || '',
-                        ...dingChannelBase
+                        change_count: Number((decision.changes && decision.changes.change_count) || 0),
+                        ...sentCheckpoint
                     };
                 })
             });
