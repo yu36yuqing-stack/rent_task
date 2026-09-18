@@ -27,14 +27,36 @@ const originals = {
     syncOrdersByUser: orderMod.syncOrdersByUser
 };
 
+let productPipelineMode = 'sync_throw';
 pipelineMod.runFullUserPipeline = async () => {
     throw new Error('stub_pipeline_boom');
 };
 pipelineMod.runUserPipelineSyncAccounts = async () => {
-    throw new Error('stub_pipeline_boom');
+    if (productPipelineMode === 'sync_throw') throw new Error('stub_pipeline_boom');
+    return {
+        ok: true,
+        stage: 'sync_accounts_done',
+        sync: { ok: true },
+        accounts_count: 1,
+        pipeline_started_at_ms: Date.now(),
+        pipeline_timing: { total_ms: 1, sync_accounts_ms: 1 }
+    };
 };
-pipelineMod.runUserPipelineAfterSync = async () => {
-    throw new Error('stub_pipeline_after_boom');
+pipelineMod.runUserPipelineAfterSync = async (_user, sync) => {
+    if (productPipelineMode !== 'after_return_failure') throw new Error('stub_pipeline_after_boom');
+    return {
+        ok: false,
+        stage: 'notify',
+        sync,
+        accounts_count: 1,
+        notify_result: {
+            ok: false,
+            reason: 'notify_failed',
+            channels: { dingding: { status: 'failed', error: 'stub background notify failure' } }
+        },
+        errors: ['stub background notify failure'],
+        pipeline_timing: { total_ms: 2, sync_accounts_ms: 1, probe_and_notify_ms: 1 }
+    };
 };
 orderMod.syncOrdersByUser = async () => {
     throw new Error('stub_order_boom');
@@ -43,6 +65,7 @@ orderMod.syncOrdersByUser = async () => {
 const { createUserByAdmin } = require('../database/user_db');
 const { createAccessToken } = require('../user/auth_token');
 const { openRuntimeDatabase } = require('../database/sqlite_client');
+const { getRuntimeTaskByTaskId } = require('../database/runtime_task_db');
 delete require.cache[require.resolve('../h5/local_h5_server')];
 const { bootstrap } = require('../h5/local_h5_server');
 const { stopProdRiskTaskWorker } = require('../product/prod_status_guard');
@@ -79,6 +102,16 @@ async function getLatestTaskByType(taskType) {
     } finally {
         db.close();
     }
+}
+
+async function waitForTaskDone(taskId, timeoutMs = 5000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const row = await getRuntimeTaskByTaskId(taskId);
+        if (row && !['pending', 'running'].includes(String(row.status || '').trim())) return row;
+        await sleep(50);
+    }
+    throw new Error(`waitForTaskDone timeout task_id=${taskId}`);
 }
 
 async function main() {
@@ -125,6 +158,23 @@ async function main() {
         const orderTaskRow = await getLatestTaskByType('order_sync');
         assert.strictEqual(orderTaskRow.status, 'failed', '订单同步失败任务状态应为 failed');
         assert.strictEqual(orderTaskRow.stage, 'failed', '订单同步失败阶段应为 failed');
+
+        productPipelineMode = 'after_return_failure';
+        const backgroundRes = await fetch(`${baseUrl}/api/products/sync`, {
+            method: 'POST',
+            headers,
+            body: '{}'
+        });
+        const backgroundJson = await backgroundRes.json();
+        assert.strictEqual(backgroundRes.status, 200, '后续阶段失败前应先返回后台任务');
+        const backgroundTask = await waitForTaskDone(backgroundJson.task_id);
+        assert.strictEqual(backgroundTask.status, 'failed', '后台通知失败任务应为 failed');
+        const backgroundResult = JSON.parse(String(backgroundTask.result_json || '{}'));
+        assert.strictEqual(
+            backgroundResult.notify_result.channels.dingding.status,
+            'failed',
+            '手工同步后台失败结果应保留通知渠道结果'
+        );
 
         console.log(`[PASS] h5_runtime_task_failure_smoke_test temp_dir=${tempDir}`);
     } finally {

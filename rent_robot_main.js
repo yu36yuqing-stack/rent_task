@@ -219,7 +219,8 @@ async function runPipeline(runRecord) {
                     result_json: {
                         ok: false,
                         sync: out && out.sync ? out.sync : null,
-                        accounts_count: Number(out && out.accounts_count || 0)
+                        accounts_count: Number(out && out.accounts_count || 0),
+                        notify_result: out && out.notify_result ? out.notify_result : null
                     },
                     error_json: pipelineErrs,
                     desc: `cron product sync failed user=${uid}`

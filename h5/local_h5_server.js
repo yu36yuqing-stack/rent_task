@@ -1025,6 +1025,7 @@ async function continueProductPipelineInBackground(args = {}) {
                     ok: false,
                     sync: out && out.sync ? out.sync : syncOut,
                     accounts_count: Number(out && out.accounts_count || 0),
+                    notify_result: out && out.notify_result ? out.notify_result : null,
                     pipeline_timing: out && out.pipeline_timing ? out.pipeline_timing : pipelineTiming
                 },
                 error_json: Array.isArray(out && out.errors) ? out.errors : [msg],

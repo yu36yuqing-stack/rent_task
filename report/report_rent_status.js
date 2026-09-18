@@ -5,6 +5,10 @@ const { sendDingdingMessage } = require('./dingding/ding_notify.js');
 const { buildTelegramMessage } = require('./telegram/tg_style.js');
 const { buildDingdingMessage } = require('./dingding/ding_style.js');
 const {
+    buildDingdingReportDeliveryDecision,
+    recordDingdingReportCheckpoint
+} = require('./dingding/ding_report_dedup');
+const {
     listTodayPaidOrderCountByAccounts,
     listRolling24hPaidOrderCountByAccounts,
     listRentingOrderWindowByAccounts
@@ -417,42 +421,119 @@ async function notifyUserByPayload(user, payload) {
             : Boolean(payload.allNormal)
     };
 
+    const uid = Number((user && user.id) || 0);
     const tgMsg = buildTelegramMessage(payloadWithAuth);
-    const dingMsg = buildDingdingMessage(payloadWithAuth);
-
     const jobs = [];
+    const channels = {};
+    let configuredCount = 0;
     if (tgCfg.bot_token && tgCfg.chat_id) {
-        jobs.push(
-            sendTelegramMessage(tgMsg, payload.ok ? 'html' : '', {
+        configuredCount += 1;
+        jobs.push({
+            channel: 'telegram',
+            promise: sendTelegramMessage(tgMsg, payload.ok ? 'html' : '', {
                 token: tgCfg.bot_token,
                 chat_id: tgCfg.chat_id,
                 proxy: tgCfg.proxy || ''
-            })
-        );
+            }).then(() => ({ status: 'sent' }))
+        });
+    } else {
+        channels.telegram = { status: 'not_configured' };
     }
     if (dingCfg.webhook) {
-        jobs.push(
-            sendDingdingMessage(dingMsg, {
-                webhook: dingCfg.webhook,
-                secret: dingCfg.secret || ''
-            })
-        );
+        configuredCount += 1;
+        const decision = await buildDingdingReportDeliveryDecision({
+            userId: uid,
+            payload: payloadWithAuth,
+            webhook: dingCfg.webhook
+        });
+        const dingChannelBase = {
+            content_hash: decision.content_hash,
+            destination_hash: decision.destination_hash,
+            fingerprint_version: decision.fingerprint_version
+        };
+        if (!decision.should_send) {
+            channels.dingding = {
+                status: 'skipped_unchanged',
+                reason: 'unchanged',
+                based_on_task_id: decision.previous && decision.previous.task_id
+                    ? decision.previous.task_id
+                    : '',
+                ...dingChannelBase
+            };
+        } else {
+            const dingMsg = buildDingdingMessage(payloadWithAuth);
+            jobs.push({
+                channel: 'dingding',
+                promise: sendDingdingMessage(dingMsg, {
+                    webhook: dingCfg.webhook,
+                    secret: dingCfg.secret || ''
+                }).then(async () => {
+                    let checkpointResult = null;
+                    let checkpointError = '';
+                    try {
+                        checkpointResult = await recordDingdingReportCheckpoint(uid, dingChannelBase);
+                    } catch (error) {
+                        checkpointError = String(error && error.message ? error.message : error);
+                        console.warn(`[Report] 钉钉通知指纹保存失败 user=${uid}: ${checkpointError}`);
+                    }
+                    return {
+                        status: 'sent',
+                        reason: decision.reason,
+                        checkpoint_recorded: Boolean(checkpointResult && checkpointResult.recorded),
+                        checkpoint_error: checkpointError,
+                        dedup_error: decision.dedup_error || '',
+                        ...dingChannelBase
+                    };
+                })
+            });
+        }
+    } else {
+        channels.dingding = { status: 'not_configured' };
     }
 
-    if (jobs.length === 0) {
-        return { ok: false, reason: 'notify_config_missing', errors: ['notify_config_missing'] };
+    if (configuredCount === 0) {
+        return {
+            ok: false,
+            reason: 'notify_config_missing',
+            errors: ['notify_config_missing'],
+            sent_count: 0,
+            skipped_count: 0,
+            channels
+        };
     }
 
-    const settled = await Promise.allSettled(jobs);
-    const failed = settled.filter((s) => s.status === 'rejected');
-    if (failed.length > 0) {
+    const settled = await Promise.allSettled(jobs.map((job) => job.promise));
+    const errors = [];
+    settled.forEach((result, index) => {
+        const channel = jobs[index].channel;
+        if (result.status === 'fulfilled') {
+            channels[channel] = result.value;
+            return;
+        }
+        const error = result.reason?.message || String(result.reason);
+        channels[channel] = { status: 'failed', error };
+        errors.push(`${channel}: ${error}`);
+    });
+    const sentCount = Object.values(channels).filter((row) => row && row.status === 'sent').length;
+    const skippedCount = Object.values(channels).filter((row) => row && row.status === 'skipped_unchanged').length;
+    if (errors.length > 0) {
         return {
             ok: false,
             reason: 'notify_failed',
-            errors: failed.map((f) => f.reason?.message || String(f.reason))
+            errors,
+            sent_count: sentCount,
+            skipped_count: skippedCount,
+            channels
         };
     }
-    return { ok: true, reason: '', errors: [] };
+    return {
+        ok: true,
+        reason: sentCount === 0 && skippedCount > 0 ? 'unchanged' : '',
+        errors: [],
+        sent_count: sentCount,
+        skipped_count: skippedCount,
+        channels
+    };
 }
 
 function formatMissingSample(missingAccounts = []) {

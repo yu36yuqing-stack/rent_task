@@ -57,6 +57,14 @@ async function main() {
         desc: 'cron admin user should enter pipeline'
     });
     const failUser = await createUserByAdmin({
+        account: 'cron_result_fail_user',
+        password: '123456',
+        name: 'Cron Result Fail User',
+        user_type: '外部',
+        status: 'enabled',
+        desc: 'cron returned failure user'
+    });
+    const throwUser = await createUserByAdmin({
         account: 'cron_fail_user',
         password: '123456',
         name: 'Cron Fail User',
@@ -70,8 +78,23 @@ async function main() {
     assert.ok(lockRet && lockRet.acquired, '种子锁获取失败');
 
     pipelineMod.runFullUserPipeline = async (user) => {
-        if (Number(user && user.id || 0) === Number(failUser.id)) {
+        if (Number(user && user.id || 0) === Number(throwUser.id)) {
             throw new Error('stub_cron_pipeline_boom');
+        }
+        if (Number(user && user.id || 0) === Number(failUser.id)) {
+            return {
+                ok: false,
+                sync: { ok: true },
+                accounts_count: 1,
+                action_result: { actions: [], errors: [], planned: 0 },
+                notify_result: {
+                    ok: false,
+                    reason: 'notify_failed',
+                    channels: { dingding: { status: 'failed', error: 'stub notify failure' } }
+                },
+                errors: ['stub notify failure'],
+                non_fatal_errors: []
+            };
         }
         return {
             ok: true,
@@ -96,6 +119,7 @@ async function main() {
     const skipRow = rows.find((row) => Number(row.user_id || 0) === Number(lockedUser.id));
     const adminRow = rows.find((row) => Number(row.user_id || 0) === Number(adminUser.id));
     const failRow = rows.find((row) => Number(row.user_id || 0) === Number(failUser.id));
+    const throwRow = rows.find((row) => Number(row.user_id || 0) === Number(throwUser.id));
     assert.ok(skipRow, '应生成 skip 任务');
     assert.strictEqual(skipRow.status, 'skipped', 'skip 任务状态应为 skipped');
     assert.strictEqual(skipRow.stage, 'lock_skipped', 'skip 任务阶段不对');
@@ -105,8 +129,14 @@ async function main() {
     assert.ok(failRow, '应生成 fail 任务');
     assert.strictEqual(failRow.status, 'failed', 'fail 任务状态应为 failed');
     assert.strictEqual(failRow.stage, 'pipeline_failed', 'fail 任务阶段应为 pipeline_failed');
+    const failResult = JSON.parse(String(failRow.result_json || '{}'));
+    assert.strictEqual(failResult.notify_result.channels.dingding.status, 'failed', '返回失败的任务应保留通知渠道结果');
     const failErrs = JSON.parse(String(failRow.error_json || '[]'));
-    assert.ok(Array.isArray(failErrs) && failErrs[0].includes('stub_cron_pipeline_boom'), 'fail 任务错误信息不对');
+    assert.deepStrictEqual(failErrs, ['stub notify failure'], '返回失败任务错误信息不对');
+    assert.ok(throwRow, '应生成异常任务');
+    assert.strictEqual(throwRow.status, 'failed', '异常任务状态应为 failed');
+    const throwErrs = JSON.parse(String(throwRow.error_json || '[]'));
+    assert.ok(Array.isArray(throwErrs) && throwErrs[0].includes('stub_cron_pipeline_boom'), '异常任务错误信息不对');
 
     pipelineMod.runFullUserPipeline = originalRunPipeline;
     delete require.cache[require.resolve('../rent_robot_main')];

@@ -138,6 +138,22 @@ async function main() {
         'done'
     ], '阶段上报顺序不符合预期');
 
+    const notifyFailure = {
+        ok: false,
+        reason: 'notify_failed',
+        errors: ['dingding: stub failure'],
+        channels: { dingding: { status: 'failed', error: 'stub failure' } }
+    };
+    reportMod.notifyUserByPayload = async () => notifyFailure;
+    delete require.cache[require.resolve('../pipeline/user_pipeline')];
+    const { runFullUserPipeline: runFailingPipeline } = require('../pipeline/user_pipeline');
+    const failedOut = await runFailingPipeline(
+        { id: 1001, account: 'stage_user', name: 'Stage User', status: 'enabled' },
+        { logger: { log() {}, warn() {}, error() {} }, actionEnabled: false, readOnly: true }
+    );
+    assert.strictEqual(failedOut.ok, false, '通知失败时 pipeline 应失败');
+    assert.deepStrictEqual(failedOut.notify_result, notifyFailure, 'pipeline 失败结果应保留通知渠道明细');
+
     Object.assign(productMod, {
         syncUserAccountsByAuth: originals.syncUserAccountsByAuth,
         listAllUserGameAccountsByUser: originals.listAllUserGameAccountsByUser

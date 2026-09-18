@@ -398,6 +398,7 @@ async function runUserPipelineAfterSync(user, syncOut = null, options = {}) {
                 sync: syncOut,
                 accounts_count: accounts.length,
                 action_result: actionResult,
+                notify_result: notifyResult,
                 errors: errs,
                 non_fatal_errors: nonFatalErrors,
                 pipeline_timing: finishTiming()
