@@ -9,28 +9,20 @@ function normalizePricingGameName(gameName) {
 
 function buildPricingGameAvatarHtml(gameName) {
   const normalized = normalizePricingGameName(gameName);
-  if (normalized === 'CSGO') {
-    return `<span class="game-avatar game-avatar-csgo" title="CSGO" aria-label="CSGO">
-      <img src="/assets/game_icons/csgo.png?v=20260425-soldier" alt="CSGO" loading="lazy" decoding="async">
-    </span>`;
-  }
-  if (normalized === '和平精英') {
-    return `<span class="game-avatar game-avatar-hpjy" title="和平精英" aria-label="和平精英">
-      <img src="/assets/game_icons/hpjy.png" alt="和平精英" loading="lazy" decoding="async">
-    </span>`;
-  }
-  if (normalized === 'CFM') {
-    return `<span class="game-avatar game-avatar-cfm" title="CFM" aria-label="CFM">
-      <img src="/assets/game_icons/cfm.png" alt="CFM" loading="lazy" decoding="async">
-    </span>`;
-  }
-  return `<span class="game-avatar game-avatar-wzry" title="王者荣耀" aria-label="王者荣耀">
-    <img src="/assets/game_icons/wzry.webp" alt="王者荣耀" loading="lazy" decoding="async">
+  const catalog = {
+    CSGO: { title: 'CSGO', className: 'game-avatar-csgo', src: '/assets/game_icons/csgo.png?v=20260425-soldier' },
+    '和平精英': { title: '和平精英', className: 'game-avatar-hpjy', src: '/assets/game_icons/hpjy.png' },
+    CFM: { title: 'CFM', className: 'game-avatar-cfm', src: '/assets/game_icons/cfm.png' },
+    WZRY: { title: '王者荣耀', className: 'game-avatar-wzry', src: '/assets/game_icons/wzry.webp' }
+  };
+  const item = catalog[normalized] || catalog.WZRY;
+  return `<span class="game-avatar ${item.className}" title="${item.title}" aria-label="${item.title}">
+    <img src="${item.src}" alt="${item.title}" loading="lazy" decoding="async">
   </span>`;
 }
 
 function escapePricingHtml(text) {
-  return String(text || '')
+  return String(text == null ? '' : text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -38,16 +30,15 @@ function escapePricingHtml(text) {
     .replace(/'/g, '&#39;');
 }
 
-function formatPricingPercent(value) {
-  const n = Number(value || 0);
-  if (!Number.isFinite(n)) return '-';
-  return `${(n * 100).toFixed(2).replace(/\.?0+$/, '')}%`;
+function formatPricingMoney(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  return n.toFixed(2).replace(/\.?0+$/, '');
 }
 
-function formatPricingMoney(value, digits = 2) {
-  const n = Number(value || 0);
-  if (!Number.isFinite(n)) return '0';
-  return n.toFixed(digits).replace(/\.?0+$/, '');
+function formatPricingResultMoney(value) {
+  const text = formatPricingMoney(value);
+  return text ? `¥${text}` : '-';
 }
 
 function pricingGameOptions() {
@@ -59,287 +50,477 @@ function pricingGameOptions() {
   ];
 }
 
-function isPricingPageReady() {
-  return String(state.currentMenu || '').trim() === 'pricing_uhaozu'
-    && normalizePricingGameName(state.pricing && state.pricing.game_name || 'WZRY') === '和平精英';
+function ensurePricingLadderState() {
+  const pricing = state.pricing || (state.pricing = {});
+  if (!pricing.game_name) pricing.game_name = 'WZRY';
+  if (!Array.isArray(pricing.list)) pricing.list = [];
+  if (!pricing.editing || typeof pricing.editing !== 'object') pricing.editing = {};
+  if (!pricing.saving || typeof pricing.saving !== 'object') pricing.saving = {};
+  if (!pricing.drafts || typeof pricing.drafts !== 'object') pricing.drafts = {};
+  if (!pricing.feature || typeof pricing.feature !== 'object') {
+    pricing.feature = { enabled: false, reconcile_required: false, version: 0 };
+  }
+  if (typeof pricing.feature_saving !== 'boolean') pricing.feature_saving = false;
+  if (!pricing.channel_sheet || typeof pricing.channel_sheet !== 'object') {
+    pricing.channel_sheet = {
+      account: '',
+      channel: 'uhaozu',
+      view: 'result',
+      loading: false,
+      refreshing: false,
+      payload: null,
+      error: ''
+    };
+  }
+  if (typeof pricing.loaded_once !== 'boolean') pricing.loaded_once = false;
+  return pricing;
 }
 
-function bindPricingGameTabs() {
-  if (!els.pricingGameTabs) return;
-  Array.from(els.pricingGameTabs.querySelectorAll('.stats-game-tab')).forEach((node) => {
-    node.onclick = () => {
-      const gameName = String(node.getAttribute('data-pricing-game') || '').trim();
-      if (!gameName || gameName === String(state.pricing.game_name || '').trim()) return;
-      state.pricing.game_name = gameName;
-      if (isPricingPageReady()) {
-        void loadPricingView();
-        return;
-      }
-      state.pricing.loading = false;
-      state.pricing.error = '';
-      state.pricing.loaded_once = true;
-      state.pricing.list = [];
-      state.pricing.summary = { account_count: 0, zero_cost_count: 0, total_cost_amount: 0, avg_suggested_listing_hourly_price: 0 };
-      renderPricingView();
+function pricingChannelSheetEls() {
+  return {
+    sheet: document.getElementById('pricingChannelSheet'),
+    title: document.getElementById('pricingChannelSheetTitle'),
+    tabs: document.getElementById('pricingChannelTabs'),
+    body: document.getElementById('pricingChannelBody'),
+    close: document.getElementById('pricingChannelCloseBtn')
+  };
+}
+
+function closePricingChannelSheet() {
+  const nodes = pricingChannelSheetEls();
+  if (!nodes.sheet) return;
+  nodes.sheet.classList.add('hidden');
+  nodes.sheet.setAttribute('aria-hidden', 'true');
+}
+
+function renderPricingPackageValues(prices = {}) {
+  return ['hour', 'night', 'day', 'week'].map((key) => `
+    <span class="pricing-package-value">${escapePricingHtml(formatPricingResultMoney(prices[key]))}</span>
+  `).join('');
+}
+
+function pricingApplyStatusText(status) {
+  if (status === 'effective') return '渠道价格与当前档一致';
+  if (status === 'manual') return '渠道手工价（不会自动纠正）';
+  if (status === 'pending') return '待执行换档';
+  if (status === 'blocked') return '受上下架安全规则阻塞';
+  if (status === 'failed') return '上次换档失败';
+  return '套餐数据暂不完整';
+}
+
+function renderPricingChannelLogs(result = {}) {
+  const logs = Array.isArray(result.error_logs) ? result.error_logs : [];
+  if (logs.length === 0) {
+    return '<div class="pricing-channel-empty">当前账号暂无 U号租价格设置错误。</div>';
+  }
+  return `<div class="pricing-error-log-list">${logs.map((log) => `
+    <article class="pricing-error-log-item">
+      <div class="pricing-error-log-head">
+        <span>${escapePricingHtml(log.create_date || '-')}</span>
+        <span class="pricing-error-log-tools">
+          <span>批次 ${escapePricingHtml(log.batch_id || '-')}</span>
+          <button class="copy-btn" data-pricing-copy-error="${Number(log.id || 0)}" type="button">复制错误</button>
+        </span>
+      </div>
+      <p>${escapePricingHtml(log.fail_message || 'U号租未返回明确错误信息')}</p>
+      <div class="pricing-error-log-prices">
+        目标：时租 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.hour))} ·
+        包夜 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.night))} ·
+        包天 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.day))} ·
+        包周 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.week))}
+      </div>
+    </article>
+  `).join('')}</div>`;
+}
+
+function renderUhaozuChannelResult(payload = {}) {
+  const result = payload.channel_result || {};
+  const sheetState = ensurePricingLadderState().channel_sheet;
+  const baseline = result.baseline || null;
+  const remote = result.remote_current || {};
+  const tiers = Array.isArray(result.tiers) ? result.tiers : [];
+  const errors = Array.isArray(result.error_logs) ? result.error_logs : [];
+  const baselineText = result.baseline_status === 'saved'
+    ? '已冻结基准'
+    : (result.baseline_status === 'preview' ? '使用当前同步价格预览，保存配置后冻结' : '套餐价格不完整');
+  const viewTabs = `
+    <div class="orders-tabs pricing-result-tabs">
+      <button class="orders-tab header-tab ${sheetState.view === 'result' ? 'active' : ''}" data-pricing-result-view="result" type="button">套餐结果</button>
+      <button class="orders-tab header-tab ${sheetState.view === 'logs' ? 'active' : ''}" data-pricing-result-view="logs" type="button">错误日志${errors.length ? ` (${errors.length})` : ''}</button>
+    </div>
+  `;
+  if (sheetState.view === 'logs') return `${viewTabs}${renderPricingChannelLogs(result)}`;
+  const baselineBlock = baseline ? `
+    <div class="pricing-channel-summary">
+      <div>
+        <span>价格基准</span>
+        <strong>${escapePricingHtml(baselineText)}</strong>
+      </div>
+      <div class="pricing-package-line">
+        <span>时租 ${escapePricingHtml(formatPricingResultMoney(baseline.prices && baseline.prices.hour))}</span>
+        <span>包夜 ${escapePricingHtml(formatPricingResultMoney(baseline.prices && baseline.prices.night))}</span>
+        <span>包天 ${escapePricingHtml(formatPricingResultMoney(baseline.prices && baseline.prices.day))}</span>
+        <span>包周 ${escapePricingHtml(formatPricingResultMoney(baseline.prices && baseline.prices.week))}</span>
+      </div>
+      <div class="pricing-package-line pricing-ratio-line">
+        <span>比例 1</span>
+        <span>${escapePricingHtml(String(baseline.ratios && baseline.ratios.night || '-'))}</span>
+        <span>${escapePricingHtml(String(baseline.ratios && baseline.ratios.day || '-'))}</span>
+        <span>${escapePricingHtml(String(baseline.ratios && baseline.ratios.week || '-'))}</span>
+      </div>
+    </div>
+  ` : '<div class="pricing-channel-empty">U号租当前套餐价格不完整，暂时无法计算四档套餐结果。</div>';
+  const tierRows = tiers.map((tier) => `
+    <div class="pricing-package-row ${Number(tier.tier) === Number(payload.current_tier) ? 'is-active' : ''}">
+      <strong>第 ${Number(tier.tier || 0)} 单${Number(tier.tier) === Number(payload.current_tier) ? ' · 当前档' : ''}</strong>
+      ${renderPricingPackageValues(tier.prices)}
+    </div>
+  `).join('');
+  return `
+    ${viewTabs}
+    <div class="pricing-channel-current">
+      <div>
+        <span>U号租当前渠道价格（最近同步）</span>
+        <strong>${escapePricingHtml(pricingApplyStatusText(result.apply_status))}</strong>
+      </div>
+      <div class="pricing-package-line">
+        <span>时租 ${escapePricingHtml(formatPricingResultMoney(remote.hour))}</span>
+        <span>包夜 ${escapePricingHtml(formatPricingResultMoney(remote.night))}</span>
+        <span>包天 ${escapePricingHtml(formatPricingResultMoney(remote.day))}</span>
+        <span>包周 ${escapePricingHtml(formatPricingResultMoney(remote.week))}</span>
+      </div>
+    </div>
+    ${baselineBlock}
+    ${tiers.length ? `
+      <div class="pricing-package-table">
+        <div class="pricing-package-row pricing-package-header">
+          <strong>订单档位</strong><span>时租</span><span>包夜</span><span>包天</span><span>包周</span>
+        </div>
+        ${tierRows}
+      </div>
+    ` : ''}
+    <div class="pricing-channel-inline-actions">
+      <span>商品 ${escapePricingHtml(result.goods_id || '未关联')}</span>
+      <button class="btn btn-ghost btn-card-action" data-pricing-refresh-baseline type="button"
+        ${result.remote_complete && !sheetState.refreshing ? '' : 'disabled'}>${sheetState.refreshing ? '更新中...' : '以当前渠道价格更新基准'}</button>
+    </div>
+  `;
+}
+
+function renderPricingChannelSheet() {
+  const pricing = ensurePricingLadderState();
+  const sheetState = pricing.channel_sheet;
+  const nodes = pricingChannelSheetEls();
+  if (!nodes.sheet || !nodes.body || !nodes.tabs) return;
+  if (nodes.close) nodes.close.onclick = closePricingChannelSheet;
+  const item = pricingItemByAccount(sheetState.account);
+  if (nodes.title) nodes.title.textContent = item ? `${item.display_name || item.game_account} · 渠道价格` : '渠道价格';
+  const channels = sheetState.payload && Array.isArray(sheetState.payload.channels)
+    ? sheetState.payload.channels
+    : [
+        { channel: 'uhaozu', label: 'U号租', enabled: true },
+        { channel: 'zuhaowang', label: '租号玩', enabled: false },
+        { channel: 'uuzuhao', label: '悠悠租号', enabled: false }
+      ];
+  nodes.tabs.innerHTML = channels.map((channel) => `
+    <button class="orders-tab header-tab ${sheetState.channel === channel.channel ? 'active' : ''}"
+      data-pricing-channel-tab="${escapePricingHtml(channel.channel)}" type="button">${escapePricingHtml(channel.label)}</button>
+  `).join('');
+  Array.from(nodes.tabs.querySelectorAll('[data-pricing-channel-tab]')).forEach((button) => {
+    button.onclick = () => {
+      sheetState.channel = String(button.getAttribute('data-pricing-channel-tab') || 'uhaozu');
+      sheetState.view = 'result';
+      renderPricingChannelSheet();
+    };
+  });
+  if (sheetState.loading) nodes.body.innerHTML = '<div class="pricing-channel-empty">加载中...</div>';
+  else if (sheetState.error) nodes.body.innerHTML = `<div class="pricing-channel-empty pricing-error">${escapePricingHtml(sheetState.error)}</div>`;
+  else {
+    const selected = channels.find((item) => item.channel === sheetState.channel) || channels[0];
+    if (!selected || selected.enabled !== true) {
+      const packageText = Array.isArray(selected && selected.package_keys) && selected.package_keys.length
+        ? `已知套餐：${selected.package_keys.map((key) => selected.package_labels && selected.package_labels[key] || key).join('、')}`
+        : '套餐能力待接口确认';
+      nodes.body.innerHTML = `<div class="pricing-channel-empty"><strong>${escapePricingHtml(selected && selected.label || '该渠道')}</strong><span>一期暂未启用自动改价。${escapePricingHtml(packageText)}</span></div>`;
+    } else {
+      nodes.body.innerHTML = renderUhaozuChannelResult(sheetState.payload || {});
+    }
+  }
+  Array.from(nodes.body.querySelectorAll('[data-pricing-result-view]')).forEach((button) => {
+    button.onclick = () => {
+      sheetState.view = String(button.getAttribute('data-pricing-result-view') || 'result');
+      renderPricingChannelSheet();
+    };
+  });
+  const refresh = nodes.body.querySelector('[data-pricing-refresh-baseline]');
+  if (refresh) refresh.onclick = () => void refreshPricingChannelBaseline();
+  Array.from(nodes.body.querySelectorAll('[data-pricing-copy-error]')).forEach((button) => {
+    button.onclick = async () => {
+      const id = Number(button.getAttribute('data-pricing-copy-error') || 0);
+      const logs = sheetState.payload && sheetState.payload.channel_result
+        ? sheetState.payload.channel_result.error_logs || []
+        : [];
+      const log = logs.find((item) => Number(item.id || 0) === id);
+      const ok = log ? await copyTextToClipboard(log.fail_message || '') : false;
+      showToast(ok ? '错误信息已复制' : '复制失败');
     };
   });
 }
 
-function syncPricingFormFromState() {
-  const form = state.pricing && state.pricing.form ? state.pricing.form : {};
-  const pairs = [
-    [els.pricingPaybackDays, form.payback_days],
-    [els.pricingAvgDailyRentHours, form.avg_daily_rent_hours],
-    [els.pricingPlatformFeeRate, form.platform_fee_rate],
-    [els.pricingWithdrawalFeeRate, form.withdrawal_fee_rate],
-    [els.pricingPriceStep, form.price_step],
-    [els.pricingDeposit, form.deposit]
-  ];
-  pairs.forEach(([node, value]) => {
-    if (!node) return;
-    if (document.activeElement === node) return;
-    node.value = String(value == null ? '' : value);
-  });
+async function loadPricingChannelResult(account) {
+  const pricing = ensurePricingLadderState();
+  const item = pricingItemByAccount(account);
+  if (!item) return;
+  const sheetState = pricing.channel_sheet;
+  sheetState.account = account;
+  sheetState.channel = 'uhaozu';
+  sheetState.view = 'result';
+  sheetState.loading = true;
+  sheetState.error = '';
+  sheetState.payload = null;
+  const nodes = pricingChannelSheetEls();
+  if (nodes.sheet) {
+    nodes.sheet.classList.remove('hidden');
+    nodes.sheet.setAttribute('aria-hidden', 'false');
+  }
+  renderPricingChannelSheet();
+  try {
+    const params = new URLSearchParams({
+      game_id: String(item.game_id || ''),
+      game_name: String(item.game_name || ''),
+      game_account: String(item.game_account || '')
+    });
+    sheetState.payload = await request(`/api/pricing/ladder/channel-result?${params.toString()}`);
+  } catch (e) {
+    sheetState.error = String(e && e.message || '渠道价格加载失败');
+  } finally {
+    sheetState.loading = false;
+    renderPricingChannelSheet();
+  }
+}
+
+async function refreshPricingChannelBaseline() {
+  const pricing = ensurePricingLadderState();
+  const sheetState = pricing.channel_sheet;
+  const item = pricingItemByAccount(sheetState.account);
+  if (!item || sheetState.refreshing) return;
+  if (!window.confirm('确认使用最近同步的 U号租套餐价格覆盖该账号的价格基准？')) return;
+  sheetState.refreshing = true;
+  renderPricingChannelSheet();
+  try {
+    sheetState.payload = await request('/api/pricing/ladder/channel-baseline', {
+      method: 'POST',
+      body: JSON.stringify({
+        game_id: item.game_id,
+        game_name: item.game_name,
+        game_account: item.game_account,
+        channel: 'uhaozu'
+      })
+    });
+    showToast('U号租价格基准已更新');
+  } catch (e) {
+    showToast(e.message || '价格基准更新失败');
+  } finally {
+    sheetState.refreshing = false;
+    renderPricingChannelSheet();
+  }
+}
+
+function normalizePricingDraft(item = {}) {
+  const prices = Array.isArray(item.prices) ? item.prices.slice(0, 4) : [];
+  while (prices.length < 4) prices.push(0);
+  return {
+    prices: prices.map((value) => formatPricingMoney(value)),
+    copied_from_game_account: String(item.copied_from_game_account || '').trim()
+  };
+}
+
+function validatePricingDraft(draft = {}) {
+  const rawPrices = Array.isArray(draft.prices) ? draft.prices : [];
+  if (rawPrices.length !== 4) throw new Error('请填写第 1 至第 4 单的价格');
+  const texts = rawPrices.map((value) => String(value == null ? '' : value).trim());
+  if (texts.every((value) => value === '')) return [];
+  if (texts.some((value) => value === '')) {
+    throw new Error('四档价格需要全部填写，或全部清空');
+  }
+  const prices = texts.map(Number);
+  if (prices.some((value) => !Number.isFinite(value) || value <= 0)) {
+    throw new Error('四档价格必须是大于 0 的数字');
+  }
+  return prices.map((value) => Number(value.toFixed(2)));
 }
 
 function buildPricingRequestQuery() {
-  const pricing = state.pricing || {};
   const params = new URLSearchParams();
-  params.set('game_name', String(pricing.game_name || 'WZRY'));
+  params.set('game_name', String(ensurePricingLadderState().game_name || 'WZRY'));
   return params.toString();
 }
 
 function applyPricingPayload(out) {
-  const pricing = state.pricing;
-  const config = out && out.config && typeof out.config === 'object' ? out.config : {};
+  const pricing = ensurePricingLadderState();
   pricing.game_name = normalizePricingGameName(out && out.game_name || pricing.game_name || 'WZRY');
-  pricing.form = {
-    payback_days: Number(config.payback_days || pricing.form.payback_days || 210),
-    avg_daily_rent_hours: Number(config.avg_daily_rent_hours || pricing.form.avg_daily_rent_hours || 3.5),
-    platform_fee_rate: Number(config.platform_fee_rate || pricing.form.platform_fee_rate || 0.2),
-    withdrawal_fee_rate: Number(config.withdrawal_fee_rate || pricing.form.withdrawal_fee_rate || 0.02),
-    price_step: Number(config.price_step || pricing.form.price_step || 0.5),
-    deposit: Number(config.deposit ?? pricing.form.deposit ?? 100)
-  };
-  pricing.summary = out && out.summary && typeof out.summary === 'object'
-    ? out.summary
-    : { account_count: 0, zero_cost_count: 0, total_cost_amount: 0, avg_suggested_listing_hourly_price: 0 };
   pricing.list = Array.isArray(out && out.list) ? out.list : [];
+  pricing.count_window = String(out && out.count_window || '06:00～次日06:00');
+  pricing.feature = out && out.feature && typeof out.feature === 'object'
+    ? {
+        enabled: out.feature.enabled === true,
+        reconcile_required: out.feature.reconcile_required === true,
+        version: Number(out.feature.version || 0)
+      }
+    : { enabled: false, reconcile_required: false, version: 0 };
   pricing.error = '';
   pricing.loaded_once = true;
 }
 
-async function loadPricingView() {
-  state.pricing.loading = true;
-  state.pricing.error = '';
-  renderPricingView();
-  try {
-    if (!isPricingPageReady()) {
-      state.pricing.loaded_once = true;
-      state.pricing.list = [];
-      state.pricing.summary = { account_count: 0, zero_cost_count: 0, total_cost_amount: 0, avg_suggested_listing_hourly_price: 0 };
-      return;
-    }
-    const out = await request(`/api/pricing/uhaozu?${buildPricingRequestQuery()}`);
-    applyPricingPayload(out);
-  } catch (e) {
-    state.pricing.error = String(e && e.message || '定价数据加载失败');
-  } finally {
-    state.pricing.loading = false;
-    renderPricingView();
-  }
-}
-
-async function savePricingConfig() {
-  const pricing = state.pricing || {};
-  if (String(state.currentMenu || '').trim() !== 'pricing_uhaozu') return null;
-  return request('/api/pricing/uhaozu/config', {
-    method: 'POST',
-    body: JSON.stringify({
-      game_name: pricing.game_name || 'WZRY',
-      payback_days: pricing.form && pricing.form.payback_days,
-      avg_daily_rent_hours: pricing.form && pricing.form.avg_daily_rent_hours,
-      platform_fee_rate: pricing.form && pricing.form.platform_fee_rate,
-      withdrawal_fee_rate: pricing.form && pricing.form.withdrawal_fee_rate,
-      price_step: pricing.form && pricing.form.price_step,
-      deposit: pricing.form && pricing.form.deposit
-    })
-  });
-}
-
-function renderPricingCostSheet() {
-  const sheet = state.pricingCostSheet || {};
-  const opened = Boolean(sheet.open);
-  if (!els.pricingCostSheet) return;
-  els.pricingCostSheet.classList.toggle('hidden', !opened);
-  if (!opened) return;
-  const titleName = String(sheet.role_name || sheet.account || '').trim() || '当前账号';
-  const resultText = String(sheet.result_text || '').trim();
-  const resultType = String(sheet.result_type || '').trim();
-  const loading = Boolean(sheet.loading);
-  if (els.pricingCostSheetTitle) els.pricingCostSheetTitle.textContent = `修改定价成本 · ${titleName}`;
-  if (els.pricingCostSheetResult) {
-    els.pricingCostSheetResult.className = `sheet-result ${resultType}`;
-    els.pricingCostSheetResult.textContent = resultText;
-  }
-  if (els.pricingCostAmountInput) {
-    els.pricingCostAmountInput.value = String(sheet.pricing_cost_amount || '');
-    els.pricingCostAmountInput.disabled = loading;
-  }
-  if (els.pricingBaseCostInput) {
-    els.pricingBaseCostInput.value = sheet.base_cost_amount === '' ? '' : `¥${formatPricingMoney(sheet.base_cost_amount)}`;
-    els.pricingBaseCostInput.disabled = true;
-  }
-  if (els.pricingCostNoteInput) {
-    els.pricingCostNoteInput.value = String(sheet.note || '');
-    els.pricingCostNoteInput.disabled = loading;
-  }
-  if (els.pricingCostSaveBtn) els.pricingCostSaveBtn.disabled = loading;
-  if (els.pricingCostCancelBtn) els.pricingCostCancelBtn.disabled = loading;
-}
-
-function openPricingCostSheet(item = {}) {
-  const account = String(item.game_account || '').trim();
-  if (!account) return;
-  state.pricingCostSheet = {
-    open: true,
-    account,
-    game_name: String(item.game_name || state.pricing.game_name || 'WZRY').trim() || 'WZRY',
-    role_name: String(item.role_name || item.display_name || account).trim() || account,
-    pricing_cost_amount: Number(item.total_cost_amount || 0),
-    base_cost_amount: Number(item.base_total_cost_amount || item.total_cost_amount || 0),
-    note: '仅影响定价页，不写入商品成本',
-    result_text: '',
-    result_type: '',
-    loading: false
-  };
-  renderPricingCostSheet();
-}
-
-function closePricingCostSheet() {
-  state.pricingCostSheet = {
-    open: false,
-    account: '',
-    game_name: 'WZRY',
-    role_name: '',
-    pricing_cost_amount: '',
-    base_cost_amount: '',
-    note: '',
-    result_text: '',
-    result_type: '',
-    loading: false
-  };
-  renderPricingCostSheet();
-}
-
-async function submitPricingCostConfig() {
-  const sheet = state.pricingCostSheet || {};
-  const account = String(sheet.account || '').trim();
-  const gameName = String(sheet.game_name || state.pricing.game_name || 'WZRY').trim() || 'WZRY';
-  if (!account) return;
-  const amount = Number(String((els.pricingCostAmountInput && els.pricingCostAmountInput.value) || sheet.pricing_cost_amount || '').trim());
-  if (!Number.isFinite(amount) || amount < 0) {
-    state.pricingCostSheet.result_text = '定价成本不合法';
-    state.pricingCostSheet.result_type = 'err';
-    renderPricingCostSheet();
-    return;
-  }
-  state.pricingCostSheet.loading = true;
-  state.pricingCostSheet.result_text = '保存中...';
-  state.pricingCostSheet.result_type = '';
-  state.pricingCostSheet.pricing_cost_amount = Number(amount.toFixed(2));
-  renderPricingCostSheet();
-  try {
-    await request('/api/pricing/uhaozu/account-cost', {
-      method: 'POST',
-      body: JSON.stringify({
-        game_name: gameName,
-        game_account: account,
-        total_cost_amount: Number(amount.toFixed(2))
-      })
-    });
-    state.pricingCostSheet.result_text = '保存成功';
-    state.pricingCostSheet.result_type = 'ok';
-    renderPricingCostSheet();
-    showToast('定价成本已保存');
-    setTimeout(() => {
-      closePricingCostSheet();
-      void loadPricingView();
-    }, 220);
-  } catch (e) {
-    state.pricingCostSheet.result_text = String(e && e.message || '定价成本保存失败');
-    state.pricingCostSheet.result_type = 'err';
-    renderPricingCostSheet();
-  } finally {
-    state.pricingCostSheet.loading = false;
-    renderPricingCostSheet();
-  }
-}
-
-async function publishPricingConfig() {
-  const pricing = state.pricing || {};
-  if (String(state.currentMenu || '').trim() !== 'pricing_uhaozu') return null;
-  readPricingFormValues();
-  state.pricing.publishing = true;
-  renderPricingView();
-  try {
-    const out = await request('/api/pricing/uhaozu/publish', {
-      method: 'POST',
-      body: JSON.stringify({
-        game_name: pricing.game_name || 'WZRY',
-        deposit: pricing.form && pricing.form.deposit
-      })
-    });
-    const successCount = Number(out && out.success_count || 0);
-    const failCount = Number(out && out.fail_count || 0);
-    showToast(failCount > 0 ? `发布完成，成功 ${successCount} 个，失败 ${failCount} 个` : `发布完成，共 ${successCount} 个`);
-    await loadPricingView();
-    return out;
-  } finally {
-    state.pricing.publishing = false;
-    renderPricingView();
-  }
-}
-
 function renderPricingGameTabs() {
   if (!els.pricingGameTabs) return;
-  const current = normalizePricingGameName(state.pricing && state.pricing.game_name || 'WZRY');
+  const current = normalizePricingGameName(ensurePricingLadderState().game_name);
   els.pricingGameTabs.innerHTML = pricingGameOptions().map((item) => `
-    <button class="stats-game-tab ${current === item.game_name ? 'active' : ''}" data-pricing-game="${item.game_name}">
+    <button class="stats-game-tab ${current === item.game_name ? 'active' : ''}" data-pricing-game="${item.game_name}" type="button">
       ${buildPricingGameAvatarHtml(item.game_name)}
       <span class="stats-game-tab-text">${escapePricingHtml(item.label)}</span>
     </button>
   `).join('');
-  bindPricingGameTabs();
+  Array.from(els.pricingGameTabs.querySelectorAll('[data-pricing-game]')).forEach((node) => {
+    node.onclick = () => {
+      const nextGame = String(node.getAttribute('data-pricing-game') || '').trim();
+      const pricing = ensurePricingLadderState();
+      if (!nextGame || nextGame === pricing.game_name) return;
+      pricing.game_name = nextGame;
+      pricing.editing = {};
+      pricing.saving = {};
+      pricing.drafts = {};
+      pricing.loaded_once = false;
+      void loadPricingView();
+    };
+  });
 }
 
-function renderPricingMetricGrid() {
-  if (!els.pricingMetricGrid) return;
-  els.pricingMetricGrid.innerHTML = '';
+function pricingItemByAccount(account) {
+  return ensurePricingLadderState().list.find((item) => String(item.game_account || '') === String(account || '')) || null;
 }
 
-function closePricingFormulaHelp() {
-  if (!els.pricingFormulaHelp) return;
-  els.pricingFormulaHelp.classList.add('hidden');
+function configuredPricingSources(targetAccount) {
+  return ensurePricingLadderState().list.filter((item) => (
+    Boolean(item.configured)
+    && String(item.game_account || '') !== String(targetAccount || '')
+  ));
 }
 
-function togglePricingFormulaHelp() {
-  if (!els.pricingFormulaHelp) return;
-  const opened = !els.pricingFormulaHelp.classList.contains('hidden');
-  els.pricingFormulaHelp.classList.toggle('hidden', opened);
+function enterPricingEdit(account) {
+  const pricing = ensurePricingLadderState();
+  const item = pricingItemByAccount(account);
+  if (!item) return;
+  pricing.editing[account] = true;
+  pricing.drafts[account] = normalizePricingDraft(item);
+  renderPricingView();
+}
+
+function copyPricingDraft(targetAccount, sourceAccount) {
+  const pricing = ensurePricingLadderState();
+  const source = pricingItemByAccount(sourceAccount);
+  if (!source || !source.configured) return false;
+  pricing.drafts[targetAccount] = {
+    prices: normalizePricingDraft(source).prices,
+    copied_from_game_account: String(source.game_account || '')
+  };
+  return true;
+}
+
+function readPricingDraftFromCard(account, card) {
+  const pricing = ensurePricingLadderState();
+  const current = pricing.drafts[account] || { prices: ['', '', '', ''], copied_from_game_account: '' };
+  current.prices = Array.from(card.querySelectorAll('[data-pricing-tier]')).map((input) => input.value);
+  pricing.drafts[account] = current;
+  return current;
+}
+
+async function savePricingAccount(account, card) {
+  const pricing = ensurePricingLadderState();
+  const item = pricingItemByAccount(account);
+  if (!item || pricing.saving[account]) return;
+  let draft;
+  let prices;
+  try {
+    draft = readPricingDraftFromCard(account, card);
+    prices = validatePricingDraft(draft);
+  } catch (e) {
+    showToast(e.message || '价格填写不完整');
+    return;
+  }
+  const clearing = prices.length === 0;
+  if (clearing && !item.configured) {
+    pricing.editing[account] = false;
+    delete pricing.drafts[account];
+    renderPricingView();
+    return;
+  }
+  if (clearing && !window.confirm('确认清空该账号的阶梯价格配置？渠道当前价格不会改变。')) return;
+  pricing.saving[account] = true;
+  renderPricingView();
+  try {
+    const out = await request('/api/pricing/ladder/account', {
+      method: 'POST',
+      body: JSON.stringify({
+        game_id: item.game_id,
+        game_name: item.game_name,
+        game_account: item.game_account,
+        action: clearing ? 'clear' : 'save',
+        prices,
+        expected_version: Number(item.version || 0),
+        copied_from_game_account: draft.copied_from_game_account || ''
+      })
+    });
+    const saved = out && out.rule ? out.rule : {};
+    item.configured = saved.configured === false ? false : true;
+    item.prices = item.configured
+      ? (Array.isArray(saved.prices) ? saved.prices : prices)
+      : ['', '', '', ''];
+    item.version = item.configured ? Number(saved.version || item.version || 0) : 0;
+    item.copied_from_game_account = item.configured ? String(saved.copied_from_game_account || '') : '';
+    pricing.editing[account] = false;
+    delete pricing.drafts[account];
+    showToast(item.configured ? '阶梯价格已保存' : '已清空，账号回到待配置状态');
+  } catch (e) {
+    showToast(e.message || '阶梯价格保存失败');
+  } finally {
+    pricing.saving[account] = false;
+    renderPricingView();
+  }
+}
+
+function bindPricingCardEvents() {
+  if (!els.pricingListContainer) return;
+  Array.from(els.pricingListContainer.querySelectorAll('[data-pricing-account-card]')).forEach((card) => {
+    const account = String(card.getAttribute('data-pricing-account-card') || '').trim();
+    const action = card.querySelector('[data-pricing-action]');
+    if (action) {
+      action.onclick = () => {
+        const pricing = ensurePricingLadderState();
+        if (pricing.editing[account]) void savePricingAccount(account, card);
+        else enterPricingEdit(account);
+      };
+    }
+    const channelAction = card.querySelector('[data-pricing-channel-result]');
+    if (channelAction) channelAction.onclick = () => void loadPricingChannelResult(account);
+    const select = card.querySelector('[data-pricing-copy]');
+    if (select) {
+      select.onchange = () => {
+        const sourceAccount = String(select.value || '').trim();
+        if (!sourceAccount) return;
+        readPricingDraftFromCard(account, card);
+        if (copyPricingDraft(account, sourceAccount)) renderPricingView();
+      };
+    }
+    Array.from(card.querySelectorAll('[data-pricing-tier]')).forEach((input) => {
+      input.oninput = () => readPricingDraftFromCard(account, card);
+    });
+  });
 }
 
 function renderPricingList() {
   if (!els.pricingListContainer) return;
-  const pricing = state.pricing || {};
-  if (String(state.currentMenu || '').trim() === 'pricing_uuzuhao' || String(state.currentMenu || '').trim() === 'pricing_zuhaowang') {
-    els.pricingListContainer.innerHTML = '<div class="panel pricing-empty-card">该渠道定价页开发中。</div>';
-    return;
-  }
-  if (normalizePricingGameName(pricing.game_name || 'WZRY') !== '和平精英') {
-    els.pricingListContainer.innerHTML = '<div class="panel pricing-empty-card">该游戏定价规则待开发。</div>';
-    return;
-  }
+  const pricing = ensurePricingLadderState();
   if (pricing.loading && !pricing.loaded_once) {
     els.pricingListContainer.innerHTML = '<div class="panel pricing-empty-card">加载中...</div>';
     return;
@@ -348,150 +529,149 @@ function renderPricingList() {
     els.pricingListContainer.innerHTML = `<div class="panel pricing-empty-card pricing-error">${escapePricingHtml(pricing.error)}</div>`;
     return;
   }
-  const list = Array.isArray(pricing.list) ? pricing.list : [];
-  if (list.length === 0) {
-    els.pricingListContainer.innerHTML = '<div class="panel pricing-empty-card">当前游戏暂无可计算账号。</div>';
+  if (pricing.list.length === 0) {
+    els.pricingListContainer.innerHTML = '<div class="panel pricing-empty-card">当前游戏暂无可配置账号。</div>';
     return;
   }
-  els.pricingListContainer.innerHTML = list.map((item) => `
-    <div class="panel pricing-account-card">
-      <div class="pricing-account-head">
-        <div>
-          <p class="pricing-account-name">${escapePricingHtml(item.display_name || item.role_name || item.game_account || '-')}</p>
-          <p class="pricing-account-meta">${escapePricingHtml(item.game_account || '-')} · 定价成本 ¥${formatPricingMoney(item.total_cost_amount)}${item.pricing_cost_overridden ? ` · 商品成本 ¥${formatPricingMoney(item.base_total_cost_amount)}` : ''}</p>
+  els.pricingListContainer.innerHTML = pricing.list.map((item) => {
+    const account = String(item.game_account || '').trim();
+    const editing = Boolean(pricing.editing[account]);
+    const saving = Boolean(pricing.saving[account]);
+    const draft = editing ? (pricing.drafts[account] || normalizePricingDraft(item)) : normalizePricingDraft(item);
+    const sources = configuredPricingSources(account);
+    const copyOptions = sources.map((source) => `
+      <option value="${escapePricingHtml(source.game_account)}" ${draft.copied_from_game_account === source.game_account ? 'selected' : ''}>
+        ${escapePricingHtml(source.display_name || source.game_account)} · ${escapePricingHtml(source.game_account)}
+      </option>
+    `).join('');
+    const inputs = [1, 2, 3, 4].map((tier, index) => `
+      <label class="pricing-tier-field">
+        <span>第 ${tier} 单</span>
+        <div class="pricing-price-input">
+          <input data-pricing-tier="${tier}" type="number" min="0.01" step="0.01" inputmode="decimal"
+            aria-label="第 ${tier} 单价格" value="${escapePricingHtml(draft.prices[index] || '')}" ${editing && !saving ? '' : 'disabled'}>
+          <span>元</span>
         </div>
-        <div class="pricing-account-actions">
-          <button
-            class="btn btn-ghost btn-card-action"
-            type="button"
-            data-pricing-cost-account="${escapePricingHtml(item.game_account || '')}"
-            data-pricing-cost-game="${escapePricingHtml(item.game_name || '')}"
-            data-pricing-cost-role="${escapePricingHtml(item.role_name || item.display_name || item.game_account || '')}"
-            data-pricing-cost-amount="${escapePricingHtml(item.total_cost_amount || 0)}"
-            data-pricing-base-cost-amount="${escapePricingHtml(item.base_total_cost_amount || item.total_cost_amount || 0)}"
-          >修改定价成本</button>
-          <span class="btn btn-ghost btn-card-action pricing-price-pill">建议挂价 ¥${formatPricingMoney(item.suggested_listing_hourly_price)}</span>
+      </label>
+    `).join('');
+    return `
+      <article class="panel pricing-account-card ${editing ? 'is-editing' : ''}" data-pricing-account-card="${escapePricingHtml(account)}">
+        <div class="pricing-account-head">
+          <div class="pricing-account-identity">
+            <p class="pricing-account-name">${escapePricingHtml(item.display_name || account || '-')}</p>
+            <p class="pricing-account-meta">${escapePricingHtml(account || '-')}</p>
+          </div>
+          <div class="pricing-account-status">
+            <span>完成 ${Number(item.today_order_count || 0)} 单</span>
+            <span>${item.configured ? '已配置' : '待配置'}</span>
+          </div>
         </div>
-      </div>
-      <div class="pricing-account-grid">
-        <div class="pricing-account-metric">
-          <span class="pricing-account-metric-label">目标到手时租</span>
-          <strong>¥${formatPricingMoney(item.target_net_hourly_price)}</strong>
+        ${editing ? `
+          <label class="pricing-copy-field">
+            <span>复制其他账号配置</span>
+            <select data-pricing-copy ${sources.length > 0 && !saving ? '' : 'disabled'}>
+              <option value="">${sources.length > 0 ? '选择账号' : '暂无已配置账号'}</option>
+              ${copyOptions}
+            </select>
+          </label>
+        ` : ''}
+        <div class="pricing-ladder-grid">${inputs}</div>
+        <div class="pricing-account-footer">
+          <span class="pricing-current-price">${item.configured
+            ? `当前档位：第 ${Math.min(4, Math.max(1, Number(item.current_tier || Number(item.today_order_count || 0) + 1)))} 单`
+            : '阶梯调价：未启用'}</span>
+          <div class="pricing-account-actions">
+            <button class="btn btn-ghost btn-card-action" data-pricing-channel-result type="button">查看渠道价格</button>
+            <button class="btn btn-ghost btn-card-action" data-pricing-action type="button" ${saving ? 'disabled' : ''}>
+              ${saving ? '保存中...' : (editing ? '保存' : '编辑')}
+            </button>
+          </div>
         </div>
-        <div class="pricing-account-metric">
-          <span class="pricing-account-metric-label">理论挂价</span>
-          <strong>¥${formatPricingMoney(item.target_listing_hourly_price)}</strong>
-        </div>
-        <div class="pricing-account-metric">
-          <span class="pricing-account-metric-label">当前U号租时租</span>
-          <strong>${Number(item.current_listing_hourly_price || 0) > 0 ? `¥${formatPricingMoney(item.current_listing_hourly_price)}` : '未取到'}</strong>
-        </div>
-        <div class="pricing-account-metric">
-          <span class="pricing-account-metric-label">日均到手目标</span>
-          <strong>¥${formatPricingMoney(item.target_daily_net_income)}</strong>
-        </div>
-      </div>
-    </div>
-  `).join('');
-  Array.from(els.pricingListContainer.querySelectorAll('[data-pricing-cost-account]')).forEach((node) => {
-    node.onclick = async () => {
-      const account = String(node.getAttribute('data-pricing-cost-account') || '').trim();
-      if (!account) return;
-      const gameName = String(node.getAttribute('data-pricing-cost-game') || 'WZRY').trim() || 'WZRY';
-      const roleName = String(node.getAttribute('data-pricing-cost-role') || account).trim() || account;
-      const totalCostAmount = Number(node.getAttribute('data-pricing-cost-amount') || 0);
-      const baseTotalCostAmount = Number(node.getAttribute('data-pricing-base-cost-amount') || totalCostAmount || 0);
-      openPricingCostSheet({
-        game_account: account,
-        game_name: gameName,
-        role_name: roleName,
-        total_cost_amount: totalCostAmount,
-        base_total_cost_amount: baseTotalCostAmount
-      });
+      </article>
+    `;
+  }).join('');
+  bindPricingCardEvents();
+}
+
+async function updatePricingFeature(enabled) {
+  const pricing = ensurePricingLadderState();
+  if (pricing.feature_saving || pricing.feature.enabled === enabled) return;
+  if (enabled && !window.confirm('开启后，下一个订单同步周期会校准所有已配置账号。确认开启？')) {
+    renderPricingFeatureState();
+    return;
+  }
+  pricing.feature_saving = true;
+  renderPricingFeatureState();
+  try {
+    const out = await request('/api/pricing/ladder/feature', {
+      method: 'POST',
+      body: JSON.stringify({
+        enabled,
+        expected_version: Number(pricing.feature.version || 0)
+      })
+    });
+    const saved = out && out.feature ? out.feature : {};
+    pricing.feature = {
+      enabled: saved.enabled === true,
+      reconcile_required: saved.reconcile_required === true,
+      version: Number(saved.version || 0)
     };
-  });
+    showToast(pricing.feature.enabled ? '自动阶梯调价已开启' : '自动阶梯调价已关闭');
+  } catch (e) {
+    showToast(e.message || '自动阶梯调价开关保存失败');
+  } finally {
+    pricing.feature_saving = false;
+    renderPricingFeatureState();
+  }
+}
+
+function renderPricingFeatureState() {
+  const pricing = ensurePricingLadderState();
+  if (els.pricingFeatureToggle) {
+    els.pricingFeatureToggle.checked = pricing.feature.enabled === true;
+    els.pricingFeatureToggle.disabled = pricing.feature_saving === true;
+    els.pricingFeatureToggle.onchange = () => void updatePricingFeature(Boolean(els.pricingFeatureToggle.checked));
+  }
+  if (els.pricingFeatureStatus) {
+    els.pricingFeatureStatus.textContent = pricing.feature_saving
+      ? '保存中...'
+      : (pricing.feature.enabled ? (pricing.feature.reconcile_required ? '已开启 · 待校准' : '已开启') : '已关闭 · 仅保存配置');
+  }
 }
 
 function renderPricingView() {
   if (!els.pricingView) return;
-  const pricing = state.pricing || {};
+  const pricing = ensurePricingLadderState();
   renderPricingGameTabs();
-  syncPricingFormFromState();
-  renderPricingCostSheet();
-  const showConfig = isPricingPageReady();
-  if (els.pricingCalcBtn) {
-    const wrap = els.pricingCalcBtn.closest('.pricing-config-card');
-    if (wrap) wrap.classList.toggle('pricing-config-disabled', !showConfig);
-  }
-  const configCard = document.querySelector('#pricingView .pricing-config-card');
-  if (configCard) configCard.classList.toggle('pricing-config-disabled', !showConfig);
-  if (els.pricingCalcBtn) {
-    els.pricingCalcBtn.disabled = Boolean(pricing.loading) || Boolean(pricing.publishing) || !showConfig;
-    els.pricingCalcBtn.textContent = pricing.loading ? '计算中...' : '重新计算';
-  }
-  if (els.pricingPublishBtn) {
-    els.pricingPublishBtn.disabled = Boolean(pricing.loading) || Boolean(pricing.publishing) || !showConfig;
-    els.pricingPublishBtn.textContent = pricing.publishing ? '发布中...' : '发布定价';
-  }
-  renderPricingMetricGrid();
+  renderPricingFeatureState();
+  const windowText = document.getElementById('pricingWindowText');
+  if (windowText) windowText.textContent = `订单周期：${pricing.count_window || '06:00～次日06:00'}`;
   renderPricingList();
 }
 
-function readPricingFormValues() {
-  state.pricing.form = {
-    payback_days: Number(els.pricingPaybackDays && els.pricingPaybackDays.value || state.pricing.form.payback_days || 210),
-    avg_daily_rent_hours: Number(els.pricingAvgDailyRentHours && els.pricingAvgDailyRentHours.value || state.pricing.form.avg_daily_rent_hours || 3.5),
-    platform_fee_rate: Number(els.pricingPlatformFeeRate && els.pricingPlatformFeeRate.value || state.pricing.form.platform_fee_rate || 0.2),
-    withdrawal_fee_rate: Number(els.pricingWithdrawalFeeRate && els.pricingWithdrawalFeeRate.value || state.pricing.form.withdrawal_fee_rate || 0.02),
-    price_step: Number(els.pricingPriceStep && els.pricingPriceStep.value || state.pricing.form.price_step || 0.5),
-    deposit: Number(els.pricingDeposit && els.pricingDeposit.value || state.pricing.form.deposit || 100)
-  };
+async function loadPricingView() {
+  const pricing = ensurePricingLadderState();
+  pricing.loading = true;
+  pricing.error = '';
+  renderPricingView();
+  try {
+    const out = await request(`/api/pricing/ladder?${buildPricingRequestQuery()}`);
+    applyPricingPayload(out);
+  } catch (e) {
+    pricing.error = String(e && e.message || '阶梯定价加载失败');
+  } finally {
+    pricing.loading = false;
+    renderPricingView();
+  }
 }
-
-function bindPricingEvents() {
-  if (els.pricingFormulaHelpBtn) {
-    els.pricingFormulaHelpBtn.onclick = (e) => {
-      e.stopPropagation();
-      togglePricingFormulaHelp();
-    };
-  }
-  if (els.pricingCalcBtn) {
-    els.pricingCalcBtn.onclick = async () => {
-      readPricingFormValues();
-      if (String(state.currentMenu || '').trim() === 'pricing_uhaozu') {
-        await savePricingConfig();
-      }
-      await loadPricingView();
-    };
-  }
-  if (els.pricingPublishBtn) {
-    els.pricingPublishBtn.onclick = async () => {
-      await publishPricingConfig();
-    };
-  }
-  const inputNodes = [
-    els.pricingPaybackDays,
-    els.pricingAvgDailyRentHours,
-    els.pricingPlatformFeeRate,
-    els.pricingWithdrawalFeeRate,
-    els.pricingPriceStep,
-    els.pricingDeposit
-  ];
-  inputNodes.forEach((node) => {
-    if (!node) return;
-    node.onchange = () => readPricingFormValues();
-  });
-  document.addEventListener('click', (e) => {
-    if (!els.pricingFormulaHelp || !els.pricingFormulaHelpBtn) return;
-    const t = e.target;
-    if (els.pricingFormulaHelp.contains(t) || els.pricingFormulaHelpBtn.contains(t)) return;
-    closePricingFormulaHelp();
-  });
-}
-
-bindPricingEvents();
 
 window.loadPricingView = loadPricingView;
 window.renderPricingView = renderPricingView;
-window.closePricingCostSheet = closePricingCostSheet;
-window.submitPricingCostConfig = submitPricingCostConfig;
+window.__pricingLadderTest = {
+  normalizePricingGameName,
+  formatPricingMoney,
+  formatPricingResultMoney,
+  normalizePricingDraft,
+  validatePricingDraft,
+  pricingApplyStatusText
+};

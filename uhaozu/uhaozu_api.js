@@ -528,21 +528,11 @@ function buildUhaozuModifyReferer(goodsId, gameId) {
 
 function deriveUhaozuPriceSet(info = {}, baseInfo = {}) {
     const src = info && typeof info === 'object' ? info : {};
-    const hour = src.rentalByHour;
-    if (!Number.isFinite(Number(hour))) return src;
-    const baseHour = Number(hour);
-    const derived = {
-        ...src,
-        rentalByHour: roundPrice(baseHour)
-    };
-
-    const ratioMap = {
-        rentalByNight: 5,
-        rentalByDay: 7,
-        rentalByWeek: 40
-    };
-    for (const [key, ratio] of Object.entries(ratioMap)) {
-        derived[key] = roundPrice(baseHour * ratio * 0.95);
+    const base = baseInfo && typeof baseInfo === 'object' ? baseInfo : {};
+    const derived = { ...src };
+    for (const key of ['rentalByHour', 'rentalByNight', 'rentalByDay', 'rentalByWeek']) {
+        const value = src[key] !== undefined ? src[key] : base[key];
+        if (Number.isFinite(Number(value))) derived[key] = roundPrice(Number(value));
     }
     return derived;
 }

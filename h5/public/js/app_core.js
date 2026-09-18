@@ -79,6 +79,28 @@
       toastTimer = setTimeout(hide, Math.max(800, Number(durationMs || 1200)));
     }
 
+    async function copyTextToClipboard(text) {
+      const value = String(text || '').trim();
+      if (!value) return false;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(value);
+        } else {
+          const textarea = document.createElement('textarea');
+          textarea.value = value;
+          textarea.style.position = 'fixed';
+          textarea.style.left = '-9999px';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+        }
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
     const initialAuth = loadInitialAuth();
     const SUPPORT_TOUCH_PULL = ('ontouchstart' in window) || Number(navigator.maxTouchPoints || 0) > 0;
     const ORDER_OFF_MODE_NATURAL_DAY = 'natural_day';
@@ -312,6 +334,8 @@
       pricing: {
         loading: false,
         publishing: false,
+        feature_saving: false,
+        feature: { enabled: false, reconcile_required: false, version: 0 },
         channel: 'uhaozu',
         game_name: 'WZRY',
         form: {
@@ -411,7 +435,7 @@
       if (k === 'risk') return '风控中心';
       if (k === 'stats') return '统计看板';
       if (k === 'auth') return '授权管理';
-      if (k === 'pricing_uhaozu') return '定价规则 · U号租';
+      if (k === 'pricing_uhaozu') return '阶梯定价';
       if (k === 'pricing_uuzuhao') return '定价规则 · 悠悠租号';
       if (k === 'pricing_zuhaowang') return '定价规则 · 租号王';
       if (k === 'board') return '板卡管理';
@@ -460,6 +484,8 @@
       authView: document.getElementById('authView'),
       pricingView: document.getElementById('pricingView'),
       pricingGameTabs: document.getElementById('pricingGameTabs'),
+      pricingFeatureToggle: document.getElementById('pricingFeatureToggle'),
+      pricingFeatureStatus: document.getElementById('pricingFeatureStatus'),
       pricingFormulaHelpBtn: document.getElementById('pricingFormulaHelpBtn'),
       pricingFormulaHelp: document.getElementById('pricingFormulaHelp'),
       pricingCalcBtn: document.getElementById('pricingCalcBtn'),

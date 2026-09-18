@@ -57,7 +57,6 @@ const {
     enqueueAuthRevokeTasks,
     startAuthRevokeTaskWorker
 } = require('./auth_revoke_task_service');
-
 const CHANNEL_UHAOZU = 'uhaozu';
 const CHANNEL_ZHW = 'zuhaowang';
 const CHANNEL_ZHW_YUANBAO = 'zuhaowang-yuanbao';
@@ -75,6 +74,12 @@ const ORDER_ZHW_DAILY_COMPENSATION_CHANNEL = 'zuhaowang-daily-compensation';
 const ORDER_ZHW_DAILY_COMPENSATION_AFTER_HOUR = 4;
 const ORDER_ZHW_DAILY_COMPENSATION_LOOKBACK_SEC = 8 * 24 * 3600;
 const FIVE_E_ORDER_DEFAULT_LOOKBACK_SEC = 24 * 3600;
+
+function buildPriceLadderCandidatesIfEnabled(enabled, order, orderWrite) {
+    if (enabled !== true) return [];
+    const { buildPriceLadderCandidatesFromOrderWrite } = require('../price/price_ladder_reconcile_service');
+    return buildPriceLadderCandidatesFromOrderWrite(order, orderWrite);
+}
 
 function normalizeOrderOffThreshold(v, fallback = ORDER_3_OFF_THRESHOLD) {
     const n = Number(v);
@@ -1145,6 +1150,7 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
     let complaint_notify_sent = 0;
     let complaint_notify_fail = 0;
     const authRevokeCandidates = [];
+    const priceLadderCandidates = [];
     const complaintNotifyDedup = new Set();
     const needComplaintDetail = (raw = {}) => {
         const complaintStatus = Number(raw && raw.complaintStatus);
@@ -1165,6 +1171,7 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
         });
         const authRevokeCandidate = buildAuthRevokeCandidateOnStatusChange(uid, mapped, orderWrite);
         if (authRevokeCandidate) authRevokeCandidates.push(authRevokeCandidate);
+        priceLadderCandidates.push(...buildPriceLadderCandidatesIfEnabled(options.price_ladder_enabled, mapped, orderWrite));
         upserted += 1;
 
         if (!needComplaintDetail(raw)) continue;
@@ -1257,6 +1264,7 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
             notify_fail: complaint_notify_fail
         },
         _auth_revoke_candidates: authRevokeCandidates,
+        _price_ladder_candidates: priceLadderCandidates,
         mapping: UUZUHAO_ORDER_FIELD_MAPPING
     };
 }
@@ -1319,6 +1327,7 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
     let unlinked = 0;
     const completedOrderNos = [];
     const authRevokeCandidates = [];
+    const priceLadderCandidates = [];
     for (const raw of orderList) {
         const goodsId = String(raw.goodsId || '').trim();
         const ref = productIndex.get(goodsId) || { game_account: '', role_name: '' };
@@ -1333,6 +1342,7 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
         });
         const authRevokeCandidate = buildAuthRevokeCandidateOnStatusChange(uid, mapped, orderWrite);
         if (authRevokeCandidate) authRevokeCandidates.push(authRevokeCandidate);
+        priceLadderCandidates.push(...buildPriceLadderCandidatesIfEnabled(options.price_ladder_enabled, mapped, orderWrite));
         if (shouldSyncUhaozuOrderDetailByStatus(mapped.order_status)) completedOrderNos.push(mapped.order_no);
         upserted += 1;
     }
@@ -1358,6 +1368,7 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
         unlinked,
         detail_sync: detailSync,
         _auth_revoke_candidates: authRevokeCandidates,
+        _price_ladder_candidates: priceLadderCandidates,
         mapping: UHAOZU_ORDER_FIELD_MAPPING
     };
 }
@@ -1453,6 +1464,7 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
     let linked = 0;
     let unlinked = 0;
     const authRevokeCandidates = [];
+    const priceLadderCandidates = [];
     for (const raw of orderList) {
         const acc = String(raw.accountNo || '').trim();
         const ref = accountIndex.get(acc) || { role_name: '' };
@@ -1470,6 +1482,7 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
         });
         const authRevokeCandidate = buildAuthRevokeCandidateOnStatusChange(uid, mapped, orderWrite);
         if (authRevokeCandidate) authRevokeCandidates.push(authRevokeCandidate);
+        priceLadderCandidates.push(...buildPriceLadderCandidatesIfEnabled(options.price_ladder_enabled, mapped, orderWrite));
         upserted += 1;
     }
     await setLastSyncTimestamp(uid, CHANNEL_ZHW, nowSec, 'order sync watermark');
@@ -1490,6 +1503,7 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
         linked,
         unlinked,
         _auth_revoke_candidates: authRevokeCandidates,
+        _price_ladder_candidates: priceLadderCandidates,
         mapping: ZUHAOWANG_ORDER_FIELD_MAPPING
     };
 }
@@ -1537,6 +1551,7 @@ async function syncFiveEOrdersToDb(userId, options = {}) {
     let pages = 0;
     const seenOrderIds = new Set();
     const traceIds = [];
+    const priceLadderCandidates = [];
 
     for (const accountNo of accountNos) {
         const pulled = await listAllRentOrders(
@@ -1569,7 +1584,7 @@ async function syncFiveEOrdersToDb(userId, options = {}) {
             seenOrderIds.add(mapped.order_no);
             if (mapped.game_account) linked += 1;
             else unlinked += 1;
-            await upsertOrder({
+            const orderWrite = await upsertOrder({
                 user_id: uid,
                 ...mapped,
                 desc: String(options.desc || [
@@ -1579,6 +1594,7 @@ async function syncFiveEOrdersToDb(userId, options = {}) {
                     `cash_status=${Number.isFinite(mapped.raw_cash_status) ? mapped.raw_cash_status : ''}`
                 ].join(' '))
             });
+            priceLadderCandidates.push(...buildPriceLadderCandidatesIfEnabled(options.price_ladder_enabled, mapped, orderWrite));
             upserted += 1;
         }
     }
@@ -1604,6 +1620,7 @@ async function syncFiveEOrdersToDb(userId, options = {}) {
         unlinked,
         pages,
         trace_ids: Array.from(new Set(traceIds)),
+        _price_ladder_candidates: priceLadderCandidates,
         mapping: FIVE_E_ORDER_FIELD_MAPPING
     };
 }
@@ -1620,6 +1637,25 @@ async function syncOrdersByUser(userId, options = {}) {
     };
     console.log(`[OrderSync] user_id=${uid} begin`);
     const now = options.now instanceof Date ? options.now : new Date();
+    let priceLadderFeature = options.price_ladder_feature_state || null;
+    let priceLadderFeatureError = '';
+    if (!priceLadderFeature) {
+        try {
+            const { getPriceLadderFeatureConfig } = require('../database/price_ladder_feature_config_db');
+            priceLadderFeature = await getPriceLadderFeatureConfig(uid);
+        } catch (e) {
+            priceLadderFeatureError = String(e && e.message ? e.message : e);
+            priceLadderFeature = { enabled: false, reconcile_required: false, version: 0 };
+            console.warn(`[OrderSync][PriceLadder] user_id=${uid} feature config unavailable, fail closed: ${priceLadderFeatureError}`);
+        }
+    }
+    const priceLadderEnabled = priceLadderFeature.enabled === true;
+    result.price_ladder_feature = {
+        enabled: priceLadderEnabled,
+        reconcile_required: priceLadderFeature.reconcile_required === true,
+        version: Number(priceLadderFeature.version || 0),
+        error: priceLadderFeatureError
+    };
     const compensateInWindow = shouldTriggerOrderSyncNow({
         now,
         interval_min: Number(options.compensation_interval_min || ORDER_COMPENSATE_INTERVAL_MIN),
@@ -1652,6 +1688,7 @@ async function syncOrdersByUser(userId, options = {}) {
     const uuzuhaoOptions = {
         ...(options.uuzuhao || {}),
         user: options.user && Number(options.user.id) === uid ? options.user : null,
+        price_ladder_enabled: priceLadderEnabled,
         compensation_lookback_sec: Math.max(
             Number((options.uuzuhao || {}).compensation_lookback_sec || 0),
             compensateLookbackSec
@@ -1659,6 +1696,7 @@ async function syncOrdersByUser(userId, options = {}) {
     };
     const uhaozuOptions = {
         ...(options.uhaozu || {}),
+        price_ladder_enabled: priceLadderEnabled,
         compensation_lookback_sec: Math.max(
             Number((options.uhaozu || {}).compensation_lookback_sec || 0),
             compensateLookbackSec
@@ -1666,6 +1704,7 @@ async function syncOrdersByUser(userId, options = {}) {
     };
     const zuhaowangOptions = {
         ...(options.zuhaowang || {}),
+        price_ladder_enabled: priceLadderEnabled,
         compensation_lookback_sec: Math.max(
             Number((options.zuhaowang || {}).compensation_lookback_sec || 0),
             compensateLookbackSec,
@@ -1673,7 +1712,8 @@ async function syncOrdersByUser(userId, options = {}) {
         )
     };
     const fiveEOptions = {
-        ...(options['5e'] || options.five_e || {})
+        ...(options['5e'] || options.five_e || {}),
+        price_ladder_enabled: priceLadderEnabled
     };
 
     if (expectedPlatforms.includes(CHANNEL_UUZUHAO)) {
@@ -1755,12 +1795,17 @@ async function syncOrdersByUser(userId, options = {}) {
     }
 
     const authRevokeCandidates = [];
+    const priceLadderCandidates = [];
     for (const platformResult of Object.values(result.platforms)) {
         if (!platformResult || typeof platformResult !== 'object') continue;
         if (Array.isArray(platformResult._auth_revoke_candidates)) {
             authRevokeCandidates.push(...platformResult._auth_revoke_candidates);
         }
+        if (Array.isArray(platformResult._price_ladder_candidates)) {
+            priceLadderCandidates.push(...platformResult._price_ladder_candidates);
+        }
         delete platformResult._auth_revoke_candidates;
+        delete platformResult._price_ladder_candidates;
     }
 
     const successPlatforms = listSuccessfulOrderPlatforms(result.platforms);
@@ -1815,6 +1860,26 @@ async function syncOrdersByUser(userId, options = {}) {
         };
         result.order_cooldown = skipped;
         result.order_3_off = skipped;
+    }
+
+    if (!priceLadderEnabled) {
+        result.price_ladder = {
+            skipped: true,
+            reason: priceLadderFeatureError ? 'feature_config_unavailable' : 'feature_disabled'
+        };
+    } else {
+        try {
+            const { reconcilePriceLadderAfterOrderSync } = require('../price/price_ladder_reconcile_service');
+            result.price_ladder = await reconcilePriceLadderAfterOrderSync(uid, priceLadderCandidates, {
+                now,
+                allow_apply: canReconcileOrder3Off && !(result.order_off && result.order_off.error),
+                activation_reconcile: priceLadderFeature.reconcile_required === true,
+                feature_version: Number(priceLadderFeature.version || 0)
+            });
+        } catch (e) {
+            result.price_ladder = { error: String(e.message || e) };
+            result.ok = false;
+        }
     }
 
     if (canEnqueueAuthRevoke) {

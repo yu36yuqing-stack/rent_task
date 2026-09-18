@@ -261,23 +261,7 @@
     async function copyAccount(text) {
       const val = String(text || '').trim();
       if (!val) return;
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(val);
-        } else {
-          const t = document.createElement('textarea');
-          t.value = val;
-          t.style.position = 'fixed';
-          t.style.left = '-9999px';
-          document.body.appendChild(t);
-          t.select();
-          document.execCommand('copy');
-          document.body.removeChild(t);
-        }
-        showToast('已复制');
-      } catch (_) {
-        showToast('复制失败');
-      }
+      showToast(await copyTextToClipboard(val) ? '已复制' : '复制失败');
     }
 
     async function toggleBlacklist(item) {

@@ -45,19 +45,21 @@
 | Drawer | `.drawer-item` `.drawer-group` `.drawer-group-toggle` `.drawer-sub-list` `.drawer-sub-item` | 全局导航 | 菜单数据、展开和激活状态可变 |
 | Button | `.btn` + `.btn-primary/.btn-ghost/.btn-ok/.btn-danger` | 登录、分页、普通操作 | 只增加有明确语义的变体 |
 | PageAction | `.btn-page-action` | 商品、订单、统计、定价、板卡、维护、风控 | 页面头部主操作统一使用 |
-| CardAction | `.btn-card-action` | 商品卡片、个人中心卡片 | 危险操作使用语义变体 |
-| HeaderTabs | `.orders-tabs-row` `.orders-tabs` `.orders-tab.header-tab` | 订单、板卡、风控；商品页只复用容器 | 数据项和激活状态可变 |
+| CardAction | `.btn-card-action` | 商品卡片、个人中心卡片、阶梯定价账号卡片 | 危险操作使用语义变体 |
+| FeatureSwitch | `.feature-switch` `.feature-switch-copy` `.feature-switch-track` | 页面级功能启停 | 使用原生 checkbox + `role="switch"`，页面只绑定状态和保存行为 |
+| HeaderTabs | `.orders-tabs-row` `.orders-tabs` `.orders-tab.header-tab` | 订单、板卡、风控、渠道价格 Sheet；商品页只复用容器 | 数据项和激活状态可变 |
 | QuickFilters | `.orders-quick` `.orders-quick-item.header-quick-tab` | 订单二级筛选 | 仅内容和选中值可变 |
 | HeadSummary | `.head-summary-text` | 商品、订单、统计、板卡、维护 | 文案可变，视觉层级固定 |
 | OrderCard | `.order-card` `.order-card-top` `.order-card-role` `.order-card-line` | 订单、商品及相关列表 | 通过附加类增加领域差异 |
 | StatusTag | `.chip` `.order-chip` `.plat` 及已有语义变体 | 商品、订单、统计状态 | 新状态必须保留统一语义 |
 | Pager | `.pager` `.page-info` + `.btn` | 商品、订单、风控 | 页码和禁用状态可变 |
 | Overlay | `.overlay` `.overlay-card` | 提示和确认类遮罩 | 内容可变，不重建遮罩层 |
-| Sheet | `.sheet` `.sheet-card` `.sheet-head` `.sheet-actions` `.sheet-btn` | 商品操作、授权、成本、板卡 | 字段和动作可变，外壳固定 |
+| Sheet | `.sheet` `.sheet-card` `.sheet-head` `.sheet-actions` `.sheet-btn` | 商品操作、授权、成本、板卡、渠道价格 | 字段和动作可变，外壳固定 |
 | GameAvatar | `.game-avatar` + 图片资源 | 商品、订单、统计、定价、板卡 | 图标和无图回退可变 |
 | Toast | `.toast` 及已有反馈变体 | 全局轻提示和详情提示 | 文案、持续时间和语义状态可变 |
 | GlobalLoading | `.global-loading` 及其子元素 | 全局请求等待 | 文案和可见状态可变 |
 | PullRefresh | `.pull-refresh` `.pull-refresh-inner` `.pull-spinner` | 商品列表下拉刷新 | 遵循固定 Loading 文案规则 |
+| ClipboardCopy | `copyTextToClipboard(text)` + `.copy-btn` | 商品账号、渠道价格错误日志 | 复制行为统一回退，调用方只负责反馈文案 |
 
 ## 5. 试用组件与待收口能力
 
@@ -71,6 +73,7 @@
 | ProductFilters | 商品页使用 `.stats-period-btn.product-filter-tab` | 与 HeaderTabs/周期筛选存在视觉复用，但契约仍是页面级组合 | 新页面不得照搬，应先确认归入 HeaderTabs 还是独立组件 |
 | SheetController | 各页面分别维护 Sheet 的打开、关闭、Loading 和结果状态 | 外壳统一但行为分散 | 可复用现有外壳；新增重复行为时应抽公共控制器 |
 | EmptyState | 多页面各自生成空数据内容 | 尚无统一结构和状态契约 | 新页面需先声明统一空状态方案 |
+| ChannelPriceResult | `.pricing-package-table` `.pricing-package-row` `.pricing-error-log-list` | 阶梯定价渠道价格 Sheet | 套餐列由渠道能力数据决定；不得把渠道特有字段写入通用账号卡片 |
 
 “试用”不表示禁止使用，而是表示复用时必须优先补齐公共契约，不能继续复制。
 
@@ -97,7 +100,7 @@
 | 页面 | 已有变体 | 基础组件关系 |
 | --- | --- | --- |
 | Profile | `.profile-card` `.profile-field` `.profile-mode-inline` `.profile-threshold-*` | 基于 Panel、Field、ModeOption |
-| Pricing | `.pricing-config-card` `.pricing-config-grid` `.pricing-metric-grid` `.pricing-account-card` `.pricing-price-pill` | 基于 Panel、Card、Field |
+| Pricing | `.pricing-ladder-head` `.pricing-ladder-list` `.pricing-account-card` `.pricing-ladder-grid` `.pricing-copy-field` | 基于 GameTabs、Panel、Card、Field、CardAction；四档输入和账号复制为页面变体 |
 | Board | `.board-top-row` `.board-card` `.board-mobile-card` `.board-account-list` `.board-account-tag` | 基于 PageAction、Panel、Card、GameAvatar |
 | Maintenance | `.maintenance-top-row` `.maintenance-summary-grid` `.maintenance-kpi-card` `.maintenance-log-card` `.maintenance-status-pill` | 基于 Panel、Card、StatusTag |
 | Products | `.product-filters` `.product-filter-tab` `.product-op-btn` `.product-op-btn-danger` | 基于 HeaderTabs、Button、CardAction |

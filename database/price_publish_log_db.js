@@ -392,6 +392,40 @@ async function listPricePublishItemLogsByBatchId(batchId) {
     }
 }
 
+async function listPricePublishItemLogsByAccount(userId, query = {}) {
+    await initPricePublishLogDb();
+    const uid = Number(userId || 0);
+    const channel = String(query.channel || '').trim();
+    const gameAccount = String(query.game_account || '').trim();
+    const gameName = String(query.game_name || '').trim();
+    const publishStatus = String(query.publish_status || '').trim();
+    const limit = Math.max(1, Math.min(100, Number(query.limit || 20)));
+    if (!uid || !channel || !gameAccount) return [];
+    const where = ['user_id = ?', 'channel = ?', 'game_account = ?', 'is_deleted = 0'];
+    const params = [uid, channel, gameAccount];
+    if (gameName) {
+        where.push('game_name = ?');
+        params.push(gameName);
+    }
+    if (publishStatus) {
+        where.push('publish_status = ?');
+        params.push(publishStatus);
+    }
+    const db = openPriceDatabase();
+    try {
+        const rows = await all(db, `
+            SELECT *
+            FROM price_publish_item_log
+            WHERE ${where.join(' AND ')}
+            ORDER BY id DESC
+            LIMIT ?
+        `, [...params, limit]);
+        return rows.map(rowToItem);
+    } finally {
+        db.close();
+    }
+}
+
 module.exports = {
     initPricePublishLogDb,
     createPricePublishBatchLog,
@@ -399,5 +433,6 @@ module.exports = {
     createPricePublishItemLog,
     listPricePublishBatchLogsByUser,
     getPricePublishBatchLogByBatchId,
-    listPricePublishItemLogsByBatchId
+    listPricePublishItemLogsByBatchId,
+    listPricePublishItemLogsByAccount
 };

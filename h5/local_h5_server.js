@@ -134,6 +134,13 @@ const {
     getUhaozuPricingDashboardByUser,
     saveUhaozuPricingDashboardConfigByUser
 } = require('../price/price_h5_service');
+const {
+    getPriceLadderDashboardByUser,
+    savePriceLadderRuleByUser,
+    setPriceLadderFeatureByUser,
+    getPriceLadderChannelResultByUser,
+    refreshPriceLadderChannelBaselineByUser
+} = require('../price/price_ladder_service');
 const { saveUhaozuPricingAccountCostByUser } = require('../price/price_rule_service');
 const {
     publishUhaozuPricingByUser,
@@ -142,6 +149,8 @@ const {
     listPricePublishItemLogsByBatchId
 } = require('../price/price_publish_service');
 const { initUserPriceRuleDb } = require('../database/user_price_rule_db');
+const { initAccountPriceLadderRuleDb } = require('../database/account_price_ladder_rule_db');
+const { initAccountChannelPriceBaselineDb } = require('../database/account_channel_price_baseline_db');
 const { initPricePublishLogDb } = require('../database/price_publish_log_db');
 const { initMaintenanceTaskLogDb } = require('../database/maintenance_task_log_db');
 const {
@@ -1371,6 +1380,77 @@ async function handlePricingUhaozu(req, res, urlObj) {
         withdrawal_fee_rate: urlObj.searchParams.get('withdrawal_fee_rate'),
         price_step: urlObj.searchParams.get('price_step'),
         deposit: urlObj.searchParams.get('deposit')
+    });
+    return json(res, 200, { ok: true, ...out });
+}
+
+async function handlePricingLadder(req, res, urlObj) {
+    const user = await requireAuth(req);
+    const out = await getPriceLadderDashboardByUser(user.id, {
+        game_name: urlObj.searchParams.get('game_name') || 'WZRY'
+    });
+    return json(res, 200, { ok: true, ...out });
+}
+
+async function handleSetPricingLadderAccount(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    try {
+        const rule = await savePriceLadderRuleByUser(user.id, {
+            game_name: body.game_name || 'WZRY',
+            game_id: body.game_id,
+            game_account: body.game_account,
+            action: body.action,
+            prices: body.prices,
+            expected_version: body.expected_version,
+            copied_from_game_account: body.copied_from_game_account
+        });
+        return json(res, 200, { ok: true, rule });
+    } catch (err) {
+        if (err && err.code === 'PRICE_LADDER_VERSION_CONFLICT') {
+            return json(res, 409, { ok: false, message: err.message });
+        }
+        throw err;
+    }
+}
+
+async function handleSetPricingLadderFeature(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    try {
+        const feature = await setPriceLadderFeatureByUser(user.id, {
+            enabled: body.enabled,
+            expected_version: body.expected_version
+        });
+        return json(res, 200, { ok: true, feature });
+    } catch (err) {
+        if (err && err.code === 'PRICE_LADDER_VERSION_CONFLICT') {
+            return json(res, 409, { ok: false, message: err.message });
+        }
+        throw err;
+    }
+}
+
+async function handlePricingLadderChannelResult(req, res, urlObj) {
+    const user = await requireAuth(req);
+    const gameAccount = String(urlObj.searchParams.get('game_account') || '').trim();
+    if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
+    const out = await getPriceLadderChannelResultByUser(user.id, {
+        game_name: urlObj.searchParams.get('game_name') || 'WZRY',
+        game_id: urlObj.searchParams.get('game_id') || '',
+        game_account: gameAccount
+    });
+    return json(res, 200, { ok: true, ...out });
+}
+
+async function handleRefreshPricingLadderBaseline(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    const out = await refreshPriceLadderChannelBaselineByUser(user.id, {
+        game_name: body.game_name || 'WZRY',
+        game_id: body.game_id,
+        game_account: body.game_account,
+        channel: body.channel || 'uhaozu'
     });
     return json(res, 200, { ok: true, ...out });
 }
@@ -2723,6 +2803,8 @@ async function bootstrap() {
     await initUserSessionDb();
     await initUserRuleDb();
     await initUserPriceRuleDb();
+    await initAccountPriceLadderRuleDb();
+    await initAccountChannelPriceBaselineDb();
     await initPricePublishLogDb();
     await initMaintenanceTaskLogDb();
     await initProdRiskEventDb();
@@ -2748,6 +2830,11 @@ async function bootstrap() {
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/calendar') return await handleStatsCalendar(req, res, urlObj);
             if (req.method === 'GET' && urlObj.pathname === '/api/stats/account-cost-detail') return await handleStatsAccountCostDetail(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/stats/refresh') return await handleStatsRefresh(req, res);
+            if (req.method === 'GET' && urlObj.pathname === '/api/pricing/ladder') return await handlePricingLadder(req, res, urlObj);
+            if (req.method === 'POST' && urlObj.pathname === '/api/pricing/ladder/account') return await handleSetPricingLadderAccount(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/pricing/ladder/feature') return await handleSetPricingLadderFeature(req, res);
+            if (req.method === 'GET' && urlObj.pathname === '/api/pricing/ladder/channel-result') return await handlePricingLadderChannelResult(req, res, urlObj);
+            if (req.method === 'POST' && urlObj.pathname === '/api/pricing/ladder/channel-baseline') return await handleRefreshPricingLadderBaseline(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/pricing/uhaozu') return await handlePricingUhaozu(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/pricing/uhaozu/config') return await handleSetPricingUhaozuConfig(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/pricing/uhaozu/account-cost') return await handleSetPricingUhaozuAccountCost(req, res);

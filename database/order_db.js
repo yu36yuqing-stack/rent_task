@@ -456,7 +456,7 @@ async function upsertOrder(input = {}) {
     const db = openOrderDatabase();
     try {
         const existed = await get(db, `
-            SELECT id, order_status
+            SELECT id, game_id, game_name, game_account, order_status, rec_amount, start_time
             FROM "order"
             WHERE user_id = ? AND channel = ? AND order_no = ? AND is_deleted = 0
             LIMIT 1
@@ -511,12 +511,31 @@ async function upsertOrder(input = {}) {
                 Number(existed.id)
             ]);
         }
-        const previousStatus = existed ? String(existed.order_status || '').trim() : '';
+        const previousOrder = existed ? {
+            game_id: String(existed.game_id || '').trim(),
+            game_name: String(existed.game_name || '').trim(),
+            game_account: String(existed.game_account || '').trim(),
+            order_status: String(existed.order_status || '').trim(),
+            rec_amount: Number(existed.rec_amount || 0),
+            start_time: String(existed.start_time || '').trim()
+        } : null;
+        const currentOrder = {
+            game_id: row.game_id,
+            game_name: row.game_name,
+            game_account: row.game_account,
+            order_status: row.order_status,
+            rec_amount: row.rec_amount,
+            start_time: row.start_time
+        };
+        const previousStatus = previousOrder ? previousOrder.order_status : '';
         return {
             created: !existed,
             previous_status: previousStatus,
             current_status: row.order_status,
-            status_changed: !existed || previousStatus !== row.order_status
+            status_changed: !existed || previousStatus !== row.order_status,
+            price_ladder_relevant_changed: hasFinishedPriceLadderContributionChanged(previousOrder, currentOrder),
+            previous_order: previousOrder,
+            current_order: currentOrder
         };
     } finally {
         db.close();
@@ -610,14 +629,32 @@ function todayDateText() {
 
 // 业务日：每天 06:00 切日。
 // 例如 2026-02-16 00:00~05:59 仍归属 2026-02-15。
-function businessDateText(cutoffHour = 6) {
-    const now = new Date();
-    const d = new Date(now.getTime());
+function businessDateText(cutoffHour = 6, nowValue = new Date()) {
+    const now = nowValue instanceof Date ? nowValue : new Date(nowValue);
+    const d = Number.isNaN(now.getTime()) ? new Date() : new Date(now.getTime());
     if (d.getHours() < Number(cutoffHour || 6)) {
         d.setDate(d.getDate() - 1);
     }
     const p = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function isFinishedPriceLadderStatus(status) {
+    const value = String(status || '').trim();
+    return value === '已完成' || value === '部分完成';
+}
+
+function finishedPriceLadderIdentity(order = {}) {
+    if (!isFinishedPriceLadderStatus(order.order_status)) return '';
+    return [
+        String(order.game_id || '').trim(),
+        String(order.game_account || '').trim(),
+        String(order.start_time || '').trim()
+    ].join('::');
+}
+
+function hasFinishedPriceLadderContributionChanged(previousOrder, currentOrder) {
+    return finishedPriceLadderIdentity(previousOrder || {}) !== finishedPriceLadderIdentity(currentOrder || {});
 }
 
 async function listTodayOrderCountByAccounts(userId, gameAccounts = [], dateText = '') {
@@ -701,6 +738,43 @@ async function listTodayPaidOrderCountByAccounts(userId, gameAccounts = [], date
         traceOrderCount(
             `[OrderCount] uid=${uid} result hit_accounts=${hitAccounts.length}/${keys.length} total_cnt=${totalCnt} sample="${sample}"`
         );
+        return out;
+    } finally {
+        db.close();
+    }
+}
+
+async function listBusinessDayFinishedOrderCountByAccounts(userId, gameAccounts = [], dateText = '') {
+    await initOrderDb();
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+
+    const keys = normalizeAccountKeys(gameAccounts);
+    if (keys.length === 0) return {};
+
+    const day = String(dateText || businessDateText(6)).slice(0, 10);
+    const dayStart6 = `${day} 06:00:00`;
+    const tupleSql = keys.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
+    const db = openOrderDatabase();
+    try {
+        const rows = await all(db, `
+            SELECT game_id, game_account, COUNT(*) AS cnt
+            FROM "order"
+            WHERE user_id = ?
+              AND is_deleted = 0
+              AND (${tupleSql})
+              AND start_time >= ?
+              AND start_time < datetime(?, '+1 day')
+              AND COALESCE(order_status, '') IN ('已完成', '部分完成')
+            GROUP BY game_id, game_account
+        `, [uid, ...keys.flatMap((x) => [x.game_id, x.game_account]), dayStart6, dayStart6]);
+        const out = {};
+        for (const row of rows) {
+            const acc = String(row.game_account || '').trim();
+            const gid = String(row.game_id || '1').trim() || '1';
+            if (!acc) continue;
+            out[`${gid}::${acc}`] = Number(row.cnt || 0);
+        }
         return out;
     } finally {
         db.close();
@@ -809,6 +883,7 @@ module.exports = {
     listOrders,
     listTodayOrderCountByAccounts,
     listTodayPaidOrderCountByAccounts,
+    listBusinessDayFinishedOrderCountByAccounts,
     listRolling24hPaidOrderCountByAccounts,
     listRentingOrderWindowByAccounts,
     _internal: {
@@ -822,7 +897,11 @@ module.exports = {
         rebuildOrderTableToTargetSchemaIfNeeded,
         ensureOrderTableBase,
         ensureOrderIndexes,
-        normalizeOrderTableData
+        normalizeOrderTableData,
+        businessDateText,
+        isFinishedPriceLadderStatus,
+        finishedPriceLadderIdentity,
+        hasFinishedPriceLadderContributionChanged
     },
     // 兼容旧调用名
     initUserOrderDb: initOrderDb,

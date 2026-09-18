@@ -83,17 +83,221 @@ function pickPriceFields(payload = {}) {
     };
 }
 
-function resolvePublishDeposit(options = {}, pricing = {}) {
-    const optionValue = options ? options.deposit : undefined;
-    if (optionValue !== undefined && optionValue !== null && String(optionValue).trim() !== '') {
-        const parsed = Number(optionValue);
-        if (!Number.isFinite(parsed) || parsed < 0) throw new Error('deposit 不合法');
-        return parsed;
+function deriveUhaozuPackagePriceSet(targetHour, baseline = {}) {
+    const hour = Number(targetHour || 0);
+    const baseHour = Number(baseline.rentalByHour || 0);
+    if (!Number.isFinite(hour) || hour <= 0) throw new Error('目标时租价不合法');
+    if (!Number.isFinite(baseHour) || baseHour <= 0) throw new Error('U号租当前时租价不完整');
+    const derive = (key) => {
+        const value = Number(baseline[key] || 0);
+        if (!Number.isFinite(value) || value <= 0) throw new Error(`U号租当前${key}价格不完整`);
+        return Number((hour * value / baseHour).toFixed(2));
+    };
+    return {
+        rentalByHour: Number(hour.toFixed(2)),
+        rentalByNight: derive('rentalByNight'),
+        rentalByDay: derive('rentalByDay'),
+        rentalByWeek: derive('rentalByWeek')
+    };
+}
+
+function samePublishPriceSet(target = {}, actual = {}) {
+    return ['rentalByHour', 'rentalByNight', 'rentalByDay', 'rentalByWeek'].every((key) => (
+        Number(Number(target[key] || 0).toFixed(2)) === Number(Number(actual[key] || 0).toFixed(2))
+    ));
+}
+
+function sanitizePriceLogPayload(value, depth = 0) {
+    if (value === null || value === undefined) return value;
+    if (depth > 6) return '[truncated]';
+    if (Array.isArray(value)) return value.map((item) => sanitizePriceLogPayload(item, depth + 1));
+    if (typeof value !== 'object') return value;
+    const sensitive = /(cookie|authorization|token|password|passwd|pwd|mobile|phone|idcard|identity|randstr)/i;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+        key,
+        sensitive.test(key) ? '[redacted]' : sanitizePriceLogPayload(item, depth + 1)
+    ]));
+}
+
+function normalizeUhaozuTargetPriceSet(prices = {}) {
+    const target = {
+        rentalByHour: Number(prices.hour ?? prices.rentalByHour ?? 0),
+        rentalByNight: Number(prices.night ?? prices.rentalByNight ?? 0),
+        rentalByDay: Number(prices.day ?? prices.rentalByDay ?? 0),
+        rentalByWeek: Number(prices.week ?? prices.rentalByWeek ?? 0)
+    };
+    if (Object.values(target).some((value) => !Number.isFinite(value) || value <= 0)) {
+        throw new Error('U号租目标套餐价格不完整');
     }
-    const configValue = pricing && pricing.config ? pricing.config.deposit : undefined;
-    const parsedConfig = Number(configValue);
-    if (Number.isFinite(parsedConfig) && parsedConfig >= 0) return parsedConfig;
-    return 100;
+    return Object.fromEntries(Object.entries(target).map(([key, value]) => [key, Number(value.toFixed(2))]));
+}
+
+async function publishUhaozuAccountPriceSetByUser(userId, input = {}, options = {}) {
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+    const gameId = String(input.game_id || '').trim();
+    const gameName = String(input.game_name || '').trim();
+    const gameAccount = String(input.game_account || '').trim();
+    if (!gameId || !gameName || !gameAccount) throw new Error('调价账号信息不完整');
+    const targetPrices = normalizeUhaozuTargetPriceSet(input.prices || {});
+    const accountRows = await listAllAccountsByUser(uid);
+    const row = accountRows.find((item) => (
+        String(item.game_id || '').trim() === gameId
+        && String(item.game_account || '').trim() === gameAccount
+    ));
+    if (!row) throw new Error('调价账号不存在');
+    const info = row.channel_prd_info && row.channel_prd_info.uhaozu && typeof row.channel_prd_info.uhaozu === 'object'
+        ? row.channel_prd_info.uhaozu
+        : {};
+    const goodsId = String(input.goods_id || info.prd_id || info.goods_id || '').trim();
+    if (!goodsId) throw new Error('缺少 U号租商品ID');
+
+    const auth = options.auth || await getUhaozuAuthPayloadByUser(uid);
+    const queryGoods = options.query_goods || queryGoodsModifyPayloadByGoodsId;
+    const modifyGoods = options.modify_goods || modifyUhaozuGoods;
+    const batchId = String(input.batch_id || buildPublishBatchId(uid, 'uhaozu-ladder')).trim();
+    const startedAt = nowText();
+    await createPricePublishBatchLog({
+        batch_id: batchId,
+        user_id: uid,
+        channel: 'uhaozu',
+        game_name: gameName,
+        trigger_source: String(input.trigger_source || 'price_ladder').trim(),
+        request_snapshot: {
+            game_id: gameId,
+            game_account: gameAccount,
+            tier: Number(input.tier || 0),
+            prices: targetPrices
+        },
+        total_count: 1,
+        success_count: 0,
+        fail_count: 0,
+        status: 'running',
+        start_time: startedAt,
+        desc: 'publish account price ladder'
+    });
+
+    let beforePayload = null;
+    let afterPayload = null;
+    let modifyOutput = null;
+    try {
+        beforePayload = await queryGoods(goodsId, auth);
+        const beforeInfo = beforePayload && beforePayload.info && typeof beforePayload.info === 'object'
+            ? beforePayload.info
+            : {};
+        modifyOutput = await modifyGoods(goodsId, {
+            info: {
+                ...targetPrices,
+                deposit: Number(beforeInfo.deposit || 0)
+            }
+        }, auth);
+        afterPayload = await queryGoods(goodsId, auth);
+        const afterPrices = pickPriceFields(afterPayload);
+        if (!samePublishPriceSet(targetPrices, afterPrices)) {
+            throw new Error(`U号租价格回读不一致: target=${JSON.stringify(targetPrices)} actual=${JSON.stringify(afterPrices)}`);
+        }
+        const payloadInfo = modifyOutput && modifyOutput.payload && modifyOutput.payload.info && typeof modifyOutput.payload.info === 'object'
+            ? modifyOutput.payload.info
+            : {};
+        await upsertUserGameAccount({
+            user_id: uid,
+            game_account: gameAccount,
+            game_id: gameId,
+            game_name: gameName,
+            account_remark: String(row.account_remark || '').trim(),
+            channel_prd_info: {
+                uhaozu: {
+                    ...info,
+                    rentalByHour: afterPrices.rentalByHour,
+                    rentalByNight: afterPrices.rentalByNight,
+                    rentalByDay: afterPrices.rentalByDay,
+                    rentalByWeek: afterPrices.rentalByWeek,
+                    deposit: Number(payloadInfo.deposit != null ? payloadInfo.deposit : beforeInfo.deposit || 0)
+                }
+            },
+            desc: 'publish account price ladder to uhaozu'
+        });
+        const beforePrices = pickPriceFields(beforePayload);
+        await createPricePublishItemLog({
+            batch_id: batchId,
+            user_id: uid,
+            channel: 'uhaozu',
+            game_name: gameName,
+            game_account: gameAccount,
+            goods_id: goodsId,
+            publish_status: 'success',
+            before_data: sanitizePriceLogPayload(beforePayload),
+            request_data: sanitizePriceLogPayload(modifyOutput && modifyOutput.payload),
+            response_data: sanitizePriceLogPayload(modifyOutput && modifyOutput.result),
+            after_data: sanitizePriceLogPayload(afterPayload),
+            price_before_hour: beforePrices.rentalByHour,
+            price_before_night: beforePrices.rentalByNight,
+            price_before_day: beforePrices.rentalByDay,
+            price_before_week: beforePrices.rentalByWeek,
+            price_target_hour: targetPrices.rentalByHour,
+            price_target_night: targetPrices.rentalByNight,
+            price_target_day: targetPrices.rentalByDay,
+            price_target_week: targetPrices.rentalByWeek,
+            price_after_hour: afterPrices.rentalByHour,
+            price_after_night: afterPrices.rentalByNight,
+            price_after_day: afterPrices.rentalByDay,
+            price_after_week: afterPrices.rentalByWeek,
+            start_time: startedAt,
+            end_time: nowText(),
+            desc: 'publish account price ladder item'
+        });
+        await updatePricePublishBatchLog(batchId, {
+            total_count: 1,
+            success_count: 1,
+            fail_count: 0,
+            status: 'success',
+            end_time: nowText(),
+            desc: 'publish account price ladder completed'
+        });
+        return { ok: true, batch_id: batchId, goods_id: goodsId, prices: afterPrices };
+    } catch (error) {
+        const message = String(error && error.message ? error.message : error);
+        const beforePrices = pickPriceFields(beforePayload);
+        const afterPrices = pickPriceFields(afterPayload);
+        await createPricePublishItemLog({
+            batch_id: batchId,
+            user_id: uid,
+            channel: 'uhaozu',
+            game_name: gameName,
+            game_account: gameAccount,
+            goods_id: goodsId,
+            publish_status: 'fail',
+            fail_message: message,
+            before_data: sanitizePriceLogPayload(beforePayload),
+            request_data: sanitizePriceLogPayload(modifyOutput && modifyOutput.payload || { info: targetPrices }),
+            response_data: sanitizePriceLogPayload(modifyOutput && modifyOutput.result),
+            after_data: sanitizePriceLogPayload(afterPayload),
+            price_before_hour: beforePrices.rentalByHour,
+            price_before_night: beforePrices.rentalByNight,
+            price_before_day: beforePrices.rentalByDay,
+            price_before_week: beforePrices.rentalByWeek,
+            price_target_hour: targetPrices.rentalByHour,
+            price_target_night: targetPrices.rentalByNight,
+            price_target_day: targetPrices.rentalByDay,
+            price_target_week: targetPrices.rentalByWeek,
+            price_after_hour: afterPrices.rentalByHour,
+            price_after_night: afterPrices.rentalByNight,
+            price_after_day: afterPrices.rentalByDay,
+            price_after_week: afterPrices.rentalByWeek,
+            start_time: startedAt,
+            end_time: nowText(),
+            desc: 'publish account price ladder item'
+        });
+        await updatePricePublishBatchLog(batchId, {
+            total_count: 1,
+            success_count: 0,
+            fail_count: 1,
+            status: 'fail',
+            end_time: nowText(),
+            desc: 'publish account price ladder failed'
+        });
+        return { ok: false, batch_id: batchId, goods_id: goodsId, message };
+    }
 }
 
 async function publishUhaozuPricingByUser(userId, options = {}) {
@@ -102,7 +306,6 @@ async function publishUhaozuPricingByUser(userId, options = {}) {
 
     const gameName = String(options.game_name || 'WZRY').trim() || 'WZRY';
     const pricing = await getUhaozuPricingDashboardByUser(uid, { game_name: gameName });
-    const publishDeposit = resolvePublishDeposit(options, pricing);
     const auth = await getUhaozuAuthPayloadByUser(uid);
     const batchId = buildPublishBatchId(uid, 'uhaozu');
     const batchStartTime = nowText();
@@ -166,18 +369,29 @@ async function publishUhaozuPricingByUser(userId, options = {}) {
                 desc: 'publish pricing item'
             });
         } else {
+            let beforePayload = null;
+            let targetPrices = null;
+            let afterPayload = null;
             try {
-                const beforePayload = await queryGoodsModifyPayloadByGoodsId(goodsId, auth);
+                beforePayload = await queryGoodsModifyPayloadByGoodsId(goodsId, auth);
+                const beforeInfo = beforePayload && beforePayload.info && typeof beforePayload.info === 'object'
+                    ? beforePayload.info
+                    : {};
+                targetPrices = deriveUhaozuPackagePriceSet(targetPrice, beforeInfo);
                 const out = await modifyUhaozuGoods(goodsId, {
                     info: {
-                        rentalByHour: targetPrice,
-                        deposit: publishDeposit
+                        ...targetPrices,
+                        deposit: Number(beforeInfo.deposit || 0)
                     }
                 }, auth);
-                const afterPayload = await queryGoodsModifyPayloadByGoodsId(goodsId, auth);
+                afterPayload = await queryGoodsModifyPayloadByGoodsId(goodsId, auth);
                 const payloadInfo = out && out.payload && out.payload.info && typeof out.payload.info === 'object'
                     ? out.payload.info
                     : {};
+                const afterPrices = pickPriceFields(afterPayload);
+                if (!samePublishPriceSet(targetPrices, afterPrices)) {
+                    throw new Error(`U号租价格回读不一致: target=${JSON.stringify(targetPrices)} actual=${JSON.stringify(afterPrices)}`);
+                }
                 await upsertUserGameAccount({
                     user_id: uid,
                     game_account: gameAccount,
@@ -187,11 +401,11 @@ async function publishUhaozuPricingByUser(userId, options = {}) {
                     channel_prd_info: {
                         uhaozu: {
                             ...info,
-                            rentalByHour: Number(payloadInfo.rentalByHour || targetPrice),
-                            rentalByNight: Number(payloadInfo.rentalByNight || info.rentalByNight || 0),
-                            rentalByDay: Number(payloadInfo.rentalByDay || info.rentalByDay || 0),
-                            rentalByWeek: Number(payloadInfo.rentalByWeek || info.rentalByWeek || 0),
-                            deposit: Number(payloadInfo.deposit != null ? payloadInfo.deposit : publishDeposit)
+                            rentalByHour: afterPrices.rentalByHour,
+                            rentalByNight: afterPrices.rentalByNight,
+                            rentalByDay: afterPrices.rentalByDay,
+                            rentalByWeek: afterPrices.rentalByWeek,
+                            deposit: Number(payloadInfo.deposit != null ? payloadInfo.deposit : beforeInfo.deposit || 0)
                         }
                     },
                     desc: 'publish pricing to uhaozu'
@@ -200,7 +414,7 @@ async function publishUhaozuPricingByUser(userId, options = {}) {
                     game_account: gameAccount,
                     goods_id: goodsId,
                     suggested_listing_hourly_price: targetPrice,
-                    current_listing_hourly_price: Number(payloadInfo.rentalByHour || targetPrice),
+                    current_listing_hourly_price: afterPrices.rentalByHour,
                     batch_id: batchId,
                     ok: true,
                     message: 'ok'
@@ -208,7 +422,6 @@ async function publishUhaozuPricingByUser(userId, options = {}) {
                 results.push(result);
                 const beforePrices = pickPriceFields(beforePayload);
                 const requestPrices = pickPriceFields(out && out.payload);
-                const afterPrices = pickPriceFields(afterPayload);
                 await createPricePublishItemLog({
                     batch_id: batchId,
                     user_id: uid,
@@ -218,10 +431,10 @@ async function publishUhaozuPricingByUser(userId, options = {}) {
                     goods_id: goodsId,
                     publish_status: 'success',
                     fail_message: '',
-                    before_data: beforePayload,
-                    request_data: out && out.payload,
-                    response_data: out && out.result,
-                    after_data: afterPayload,
+                    before_data: sanitizePriceLogPayload(beforePayload),
+                    request_data: sanitizePriceLogPayload(out && out.payload),
+                    response_data: sanitizePriceLogPayload(out && out.result),
+                    after_data: sanitizePriceLogPayload(afterPayload),
                     price_before_hour: beforePrices.rentalByHour,
                     price_before_night: beforePrices.rentalByNight,
                     price_before_day: beforePrices.rentalByDay,
@@ -257,7 +470,21 @@ async function publishUhaozuPricingByUser(userId, options = {}) {
                     goods_id: goodsId,
                     publish_status: 'fail',
                     fail_message: result.message,
-                    price_target_hour: targetPrice,
+                    before_data: sanitizePriceLogPayload(beforePayload),
+                    request_data: targetPrices ? sanitizePriceLogPayload({ info: targetPrices }) : null,
+                    after_data: sanitizePriceLogPayload(afterPayload),
+                    price_before_hour: pickPriceFields(beforePayload).rentalByHour,
+                    price_before_night: pickPriceFields(beforePayload).rentalByNight,
+                    price_before_day: pickPriceFields(beforePayload).rentalByDay,
+                    price_before_week: pickPriceFields(beforePayload).rentalByWeek,
+                    price_target_hour: targetPrices ? targetPrices.rentalByHour : targetPrice,
+                    price_target_night: targetPrices ? targetPrices.rentalByNight : 0,
+                    price_target_day: targetPrices ? targetPrices.rentalByDay : 0,
+                    price_target_week: targetPrices ? targetPrices.rentalByWeek : 0,
+                    price_after_hour: pickPriceFields(afterPayload).rentalByHour,
+                    price_after_night: pickPriceFields(afterPayload).rentalByNight,
+                    price_after_day: pickPriceFields(afterPayload).rentalByDay,
+                    price_after_week: pickPriceFields(afterPayload).rentalByWeek,
                     start_time: itemStartTime,
                     end_time: nowText(),
                     desc: 'publish pricing item'
@@ -293,6 +520,7 @@ async function publishUhaozuPricingByUser(userId, options = {}) {
 
 module.exports = {
     publishUhaozuPricingByUser,
+    publishUhaozuAccountPriceSetByUser,
     listPricePublishBatchLogsByUser,
     getPricePublishBatchLogByBatchId,
     listPricePublishItemLogsByBatchId,
@@ -300,6 +528,12 @@ module.exports = {
         randomDelayMs,
         isAuthRowUsable,
         buildPublishBatchId,
-        pickPriceFields
+        pickPriceFields,
+        deriveUhaozuPackagePriceSet,
+        samePublishPriceSet,
+        sanitizePriceLogPayload,
+        normalizeUhaozuTargetPriceSet,
+        sleep,
+        getUhaozuAuthPayloadByUser
     }
 };
