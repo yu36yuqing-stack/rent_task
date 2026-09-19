@@ -395,46 +395,11 @@ async function setPriceLadderFeatureByUser(userId, input = {}) {
     });
 }
 
-async function refreshPriceLadderChannelBaselineByUser(userId, input = {}) {
-    const uid = Number(userId || 0);
-    if (!uid) throw new Error('user_id 不合法');
-    const game = normalizeGameProfile(input.game_id, input.game_name || 'WZRY');
-    const account = String(input.game_account || '').trim();
-    const channel = String(input.channel || 'uhaozu').trim();
-    if (channel !== 'uhaozu') throw new Error('当前仅支持更新 U号租价格基准');
-    const allAccounts = await listAllAccountsByUser(uid);
-    const target = allAccounts.find((row) => (
-        isAvailableAccount(row)
-        && String(row.game_id || '').trim() === game.game_id
-        && String(row.game_account || '').trim() === account
-    ));
-    if (!target) throw new Error('账号不存在、已出售或不属于当前游戏');
-    const remote = pickUhaozuPriceSet(target);
-    if (!remote.complete) throw new Error('U号租当前套餐价格不完整，不能更新基准');
-    await saveAccountChannelPriceBaseline(uid, {
-        game_id: game.game_id,
-        game_name: game.game_name,
-        game_account: account,
-        channel,
-        goods_id: remote.goods_id,
-        prices: remote.prices
-    }, {
-        replace: true,
-        desc: 'refreshed by h5 channel price result'
-    });
-    return getPriceLadderChannelResultByUser(uid, {
-        game_id: game.game_id,
-        game_name: game.game_name,
-        game_account: account
-    });
-}
-
 module.exports = {
     getPriceLadderDashboardByUser,
     savePriceLadderRuleByUser,
     setPriceLadderFeatureByUser,
     getPriceLadderChannelResultByUser,
-    refreshPriceLadderChannelBaselineByUser,
     _internal: {
         roundMoney,
         pickCurrentUhaozuPrice,

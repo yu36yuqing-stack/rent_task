@@ -145,6 +145,16 @@ async function main() {
         }
 
         const targetCard = '[data-pricing-account-card="hpjy-target"]';
+        await page.type('#pricingSearchInput', '待复制');
+        await page.waitForFunction(() => (
+            document.querySelectorAll('[data-pricing-account-card]').length === 1
+            && document.getElementById('pricingSearchSummary').textContent.includes('1 / 共 3')
+        ));
+        await page.$eval('#pricingSearchInput', (input) => {
+            input.value = '';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await page.waitForFunction(() => document.querySelectorAll('[data-pricing-account-card]').length === 3);
         await page.click(`${targetCard} [data-pricing-action]`);
         await page.waitForSelector(`${targetCard} [data-pricing-copy]:not([disabled])`);
         await page.select(`${targetCard} [data-pricing-copy]`, 'hpjy-source');
@@ -175,9 +185,14 @@ async function main() {
         const desktopChannelState = await page.evaluate(() => ({
             channelTabs: Array.from(document.querySelectorAll('#pricingChannelTabs [data-pricing-channel-tab]')).map((node) => node.textContent.trim()),
             tierRows: document.querySelectorAll('#pricingChannelSheet .pricing-package-row:not(.pricing-package-header)').length,
-            sheetText: document.getElementById('pricingChannelBody').textContent
+            sheetText: document.getElementById('pricingChannelBody').textContent,
+            hasBaselineAction: Boolean(document.querySelector('[data-pricing-refresh-baseline]'))
         }));
-        if (desktopChannelState.channelTabs.join(',') !== 'U号租,租号玩,悠悠租号' || desktopChannelState.tierRows !== 4) {
+        if (desktopChannelState.channelTabs.join(',') !== 'U号租,租号玩,悠悠租号'
+            || desktopChannelState.tierRows !== 4
+            || desktopChannelState.hasBaselineAction
+            || desktopChannelState.sheetText.includes('已冻结基准')
+            || desktopChannelState.sheetText.includes('价格基准')) {
             throw new Error(`渠道价格抽屉内容错误: ${JSON.stringify(desktopChannelState)}`);
         }
         await page.click('[data-pricing-channel-tab="zuhaowang"]');
@@ -195,7 +210,7 @@ async function main() {
         });
         await page.click('#pricingChannelCloseBtn');
 
-        await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
+        await page.setViewport({ width: 390, height: 640, deviceScaleFactor: 1 });
         await page.reload({ waitUntil: 'networkidle0' });
         await page.click('[data-pricing-game="和平精英"]');
         await page.waitForSelector(targetCard);
@@ -218,13 +233,28 @@ async function main() {
         await page.waitForSelector('#pricingChannelSheet:not(.hidden) .pricing-package-row.is-active');
         const channelLayout = await page.evaluate(() => {
             const sheet = document.querySelector('#pricingChannelSheet .pricing-channel-sheet-card');
+            const body = document.getElementById('pricingChannelBody');
             const rows = Array.from(document.querySelectorAll('#pricingChannelSheet .pricing-package-row:not(.pricing-package-header)'));
+            const packageLine = document.querySelector('#pricingChannelSheet .pricing-package-line');
             const rect = sheet.getBoundingClientRect();
+            body.scrollTop = body.scrollHeight;
+            const bodyRect = body.getBoundingClientRect();
+            const lastRowRect = rows.at(-1).getBoundingClientRect();
             return {
                 documentWidth: document.documentElement.scrollWidth,
                 viewportWidth: window.innerWidth,
                 sheetLeft: rect.left,
                 sheetRight: rect.right,
+                sheetHeight: rect.height,
+                sheetRows: getComputedStyle(sheet).gridTemplateRows,
+                bodyHeight: bodyRect.height,
+                bodyClientHeight: body.clientHeight,
+                bodyScrollHeight: body.scrollHeight,
+                bodyScrollable: body.scrollHeight > body.clientHeight,
+                bodyScrolled: body.scrollTop > 0,
+                lastRowVisible: lastRowRect.bottom <= bodyRect.bottom + 1 && lastRowRect.top >= bodyRect.top - 1,
+                packageColumns: getComputedStyle(packageLine).gridTemplateColumns.split(' ').filter(Boolean).length,
+                rowColumns: getComputedStyle(rows[0]).gridTemplateColumns.split(' ').filter(Boolean).length,
                 rowsInside: rows.every((row) => {
                     const rowRect = row.getBoundingClientRect();
                     return rowRect.left >= rect.left && rowRect.right <= rect.right;
@@ -232,7 +262,9 @@ async function main() {
             };
         });
         if (channelLayout.documentWidth > channelLayout.viewportWidth || channelLayout.sheetLeft < 0
-            || channelLayout.sheetRight > channelLayout.viewportWidth || !channelLayout.rowsInside) {
+            || channelLayout.sheetRight > channelLayout.viewportWidth || !channelLayout.rowsInside
+            || !channelLayout.bodyScrollable || !channelLayout.bodyScrolled || !channelLayout.lastRowVisible
+            || channelLayout.packageColumns !== 3 || channelLayout.rowColumns !== 3) {
             throw new Error(`移动端渠道价格溢出: ${JSON.stringify(channelLayout)}`);
         }
         await page.screenshot({

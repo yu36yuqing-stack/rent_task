@@ -1749,6 +1749,18 @@
       white-space: nowrap;
     }
 
+    .list-search-field {
+      margin-top: 0;
+    }
+
+    #pricingView .pricing-search-field {
+      width: min(420px, 100%);
+    }
+
+    #pricingView .pricing-search-field input {
+      font-size: 14px;
+    }
+
     #pricingView .pricing-ladder-list {
       display: grid;
       gap: 8px;
@@ -1933,7 +1945,12 @@
     .pricing-channel-sheet-card {
       width: min(760px, 100%);
       max-height: min(86vh, 780px);
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
       overflow: hidden;
+    }
+
+    .pricing-channel-sheet-card .sheet-actions {
+      grid-template-columns: 1fr;
     }
 
     .pricing-channel-tabs,
@@ -1962,12 +1979,16 @@
     }
 
     .pricing-channel-body {
-      display: grid;
-      gap: 10px;
-      min-height: 180px;
-      max-height: min(62vh, 590px);
+      display: block;
+      min-height: 0;
       overflow-y: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
       padding: 4px 8px 8px;
+    }
+
+    .pricing-channel-body > * + * {
+      margin-top: 10px;
     }
 
     .pricing-channel-empty {
@@ -1987,8 +2008,7 @@
       font-size: 14px;
     }
 
-    .pricing-channel-current,
-    .pricing-channel-summary {
+    .pricing-channel-current {
       display: grid;
       gap: 8px;
       padding: 10px 0;
@@ -1996,8 +2016,6 @@
     }
 
     .pricing-channel-current > div:first-child,
-    .pricing-channel-summary > div:first-child,
-    .pricing-channel-inline-actions,
     .pricing-error-log-head {
       display: flex;
       align-items: center;
@@ -2006,16 +2024,14 @@
     }
 
     .pricing-channel-current span,
-    .pricing-channel-summary span,
-    .pricing-channel-inline-actions {
+    .pricing-channel-meta {
       color: #66778b;
-      font-size: 11px;
+      font-size: 12px;
     }
 
-    .pricing-channel-current strong,
-    .pricing-channel-summary strong {
+    .pricing-channel-current strong {
       color: #283b51;
-      font-size: 12px;
+      font-size: 13px;
     }
 
     .pricing-package-line {
@@ -2028,11 +2044,6 @@
       color: #30465e;
       font-size: 12px;
       white-space: nowrap;
-    }
-
-    .pricing-ratio-line span {
-      color: #76879a;
-      font-size: 10px;
     }
 
     .pricing-package-table {
@@ -2082,8 +2093,10 @@
       font-weight: 600;
     }
 
-    .pricing-channel-inline-actions {
+    .pricing-channel-meta {
       min-height: 30px;
+      display: flex;
+      align-items: center;
     }
 
     .pricing-error-log-list {
@@ -2151,11 +2164,12 @@
       }
 
       .pricing-channel-sheet-card {
+        height: 92vh;
         max-height: 92vh;
       }
 
       .pricing-package-line {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
 
       .pricing-package-header {
@@ -2163,9 +2177,8 @@
       }
 
       .pricing-package-row {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        grid-template-rows: repeat(3, auto);
-        min-height: 88px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        min-height: 90px;
         align-content: start;
         padding: 8px;
       }
@@ -2184,10 +2197,6 @@
       .pricing-package-value:nth-of-type(3)::before { content: '包天 '; color: #7a899a; }
       .pricing-package-value:nth-of-type(4)::before { content: '包周 '; color: #7a899a; }
 
-      .pricing-channel-inline-actions {
-        align-items: flex-start;
-        flex-direction: column;
-      }
     }
 
     #boardView.orders-view {
@@ -2204,10 +2213,6 @@
     #boardView .board-head-bar {
       display: grid;
       gap: 8px;
-    }
-
-    #boardView .board-search-field {
-      margin-top: 0;
     }
 
     #boardView .board-filter-tabs {

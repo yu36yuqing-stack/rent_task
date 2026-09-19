@@ -32,6 +32,18 @@ assert.strictEqual(helpers.pricingApplyStatusText('pending'), '待执行换档')
 assert.strictEqual(helpers.pricingApplyStatusText('blocked'), '受上下架安全规则阻塞');
 assert.strictEqual(helpers.pricingApplyStatusText('failed'), '上次换档失败');
 assert.strictEqual(helpers.pricingApplyStatusText('unknown'), '套餐数据暂不完整');
+assert.strictEqual(helpers.pricingTierLabel(1), '第 1 单价（完成 0 单）');
+assert.strictEqual(helpers.pricingTierLabel(2), '第 2 单价（完成 1 单后）');
+assert.strictEqual(helpers.pricingTierLabel(9), '第 4 单价（完成 3 单后）');
+
+const filteredByName = helpers.filterPricingItems([
+    { display_name: '呆小姚', game_account: '2630403808' },
+    { display_name: '和平一号', game_account: 'hpjy-a' }
+], '小姚');
+assert.strictEqual(filteredByName.length, 1);
+assert.strictEqual(filteredByName[0].game_account, '2630403808');
+assert.strictEqual(helpers.filterPricingItems(filteredByName, '2630').length, 1);
+assert.strictEqual(helpers.filterPricingItems(filteredByName, '不存在').length, 0);
 
 const draft = helpers.normalizePricingDraft({
     prices: [2.4, 3.4],

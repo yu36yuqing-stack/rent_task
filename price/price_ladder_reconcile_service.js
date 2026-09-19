@@ -27,13 +27,13 @@ const {
 } = require('../database/price_ladder_feature_config_db');
 const { listBlacklistSourcesByUserAndAccounts } = require('../database/user_blacklist_source_db');
 const { listUserGameAccounts } = require('../database/user_game_account_db');
-const { normalizeOnePlatformStatus, isRestrictedLikeStatus } = require('../product/prod_channel_status');
 const { publishUhaozuAccountPriceSetByUser } = require('./price_publish_service');
 const { _internal: priceInternal } = require('./price_ladder_service');
 
 const CHANNEL = 'uhaozu';
 const DAILY_RESET_JOB_KEY = 'price_ladder_daily_reset';
 const RETRY_DELAY_MINUTES = 30;
+const NON_BLOCKING_BLACKLIST_SOURCES = new Set(['order_cooldown', 'platform_face_verify']);
 
 function tierByCompletedCount(count) {
     return Math.min(4, Math.max(1, Math.floor(Number(count || 0)) + 1));
@@ -258,14 +258,16 @@ async function getPriceLadderApplyBlock(userId, accountRow = {}) {
         listBlacklistSourcesByUserAndAccounts(uid, [key], { active_only: true }),
         listRentingOrderWindowByAccounts(uid, [key])
     ]);
-    if (blacklistRows.length > 0) {
-        return { blocked: true, reason: `blacklist:${String(blacklistRows[0].reason || blacklistRows[0].source || '').trim()}` };
+    const blockingBlacklist = blacklistRows.find((row) => (
+        !NON_BLOCKING_BLACKLIST_SOURCES.has(String(row && row.source || '').trim())
+    ));
+    if (blockingBlacklist) {
+        return {
+            blocked: true,
+            reason: `blacklist:${String(blockingBlacklist.reason || blockingBlacklist.source || '').trim()}`
+        };
     }
     if (renting[`${key.game_id}::${key.game_account}`]) return { blocked: true, reason: 'active_order' };
-    const normalized = normalizeOnePlatformStatus('uhaozu', accountRow.channel_status, accountRow.channel_prd_info);
-    if (normalized.code === 'renting' || isRestrictedLikeStatus(normalized.code)) {
-        return { blocked: true, reason: `uhaozu_status:${normalized.code}` };
-    }
     return { blocked: false, reason: '' };
 }
 
@@ -495,6 +497,7 @@ module.exports = {
         retryAtText,
         isRetryDue,
         listAllAccountsByUser,
+        NON_BLOCKING_BLACKLIST_SOURCES,
         CHANNEL,
         DAILY_RESET_JOB_KEY
     }

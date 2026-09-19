@@ -54,6 +54,7 @@ function ensurePricingLadderState() {
   const pricing = state.pricing || (state.pricing = {});
   if (!pricing.game_name) pricing.game_name = 'WZRY';
   if (!Array.isArray(pricing.list)) pricing.list = [];
+  if (typeof pricing.query !== 'string') pricing.query = '';
   if (!pricing.editing || typeof pricing.editing !== 'object') pricing.editing = {};
   if (!pricing.saving || typeof pricing.saving !== 'object') pricing.saving = {};
   if (!pricing.drafts || typeof pricing.drafts !== 'object') pricing.drafts = {};
@@ -67,7 +68,6 @@ function ensurePricingLadderState() {
       channel: 'uhaozu',
       view: 'result',
       loading: false,
-      refreshing: false,
       payload: null,
       error: ''
     };
@@ -108,6 +108,22 @@ function pricingApplyStatusText(status) {
   return '套餐数据暂不完整';
 }
 
+function pricingTierLabel(tier) {
+  const value = Math.min(4, Math.max(1, Number(tier || 1)));
+  if (value === 1) return '第 1 单价（完成 0 单）';
+  return `第 ${value} 单价（完成 ${value - 1} 单后）`;
+}
+
+function filterPricingItems(items = [], query = '') {
+  const keyword = String(query || '').trim().toLowerCase();
+  const list = Array.isArray(items) ? items : [];
+  if (!keyword) return list;
+  return list.filter((item) => (
+    String(item && item.display_name || '').toLowerCase().includes(keyword)
+    || String(item && item.game_account || '').toLowerCase().includes(keyword)
+  ));
+}
+
 function renderPricingChannelLogs(result = {}) {
   const logs = Array.isArray(result.error_logs) ? result.error_logs : [];
   if (logs.length === 0) {
@@ -136,13 +152,9 @@ function renderPricingChannelLogs(result = {}) {
 function renderUhaozuChannelResult(payload = {}) {
   const result = payload.channel_result || {};
   const sheetState = ensurePricingLadderState().channel_sheet;
-  const baseline = result.baseline || null;
   const remote = result.remote_current || {};
   const tiers = Array.isArray(result.tiers) ? result.tiers : [];
   const errors = Array.isArray(result.error_logs) ? result.error_logs : [];
-  const baselineText = result.baseline_status === 'saved'
-    ? '已冻结基准'
-    : (result.baseline_status === 'preview' ? '使用当前同步价格预览，保存配置后冻结' : '套餐价格不完整');
   const viewTabs = `
     <div class="orders-tabs pricing-result-tabs">
       <button class="orders-tab header-tab ${sheetState.view === 'result' ? 'active' : ''}" data-pricing-result-view="result" type="button">套餐结果</button>
@@ -150,29 +162,9 @@ function renderUhaozuChannelResult(payload = {}) {
     </div>
   `;
   if (sheetState.view === 'logs') return `${viewTabs}${renderPricingChannelLogs(result)}`;
-  const baselineBlock = baseline ? `
-    <div class="pricing-channel-summary">
-      <div>
-        <span>价格基准</span>
-        <strong>${escapePricingHtml(baselineText)}</strong>
-      </div>
-      <div class="pricing-package-line">
-        <span>时租 ${escapePricingHtml(formatPricingResultMoney(baseline.prices && baseline.prices.hour))}</span>
-        <span>包夜 ${escapePricingHtml(formatPricingResultMoney(baseline.prices && baseline.prices.night))}</span>
-        <span>包天 ${escapePricingHtml(formatPricingResultMoney(baseline.prices && baseline.prices.day))}</span>
-        <span>包周 ${escapePricingHtml(formatPricingResultMoney(baseline.prices && baseline.prices.week))}</span>
-      </div>
-      <div class="pricing-package-line pricing-ratio-line">
-        <span>比例 1</span>
-        <span>${escapePricingHtml(String(baseline.ratios && baseline.ratios.night || '-'))}</span>
-        <span>${escapePricingHtml(String(baseline.ratios && baseline.ratios.day || '-'))}</span>
-        <span>${escapePricingHtml(String(baseline.ratios && baseline.ratios.week || '-'))}</span>
-      </div>
-    </div>
-  ` : '<div class="pricing-channel-empty">U号租当前套餐价格不完整，暂时无法计算四档套餐结果。</div>';
   const tierRows = tiers.map((tier) => `
     <div class="pricing-package-row ${Number(tier.tier) === Number(payload.current_tier) ? 'is-active' : ''}">
-      <strong>第 ${Number(tier.tier || 0)} 单${Number(tier.tier) === Number(payload.current_tier) ? ' · 当前档' : ''}</strong>
+      <strong>${escapePricingHtml(pricingTierLabel(tier.tier))}${Number(tier.tier) === Number(payload.current_tier) ? ' · 当前使用' : ''}</strong>
       ${renderPricingPackageValues(tier.prices)}
     </div>
   `).join('');
@@ -190,20 +182,15 @@ function renderUhaozuChannelResult(payload = {}) {
         <span>包周 ${escapePricingHtml(formatPricingResultMoney(remote.week))}</span>
       </div>
     </div>
-    ${baselineBlock}
     ${tiers.length ? `
       <div class="pricing-package-table">
         <div class="pricing-package-row pricing-package-header">
-          <strong>订单档位</strong><span>时租</span><span>包夜</span><span>包天</span><span>包周</span>
+          <strong>阶梯价格</strong><span>时租</span><span>包夜</span><span>包天</span><span>包周</span>
         </div>
         ${tierRows}
       </div>
-    ` : ''}
-    <div class="pricing-channel-inline-actions">
-      <span>商品 ${escapePricingHtml(result.goods_id || '未关联')}</span>
-      <button class="btn btn-ghost btn-card-action" data-pricing-refresh-baseline type="button"
-        ${result.remote_complete && !sheetState.refreshing ? '' : 'disabled'}>${sheetState.refreshing ? '更新中...' : '以当前渠道价格更新基准'}</button>
-    </div>
+    ` : '<div class="pricing-channel-empty">U号租当前套餐价格不完整，暂时无法计算四档套餐结果。</div>'}
+    <div class="pricing-channel-meta">商品 ${escapePricingHtml(result.goods_id || '未关联')}</div>
   `;
 }
 
@@ -252,8 +239,6 @@ function renderPricingChannelSheet() {
       renderPricingChannelSheet();
     };
   });
-  const refresh = nodes.body.querySelector('[data-pricing-refresh-baseline]');
-  if (refresh) refresh.onclick = () => void refreshPricingChannelBaseline();
   Array.from(nodes.body.querySelectorAll('[data-pricing-copy-error]')).forEach((button) => {
     button.onclick = async () => {
       const id = Number(button.getAttribute('data-pricing-copy-error') || 0);
@@ -295,33 +280,6 @@ async function loadPricingChannelResult(account) {
     sheetState.error = String(e && e.message || '渠道价格加载失败');
   } finally {
     sheetState.loading = false;
-    renderPricingChannelSheet();
-  }
-}
-
-async function refreshPricingChannelBaseline() {
-  const pricing = ensurePricingLadderState();
-  const sheetState = pricing.channel_sheet;
-  const item = pricingItemByAccount(sheetState.account);
-  if (!item || sheetState.refreshing) return;
-  if (!window.confirm('确认使用最近同步的 U号租套餐价格覆盖该账号的价格基准？')) return;
-  sheetState.refreshing = true;
-  renderPricingChannelSheet();
-  try {
-    sheetState.payload = await request('/api/pricing/ladder/channel-baseline', {
-      method: 'POST',
-      body: JSON.stringify({
-        game_id: item.game_id,
-        game_name: item.game_name,
-        game_account: item.game_account,
-        channel: 'uhaozu'
-      })
-    });
-    showToast('U号租价格基准已更新');
-  } catch (e) {
-    showToast(e.message || '价格基准更新失败');
-  } finally {
-    sheetState.refreshing = false;
     renderPricingChannelSheet();
   }
 }
@@ -390,6 +348,7 @@ function renderPricingGameTabs() {
       pricing.editing = {};
       pricing.saving = {};
       pricing.drafts = {};
+      pricing.query = '';
       pricing.loaded_once = false;
       void loadPricingView();
     };
@@ -533,7 +492,12 @@ function renderPricingList() {
     els.pricingListContainer.innerHTML = '<div class="panel pricing-empty-card">当前游戏暂无可配置账号。</div>';
     return;
   }
-  els.pricingListContainer.innerHTML = pricing.list.map((item) => {
+  const filtered = filterPricingItems(pricing.list, pricing.query);
+  if (filtered.length === 0) {
+    els.pricingListContainer.innerHTML = '<div class="panel pricing-empty-card">没有找到匹配的账号。</div>';
+    return;
+  }
+  els.pricingListContainer.innerHTML = filtered.map((item) => {
     const account = String(item.game_account || '').trim();
     const editing = Boolean(pricing.editing[account]);
     const saving = Boolean(pricing.saving[account]);
@@ -546,7 +510,7 @@ function renderPricingList() {
     `).join('');
     const inputs = [1, 2, 3, 4].map((tier, index) => `
       <label class="pricing-tier-field">
-        <span>第 ${tier} 单</span>
+        <span>${escapePricingHtml(pricingTierLabel(tier))}</span>
         <div class="pricing-price-input">
           <input data-pricing-tier="${tier}" type="number" min="0.01" step="0.01" inputmode="decimal"
             aria-label="第 ${tier} 单价格" value="${escapePricingHtml(draft.prices[index] || '')}" ${editing && !saving ? '' : 'disabled'}>
@@ -578,7 +542,7 @@ function renderPricingList() {
         <div class="pricing-ladder-grid">${inputs}</div>
         <div class="pricing-account-footer">
           <span class="pricing-current-price">${item.configured
-            ? `当前档位：第 ${Math.min(4, Math.max(1, Number(item.current_tier || Number(item.today_order_count || 0) + 1)))} 单`
+            ? `已完成 ${Number(item.today_order_count || 0)} 单，当前使用第 ${Math.min(4, Math.max(1, Number(item.current_tier || Number(item.today_order_count || 0) + 1)))} 单价格`
             : '阶梯调价：未启用'}</span>
           <div class="pricing-account-actions">
             <button class="btn btn-ghost btn-card-action" data-pricing-channel-result type="button">查看渠道价格</button>
@@ -646,6 +610,19 @@ function renderPricingView() {
   renderPricingFeatureState();
   const windowText = document.getElementById('pricingWindowText');
   if (windowText) windowText.textContent = `订单周期：${pricing.count_window || '06:00～次日06:00'}`;
+  if (els.pricingSearchInput) {
+    if (document.activeElement !== els.pricingSearchInput) els.pricingSearchInput.value = pricing.query;
+    els.pricingSearchInput.oninput = () => {
+      pricing.query = String(els.pricingSearchInput.value || '').trim();
+      renderPricingView();
+    };
+  }
+  if (els.pricingSearchSummary) {
+    const visible = filterPricingItems(pricing.list, pricing.query).length;
+    els.pricingSearchSummary.textContent = pricing.query
+      ? `当前显示 ${visible} / 共 ${pricing.list.length} 个账号`
+      : `共 ${pricing.list.length} 个账号`;
+  }
   renderPricingList();
 }
 
@@ -673,5 +650,7 @@ window.__pricingLadderTest = {
   formatPricingResultMoney,
   normalizePricingDraft,
   validatePricingDraft,
-  pricingApplyStatusText
+  pricingApplyStatusText,
+  pricingTierLabel,
+  filterPricingItems
 };

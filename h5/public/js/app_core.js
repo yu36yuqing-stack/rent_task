@@ -353,6 +353,7 @@
           avg_suggested_listing_hourly_price: 0
         },
         list: [],
+        query: '',
         error: '',
         loaded_once: false
       },
@@ -497,6 +498,8 @@
       pricingPriceStep: document.getElementById('pricingPriceStep'),
       pricingDeposit: document.getElementById('pricingDeposit'),
       pricingMetricGrid: document.getElementById('pricingMetricGrid'),
+      pricingSearchInput: document.getElementById('pricingSearchInput'),
+      pricingSearchSummary: document.getElementById('pricingSearchSummary'),
       pricingListContainer: document.getElementById('pricingListContainer'),
       boardView: document.getElementById('boardView'),
       maintenanceCleanupView: document.getElementById('maintenanceCleanupView'),

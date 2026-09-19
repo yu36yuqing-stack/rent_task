@@ -48,7 +48,6 @@ const {
     getPriceLadderDashboardByUser,
     savePriceLadderRuleByUser,
     getPriceLadderChannelResultByUser,
-    refreshPriceLadderChannelBaselineByUser,
     _internal: serviceInternal
 } = require('../price/price_ladder_service');
 
@@ -285,15 +284,6 @@ async function main() {
     assert(/包夜价格/.test(channelResult.channel_result.error_logs[0].fail_message));
     assert.strictEqual(channelResult.channel_result.apply_status, 'manual');
 
-    await seedAccount({ account: 'hpjy-a', remark: '和平一号', price: 2.5, night: 8, day: 12, week: 70 });
-    const refreshed = await refreshPriceLadderChannelBaselineByUser(8, {
-        game_name: '和平精英',
-        game_account: 'hpjy-a',
-        channel: 'uhaozu'
-    });
-    assert.deepStrictEqual(refreshed.channel_result.baseline.prices, { hour: 2.5, night: 8, day: 12, week: 70 });
-    assert.strictEqual(refreshed.channel_result.baseline.version, 2);
-
     await seedAccount({ account: 'hpjy-incomplete', remark: '套餐缺失', price: 3, night: 0, day: 0, week: 0 });
     const incompleteSaved = await savePriceLadderRuleByUser(8, {
         game_name: '和平精英',
@@ -308,10 +298,6 @@ async function main() {
     });
     assert.strictEqual(incompleteResult.channel_result.baseline_status, 'unavailable');
     assert.strictEqual(incompleteResult.channel_result.tiers.length, 0);
-    await expectReject(() => refreshPriceLadderChannelBaselineByUser(8, {
-        game_name: '和平精英', game_account: 'hpjy-incomplete'
-    }), /不完整/);
-
     assert.strictEqual(await getAccountPriceLadderRule(8, '2', 'missing'), null);
     assert.strictEqual((await listAccountPriceLadderRules(0, '2')).length, 0);
     assert.strictEqual((await listAccountPriceLadderRules(8, '')).length, 0);
@@ -325,9 +311,6 @@ async function main() {
     await expectReject(() => saveAccountChannelPriceBaseline(8, {
         game_id: '2', game_name: '和平精英', game_account: 'bad', channel: 'uhaozu', prices: { hour: 2, night: -1 }
     }), /套餐价格/);
-    await expectReject(() => refreshPriceLadderChannelBaselineByUser(8, {
-        game_name: '和平精英', game_account: 'hpjy-a', channel: 'zuhaowang'
-    }), /仅支持/);
     await expectReject(() => getPriceLadderChannelResultByUser(8, {
         game_name: '和平精英', game_account: 'missing'
     }), /账号不存在/);

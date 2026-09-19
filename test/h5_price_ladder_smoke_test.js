@@ -109,7 +109,7 @@ async function main() {
         const missingAccountRes = await fetch(`${baseUrl}/api/pricing/ladder/channel-result?game_name=${encodeURIComponent('和平精英')}`, { headers });
         assert.strictEqual(missingAccountRes.status, 400);
 
-        const refreshRes = await fetch(`${baseUrl}/api/pricing/ladder/channel-baseline`, {
+        const removedBaselineRes = await fetch(`${baseUrl}/api/pricing/ladder/channel-baseline`, {
             method: 'POST',
             headers,
             body: JSON.stringify({
@@ -118,9 +118,7 @@ async function main() {
                 channel: 'uhaozu'
             })
         });
-        const refreshJson = await refreshRes.json();
-        assert.strictEqual(refreshRes.status, 200);
-        assert.strictEqual(refreshJson.channel_result.baseline.version, 2);
+        assert.strictEqual(removedBaselineRes.status, 404);
 
         const conflictRes = await fetch(`${baseUrl}/api/pricing/ladder/account`, {
             method: 'POST',
@@ -160,6 +158,7 @@ async function main() {
         assert.strictEqual(staticRes.status, 200);
         assert(staticHtml.includes('账号阶梯价格'));
         assert(staticHtml.includes('pricingFeatureToggle'));
+        assert(staticHtml.includes('pricingSearchInput'));
         assert(staticHtml.includes('一期生效渠道：U号租'));
         assert(staticHtml.includes('pricingChannelSheet'));
         assert(staticHtml.includes('渠道价格'));

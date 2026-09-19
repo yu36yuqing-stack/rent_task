@@ -40,6 +40,7 @@
 | PageContainer | `.wrap` `.orders-view` | 全局页面、列表型页面 | 页面锚点只调整布局 |
 | Panel | `.panel` | 登录、配置、页面内容区 | 页面变体可以调整内部排版 |
 | Field | `.field` 及表单控件基础样式 | 登录、授权、配置、Sheet 表单 | 页面变体只调整排列和密度 |
+| ListSearch | `.field.list-search-field` + 页面搜索输入框 | 板卡、阶梯定价账号列表 | 复用 Field 外观；页面只提供检索字段和本地过滤函数 |
 | ModeOption | `.mode-options` `.mode-option-row` | 个人中心、订单规则、商品级配置 | 选项内容和选中状态可变 |
 | AppHeader | `.hero` `.hero-toolbar` `.hero-menu-trigger` `.hero-menu-title` | 登录态和应用态顶部区域 | 标题和菜单状态可变 |
 | Drawer | `.drawer-item` `.drawer-group` `.drawer-group-toggle` `.drawer-sub-list` `.drawer-sub-item` | 全局导航 | 菜单数据、展开和激活状态可变 |
@@ -73,7 +74,7 @@
 | ProductFilters | 商品页使用 `.stats-period-btn.product-filter-tab` | 与 HeaderTabs/周期筛选存在视觉复用，但契约仍是页面级组合 | 新页面不得照搬，应先确认归入 HeaderTabs 还是独立组件 |
 | SheetController | 各页面分别维护 Sheet 的打开、关闭、Loading 和结果状态 | 外壳统一但行为分散 | 可复用现有外壳；新增重复行为时应抽公共控制器 |
 | EmptyState | 多页面各自生成空数据内容 | 尚无统一结构和状态契约 | 新页面需先声明统一空状态方案 |
-| ChannelPriceResult | `.pricing-package-table` `.pricing-package-row` `.pricing-error-log-list` | 阶梯定价渠道价格 Sheet | 套餐列由渠道能力数据决定；不得把渠道特有字段写入通用账号卡片 |
+| ChannelPriceResult | `.pricing-package-table` `.pricing-package-row` `.pricing-error-log-list` | 阶梯定价渠道价格 Sheet | 套餐列由渠道能力数据决定；内容区必须可滚动；移动端价格项使用三列网格；不得把渠道特有字段写入通用账号卡片 |
 
 “试用”不表示禁止使用，而是表示复用时必须优先补齐公共契约，不能继续复制。
 
@@ -100,7 +101,7 @@
 | 页面 | 已有变体 | 基础组件关系 |
 | --- | --- | --- |
 | Profile | `.profile-card` `.profile-field` `.profile-mode-inline` `.profile-threshold-*` | 基于 Panel、Field、ModeOption |
-| Pricing | `.pricing-ladder-head` `.pricing-ladder-list` `.pricing-account-card` `.pricing-ladder-grid` `.pricing-copy-field` | 基于 GameTabs、Panel、Card、Field、CardAction；四档输入和账号复制为页面变体 |
+| Pricing | `.pricing-ladder-head` `.pricing-ladder-list` `.pricing-account-card` `.pricing-ladder-grid` `.pricing-copy-field` `.pricing-search-field` | 基于 GameTabs、Panel、Card、Field、ListSearch、CardAction；四档输入、账号复制和当前游戏内搜索为页面变体 |
 | Board | `.board-top-row` `.board-card` `.board-mobile-card` `.board-account-list` `.board-account-tag` | 基于 PageAction、Panel、Card、GameAvatar |
 | Maintenance | `.maintenance-top-row` `.maintenance-summary-grid` `.maintenance-kpi-card` `.maintenance-log-card` `.maintenance-status-pill` | 基于 Panel、Card、StatusTag |
 | Products | `.product-filters` `.product-filter-tab` `.product-op-btn` `.product-op-btn-danger` | 基于 HeaderTabs、Button、CardAction |

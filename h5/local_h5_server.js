@@ -138,8 +138,7 @@ const {
     getPriceLadderDashboardByUser,
     savePriceLadderRuleByUser,
     setPriceLadderFeatureByUser,
-    getPriceLadderChannelResultByUser,
-    refreshPriceLadderChannelBaselineByUser
+    getPriceLadderChannelResultByUser
 } = require('../price/price_ladder_service');
 const { saveUhaozuPricingAccountCostByUser } = require('../price/price_rule_service');
 const {
@@ -1439,18 +1438,6 @@ async function handlePricingLadderChannelResult(req, res, urlObj) {
         game_name: urlObj.searchParams.get('game_name') || 'WZRY',
         game_id: urlObj.searchParams.get('game_id') || '',
         game_account: gameAccount
-    });
-    return json(res, 200, { ok: true, ...out });
-}
-
-async function handleRefreshPricingLadderBaseline(req, res) {
-    const user = await requireAuth(req);
-    const body = await readJsonBody(req);
-    const out = await refreshPriceLadderChannelBaselineByUser(user.id, {
-        game_name: body.game_name || 'WZRY',
-        game_id: body.game_id,
-        game_account: body.game_account,
-        channel: body.channel || 'uhaozu'
     });
     return json(res, 200, { ok: true, ...out });
 }
@@ -2834,7 +2821,6 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/pricing/ladder/account') return await handleSetPricingLadderAccount(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/pricing/ladder/feature') return await handleSetPricingLadderFeature(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/pricing/ladder/channel-result') return await handlePricingLadderChannelResult(req, res, urlObj);
-            if (req.method === 'POST' && urlObj.pathname === '/api/pricing/ladder/channel-baseline') return await handleRefreshPricingLadderBaseline(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/pricing/uhaozu') return await handlePricingUhaozu(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/pricing/uhaozu/config') return await handleSetPricingUhaozuConfig(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/pricing/uhaozu/account-cost') return await handleSetPricingUhaozuAccountCost(req, res);

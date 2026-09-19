@@ -187,12 +187,35 @@ async function runtime() {
         reason: '冷却期下架',
         priority: 500
     });
-    const blocked = await reconcilePriceLadderAfterOrderSync(USER_ID, order3.candidates, {
+    await upsertBlacklistSource(USER_ID, ACCOUNT, 'platform_face_verify', {
+        game_id: GAME_ID,
+        game_name: GAME_NAME,
+        active: true,
+        reason: '人脸识别',
+        priority: 800
+    });
+    const allowedDuringCooldown = await reconcilePriceLadderAfterOrderSync(USER_ID, order3.candidates, {
         now: localDate(day), allow_apply: true, publisher
     });
-    assert.strictEqual(blocked.reconciliation.blocked, 1);
-    assert.strictEqual(publishCalls.length, 2);
-    assert.strictEqual((await runtime()).status, 'blocked');
+    assert.strictEqual(allowedDuringCooldown.reconciliation.applied, 1);
+    assert.strictEqual(publishCalls.length, 3);
+    assert.strictEqual(publishCalls[2].tier, 4);
+    assert.strictEqual((await runtime()).status, 'applied');
+
+    await upsertBlacklistSource(USER_ID, ACCOUNT, 'manual_maintenance', {
+        game_id: GAME_ID,
+        game_name: GAME_NAME,
+        active: true,
+        reason: '维护中',
+        priority: 900
+    });
+    const maintenanceBlock = await getPriceLadderApplyBlock(USER_ID, {
+        game_id: GAME_ID,
+        game_name: GAME_NAME,
+        game_account: ACCOUNT
+    });
+    assert.strictEqual(maintenanceBlock.blocked, true);
+    assert.strictEqual(maintenanceBlock.reason, 'blacklist:维护中');
     await upsertBlacklistSource(USER_ID, ACCOUNT, 'order_cooldown', {
         game_id: GAME_ID,
         game_name: GAME_NAME,
@@ -200,12 +223,20 @@ async function runtime() {
         reason: '冷却期下架',
         priority: 500
     });
-    const unblocked = await reconcilePendingPriceLaddersByUser(USER_ID, {
-        now: localDate(day), allow_apply: true, publisher
+    await upsertBlacklistSource(USER_ID, ACCOUNT, 'platform_face_verify', {
+        game_id: GAME_ID,
+        game_name: GAME_NAME,
+        active: false,
+        reason: '人脸识别',
+        priority: 800
     });
-    assert.strictEqual(unblocked.applied, 1);
-    assert.strictEqual(publishCalls.length, 3);
-    assert.strictEqual(publishCalls[2].tier, 4);
+    await upsertBlacklistSource(USER_ID, ACCOUNT, 'manual_maintenance', {
+        game_id: GAME_ID,
+        game_name: GAME_NAME,
+        active: false,
+        reason: '维护中',
+        priority: 900
+    });
 
     const order4 = await writeOrder('order-4', '已完成', day);
     const sameTier = await reconcilePriceLadderAfterOrderSync(USER_ID, order4.candidates, {
@@ -321,8 +352,10 @@ async function runtime() {
         channel_status: { uhaozu: '授权异常' },
         channel_prd_info: { uhaozu: { audit_reason: '授权失效' } }
     });
-    assert.strictEqual(restricted.blocked, true);
-    assert.strictEqual(restricted.reason, 'uhaozu_status:auth_abnormal');
+    assert.strictEqual(restricted.blocked, false);
+    assert.strictEqual(restricted.reason, '');
+    assert(_internal.NON_BLOCKING_BLACKLIST_SOURCES.has('order_cooldown'));
+    assert(_internal.NON_BLOCKING_BLACKLIST_SOURCES.has('platform_face_verify'));
     assert.strictEqual(await initializePriceLadderRuntimeOnRuleSave(0, null), null);
 
     await upsertAccountPriceLadderRuntime(USER_ID, {

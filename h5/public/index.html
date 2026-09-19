@@ -139,6 +139,11 @@
         </label>
       </div>
       <p class="pricing-channel-note">一期生效渠道：U号租</p>
+      <div class="field list-search-field pricing-search-field">
+        <label for="pricingSearchInput">搜索账号</label>
+        <input id="pricingSearchInput" type="search" placeholder="输入账号名称或账号" autocomplete="off">
+      </div>
+      <p id="pricingSearchSummary" class="head-summary-text">共 0 个账号</p>
       <div id="pricingListContainer" class="pricing-ladder-list"></div>
     </section>
 
@@ -148,7 +153,7 @@
         <button id="boardAddBtn" class="btn btn-ghost btn-page-action">新增板卡</button>
       </div>
       <div class="board-head-bar">
-        <div class="field board-search-field">
+        <div class="field list-search-field board-search-field">
           <label for="boardSearchInput">搜索板卡 / 手机号 / account</label>
           <input id="boardSearchInput" placeholder="输入板卡 IP、手机号或 account">
         </div>
