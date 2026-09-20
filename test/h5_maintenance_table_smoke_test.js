@@ -148,6 +148,9 @@ assert.ok(context.els.maintenanceCleanupSummary.innerHTML.includes('实际释放
 assert.ok(css.includes('overflow-x: auto'), '移动端表格容器应支持横向滚动');
 assert.ok(css.includes('position: sticky'), '表格首列应固定');
 assert.ok(css.includes('min-width: 660px'), '窄屏表格应保持稳定列宽');
+assert.ok(css.includes('#maintenanceCleanupView > *'), '维护页 Grid 子项必须允许收缩');
+assert.ok(css.includes('max-width: 100%'), '维护页卡片和表格滚动容器不得撑宽页面');
+assert.ok(css.includes('@media (max-width: 640px)'), '常见手机宽度必须进入维护页响应式布局');
 
 async function runAsyncStateChecks() {
     const requests = [];

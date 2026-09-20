@@ -3792,6 +3792,19 @@
       line-height: 1.5;
     }
 
+    #maintenanceCleanupView {
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    #maintenanceCleanupView > *,
+    #maintenanceCleanupView .maintenance-top-row > div,
+    #maintenanceCleanupView .maintenance-summary-grid,
+    #maintenanceCleanupView .maintenance-log-list,
+    #maintenanceCleanupView .maintenance-log-card {
+      min-width: 0;
+    }
+
     #maintenanceCleanupView .maintenance-top-row {
       display: flex;
       align-items: flex-start;
@@ -3808,6 +3821,7 @@
     }
 
     #maintenanceCleanupView .maintenance-kpi-card {
+      min-width: 0;
       border: 1px solid rgba(123, 146, 174, .24);
       border-radius: 16px;
       background: rgba(255, 255, 255, .88);
@@ -3827,6 +3841,7 @@
       color: #17283d;
       font-size: 18px;
       line-height: 1.2;
+      overflow-wrap: anywhere;
     }
 
     #maintenanceCleanupView .maintenance-kpi-wide {
@@ -3847,6 +3862,8 @@
     }
 
     #maintenanceCleanupView .maintenance-log-card {
+      width: 100%;
+      max-width: 100%;
       padding: 14px;
     }
 
@@ -3856,6 +3873,10 @@
       justify-content: space-between;
       gap: 10px;
       margin-bottom: 10px;
+    }
+
+    #maintenanceCleanupView .maintenance-log-head > div {
+      min-width: 0;
     }
 
     #maintenanceCleanupView .maintenance-log-title {
@@ -3869,6 +3890,7 @@
       margin: 4px 0 0;
       color: #667b96;
       font-size: 12px;
+      overflow-wrap: anywhere;
     }
 
     #maintenanceCleanupView .maintenance-status-pill {
@@ -3907,6 +3929,9 @@
     }
 
     #maintenanceCleanupView .maintenance-detail-table-wrap {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
       overflow-x: auto;
       border: 1px solid rgba(123, 146, 174, .24);
       border-radius: 10px;
@@ -3988,6 +4013,33 @@
       text-align: center;
     }
 
+    @media (max-width: 640px) {
+      #maintenanceCleanupView .maintenance-top-row {
+        flex-direction: column;
+      }
+
+      #maintenanceCleanupView .maintenance-top-row .btn-page-action {
+        width: 100%;
+        justify-content: center;
+      }
+
+      #maintenanceCleanupView .maintenance-summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      #maintenanceCleanupView .maintenance-kpi-wide {
+        grid-column: span 2;
+      }
+
+      #maintenanceCleanupView .maintenance-log-card {
+        padding: 12px;
+      }
+
+      #maintenanceCleanupView .maintenance-detail-table {
+        min-width: 660px;
+      }
+    }
+
     @media (max-width: 360px) {
       .title { max-width: 64%; }
       .filters { gap: 5px; }
@@ -4037,16 +4089,8 @@
         flex-wrap: wrap;
       }
 
-      #maintenanceCleanupView .maintenance-top-row {
-        flex-direction: column;
-      }
-
       #maintenanceCleanupView .maintenance-summary-grid {
         grid-template-columns: 1fr;
-      }
-
-      #maintenanceCleanupView .maintenance-detail-table {
-        min-width: 660px;
       }
 
       #maintenanceCleanupView .maintenance-kpi-wide {

@@ -103,7 +103,7 @@
 | Profile | `.profile-card` `.profile-field` `.profile-mode-inline` `.profile-threshold-*` | 基于 Panel、Field、ModeOption |
 | Pricing | `.pricing-ladder-head` `.pricing-ladder-list` `.pricing-account-card` `.pricing-ladder-grid` `.pricing-copy-field` `.pricing-search-field` | 基于 GameTabs、Panel、Card、Field、ListSearch、CardAction；四档输入、账号复制和当前游戏内搜索为页面变体 |
 | Board | `.board-top-row` `.board-card` `.board-mobile-card` `.board-account-list` `.board-account-tag` | 基于 PageAction、Panel、Card、GameAvatar |
-| Maintenance | `.maintenance-top-row` `.maintenance-summary-grid` `.maintenance-kpi-card` `.maintenance-log-card` `.maintenance-status-pill`；清理记录使用 `.maintenance-detail-table` 统一展示数据表、日志文件和数据库压缩结果，移动端横向滚动并固定项目列 | 基于 Panel、Card、StatusTag、Table |
+| Maintenance | `.maintenance-top-row` `.maintenance-summary-grid` `.maintenance-kpi-card` `.maintenance-log-card` `.maintenance-status-pill`；清理记录使用 `.maintenance-detail-table` 统一展示数据表、日志文件和数据库压缩结果；页面及 Grid 子项必须允许收缩，移动端仅表格容器横向滚动并固定项目列；`640px` 以下顶部操作改为纵向、指标卡改为两列，`360px` 以下改为单列 | 基于 Panel、Card、StatusTag、Table、PageAction |
 | Products | `.product-filters` `.product-filter-tab` `.product-op-btn` `.product-op-btn-danger` | 基于 HeaderTabs、Button、CardAction |
 
 页面变体只记录与基础组件不同的部分。若变体被第二个页面采用，应重新评估并提升为公共变体或公共组件。
