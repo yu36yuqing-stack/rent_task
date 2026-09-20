@@ -57,7 +57,7 @@
 | Overlay | `.overlay` `.overlay-card` | 提示和确认类遮罩 | 内容可变，不重建遮罩层 |
 | Sheet | `.sheet` `.sheet-card` `.sheet-head` `.sheet-actions` `.sheet-btn` | 商品操作、授权、成本、板卡、渠道价格 | 字段和动作可变，外壳固定 |
 | GameAvatar | `.game-avatar` + 图片资源 | 商品、订单、统计、定价、板卡 | 图标和无图回退可变 |
-| Toast | `.toast` 及已有反馈变体 | 全局轻提示和详情提示 | 文案、持续时间和语义状态可变 |
+| Toast | `.toast` 及 `.toast-detail` 反馈变体 | 全局轻提示和渠道错误详情 | 普通提示定时关闭；详情模式允许 `durationMs=0` 持续展示，并由用户点击关闭 |
 | GlobalLoading | `.global-loading` 及其子元素 | 全局请求等待 | 文案和可见状态可变 |
 | PullRefresh | `.pull-refresh` `.pull-refresh-inner` `.pull-spinner` | 商品列表下拉刷新 | 遵循固定 Loading 文案规则 |
 | ClipboardCopy | `copyTextToClipboard(text)` + `.copy-btn` | 商品账号、渠道价格错误日志 | 复制行为统一回退，调用方只负责反馈文案 |
@@ -74,7 +74,7 @@
 | ProductFilters | 商品页使用 `.stats-period-btn.product-filter-tab` | 与 HeaderTabs/周期筛选存在视觉复用，但契约仍是页面级组合 | 新页面不得照搬，应先确认归入 HeaderTabs 还是独立组件 |
 | SheetController | 各页面分别维护 Sheet 的打开、关闭、Loading 和结果状态 | 外壳统一但行为分散 | 可复用现有外壳；新增重复行为时应抽公共控制器 |
 | EmptyState | 多页面各自生成空数据内容 | 尚无统一结构和状态契约 | 新页面需先声明统一空状态方案 |
-| ChannelPriceResult | `.pricing-package-table` `.pricing-package-row` `.pricing-error-log-list` | 阶梯定价渠道价格 Sheet | 套餐列由渠道能力数据决定；内容区必须可滚动；移动端价格项使用三列网格；不得把渠道特有字段写入通用账号卡片 |
+| ChannelPriceResult | `.pricing-package-table` `.pricing-package-row` `.pricing-error-log-list` `.pricing-log-detail-btn` | 阶梯定价渠道价格 Sheet | 套餐列由渠道能力数据决定；调价记录统一展示成功/失败、触发来源和前后价格；失败详情复用持久 Toast；内容区必须可滚动；不得把渠道特有字段写入通用账号卡片 |
 
 “试用”不表示禁止使用，而是表示复用时必须优先补齐公共契约，不能继续复制。
 

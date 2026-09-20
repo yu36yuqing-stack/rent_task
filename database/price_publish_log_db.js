@@ -1,5 +1,7 @@
 const { openPriceDatabase } = require('./sqlite_client');
 
+const ACCOUNT_ITEM_RETENTION = 20;
+
 function nowText() {
     const d = new Date();
     const p = (n) => String(n).padStart(2, '0');
@@ -103,7 +105,8 @@ function rowToItem(row = {}) {
         create_date: String(row.create_date || '').trim(),
         modify_date: String(row.modify_date || '').trim(),
         is_deleted: Number(row.is_deleted || 0),
-        desc: String(row.desc || '').trim()
+        desc: String(row.desc || '').trim(),
+        trigger_source: String(row.trigger_source || '').trim()
     };
 }
 
@@ -181,6 +184,10 @@ async function initPricePublishLogDb() {
         await run(db, `
             CREATE INDEX IF NOT EXISTS idx_price_publish_item_log_user_channel_time
             ON price_publish_item_log(user_id, channel, modify_date, is_deleted)
+        `);
+        await run(db, `
+            CREATE INDEX IF NOT EXISTS idx_price_publish_item_log_account_recent
+            ON price_publish_item_log(user_id, channel, game_name, game_account, id DESC)
         `);
     } finally {
         db.close();
@@ -312,6 +319,46 @@ async function createPricePublishItemLog(input = {}) {
             now,
             String(input.desc || '').trim()
         ]);
+        const retentionParams = [
+            Number(input.user_id || 0),
+            String(input.channel || '').trim(),
+            String(input.game_name || '').trim(),
+            String(input.game_account || '').trim(),
+            ACCOUNT_ITEM_RETENTION
+        ];
+        const expiredRows = await all(db, `
+            SELECT id, batch_id
+            FROM price_publish_item_log
+            WHERE user_id = ?
+              AND channel = ?
+              AND game_name = ?
+              AND game_account = ?
+            ORDER BY id DESC
+            LIMIT -1 OFFSET ?
+        `, retentionParams);
+        if (expiredRows.length > 0) {
+            const itemPlaceholders = expiredRows.map(() => '?').join(', ');
+            await run(db, `
+                DELETE FROM price_publish_item_log
+                WHERE id IN (${itemPlaceholders})
+            `, expiredRows.map((row) => Number(row.id || 0)));
+
+            const expiredBatchIds = [...new Set(expiredRows
+                .map((row) => String(row.batch_id || '').trim())
+                .filter(Boolean))];
+            if (expiredBatchIds.length > 0) {
+                const batchPlaceholders = expiredBatchIds.map(() => '?').join(', ');
+                await run(db, `
+                    DELETE FROM price_publish_batch_log
+                    WHERE batch_id IN (${batchPlaceholders})
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM price_publish_item_log item
+                          WHERE item.batch_id = price_publish_batch_log.batch_id
+                      )
+                `, expiredBatchIds);
+            }
+        }
     } finally {
         db.close();
     }
@@ -381,10 +428,12 @@ async function listPricePublishItemLogsByBatchId(batchId) {
     const db = openPriceDatabase();
     try {
         const rows = await all(db, `
-            SELECT *
-            FROM price_publish_item_log
-            WHERE batch_id = ? AND is_deleted = 0
-            ORDER BY id ASC
+            SELECT i.*, b.trigger_source AS trigger_source
+            FROM price_publish_item_log i
+            LEFT JOIN price_publish_batch_log b
+              ON b.batch_id = i.batch_id AND b.is_deleted = 0
+            WHERE i.batch_id = ? AND i.is_deleted = 0
+            ORDER BY i.id ASC
         `, [String(batchId || '').trim()]);
         return rows.map(rowToItem);
     } finally {
@@ -414,10 +463,12 @@ async function listPricePublishItemLogsByAccount(userId, query = {}) {
     const db = openPriceDatabase();
     try {
         const rows = await all(db, `
-            SELECT *
-            FROM price_publish_item_log
-            WHERE ${where.join(' AND ')}
-            ORDER BY id DESC
+            SELECT i.*, b.trigger_source AS trigger_source
+            FROM price_publish_item_log i
+            LEFT JOIN price_publish_batch_log b
+              ON b.batch_id = i.batch_id AND b.is_deleted = 0
+            WHERE ${where.map((item) => `i.${item}`).join(' AND ')}
+            ORDER BY i.id DESC
             LIMIT ?
         `, [...params, limit]);
         return rows.map(rowToItem);
@@ -434,5 +485,9 @@ module.exports = {
     listPricePublishBatchLogsByUser,
     getPricePublishBatchLogByBatchId,
     listPricePublishItemLogsByBatchId,
-    listPricePublishItemLogsByAccount
+    listPricePublishItemLogsByAccount,
+    _internal: {
+        ACCOUNT_ITEM_RETENTION,
+        rowToItem
+    }
 };

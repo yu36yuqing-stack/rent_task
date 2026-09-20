@@ -112,7 +112,17 @@ function sanitizePublishLog(row = {}) {
         id: Number(row.id || 0),
         batch_id: String(row.batch_id || '').trim(),
         publish_status: String(row.publish_status || '').trim(),
+        trigger_source: String(row.trigger_source || '').trim(),
         fail_message: String(row.fail_message || '').trim().slice(0, 500),
+        error_detail: row.response_data && typeof row.response_data === 'object'
+            ? row.response_data
+            : null,
+        before_prices: {
+            hour: roundMoney(row.price_before_hour),
+            night: roundMoney(row.price_before_night),
+            day: roundMoney(row.price_before_day),
+            week: roundMoney(row.price_before_week)
+        },
         target_prices: {
             hour: roundMoney(row.price_target_hour),
             night: roundMoney(row.price_target_night),
@@ -220,7 +230,7 @@ async function getPriceLadderDashboardByUser(userId, options = {}) {
     };
 }
 
-async function savePriceLadderRuleByUser(userId, input = {}) {
+async function savePriceLadderRuleByUser(userId, input = {}, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
     const game = normalizeGameProfile(input.game_id, input.game_name || 'WZRY');
@@ -288,15 +298,31 @@ async function savePriceLadderRuleByUser(userId, input = {}) {
     }
     const feature = await getPriceLadderFeatureConfig(uid);
     let runtime = null;
+    let publishResult = null;
     if (feature.enabled) {
-        const { initializePriceLadderRuntimeOnRuleSave } = require('./price_ladder_reconcile_service');
-        runtime = await initializePriceLadderRuntimeOnRuleSave(uid, saved);
+        const {
+            initializePriceLadderRuntimeOnRuleSave,
+            reconcilePendingPriceLaddersByUser
+        } = require('./price_ladder_reconcile_service');
+        runtime = await initializePriceLadderRuntimeOnRuleSave(uid, saved, {
+            now: options.now,
+            trigger_source: 'rule_saved'
+        });
+        publishResult = await reconcilePendingPriceLaddersByUser(uid, {
+            now: options.now,
+            allow_apply: true,
+            publisher: options.publisher,
+            feature_guard: options.feature_guard,
+            accounts: [{ game_id: game.game_id, game_account: account }]
+        });
+        runtime = await getAccountPriceLadderRuntime(uid, game.game_id, account, 'uhaozu');
     }
     return {
         ...saved,
         baseline_created: baselineCreated,
         baseline_ready: Boolean(existingBaseline || baselineCreated),
-        runtime
+        runtime,
+        publish_result: publishResult
     };
 }
 
@@ -314,7 +340,7 @@ async function getPriceLadderChannelResultByUser(userId, options = {}) {
     ));
     if (!target) throw new Error('账号不存在、已出售或不属于当前游戏');
 
-    const [rule, storedBaseline, finishedCounts, errorLogs, runtime] = await Promise.all([
+    const [rule, storedBaseline, finishedCounts, adjustmentLogs, runtime] = await Promise.all([
         getAccountPriceLadderRule(uid, game.game_id, account),
         getAccountChannelPriceBaseline(uid, game.game_id, account, 'uhaozu'),
         listBusinessDayFinishedOrderCountByAccounts(uid, [{ game_id: game.game_id, game_account: account }]),
@@ -322,7 +348,6 @@ async function getPriceLadderChannelResultByUser(userId, options = {}) {
             channel: 'uhaozu',
             game_account: account,
             game_name: game.game_name,
-            publish_status: 'fail',
             limit: 20
         }),
         getAccountPriceLadderRuntime(uid, game.game_id, account, 'uhaozu')
@@ -380,7 +405,7 @@ async function getPriceLadderChannelResultByUser(userId, options = {}) {
                 last_error: runtime.last_error,
                 modify_date: runtime.modify_date
             } : null,
-            error_logs: errorLogs.map(sanitizePublishLog)
+            adjustment_logs: adjustmentLogs.map(sanitizePublishLog)
         }
     };
 }

@@ -113,14 +113,39 @@ async function runtime() {
 
     const day = orderInternal.businessDateText(6);
     const nextDay = addDays(day, 1);
+    const publishCalls = [];
+    let publishMode = 'success';
+    const publisher = async (_uid, input) => {
+        publishCalls.push(input);
+        if (publishMode === 'throw') throw new Error('network timeout');
+        if (publishMode === 'fail') return { ok: false, message: '平台价格范围错误' };
+        if (publishMode === 'unchanged') return { ok: true, changed: false, prices: input.prices };
+        return { ok: true, changed: true, batch_id: `batch-${publishCalls.length}`, prices: input.prices };
+    };
     await savePriceLadderRuleByUser(USER_ID, {
         game_id: GAME_ID,
         game_name: GAME_NAME,
         game_account: ACCOUNT,
         prices: [2, 3, 4, 5],
         expected_version: 0
+    }, {
+        now: localDate(day),
+        publisher
     });
     assert.strictEqual((await runtime()).applied_tier, 1);
+    assert.strictEqual(publishCalls.length, 1);
+    assert.strictEqual(publishCalls[0].force_publish, true);
+    publishCalls.length = 0;
+    publishMode = 'unchanged';
+    const sameTierReset = await reconcilePriceLadderAfterOrderSync(USER_ID, [], {
+        now: localDate(day), allow_apply: true, publisher
+    });
+    assert.strictEqual(sameTierReset.reset.due, true);
+    assert.strictEqual(sameTierReset.reconciliation.unchanged, 1);
+    assert.strictEqual(publishCalls.length, 1);
+    assert.strictEqual(publishCalls[0].trigger_source, 'daily_reset');
+    publishCalls.length = 0;
+    publishMode = 'success';
 
     const renting = await writeOrder('order-1', '租赁中', day);
     assert.strictEqual(renting.result.price_ladder_relevant_changed, false);
@@ -130,14 +155,6 @@ async function runtime() {
     assert.strictEqual(finished.result.price_ladder_relevant_changed, true);
     assert.strictEqual(finished.candidates[0].delta, 1);
 
-    const publishCalls = [];
-    let publishMode = 'success';
-    const publisher = async (_uid, input) => {
-        publishCalls.push(input);
-        if (publishMode === 'throw') throw new Error('network timeout');
-        if (publishMode === 'fail') return { ok: false, message: '平台价格范围错误' };
-        return { ok: true, batch_id: `batch-${publishCalls.length}`, prices: input.prices };
-    };
     const first = await reconcilePriceLadderAfterOrderSync(USER_ID, finished.candidates, {
         now: localDate(day),
         allow_apply: true,
@@ -145,7 +162,7 @@ async function runtime() {
         activation_reconcile: true,
         feature_version: 1
     });
-    assert.strictEqual(first.reset.due, true);
+    assert.strictEqual(first.reset.due, false);
     assert.strictEqual(first.activation.scanned, 1);
     assert.strictEqual(first.activation_marked, true);
     assert.strictEqual((await getPriceLadderFeatureConfig(USER_ID)).reconcile_required, false);
@@ -214,8 +231,8 @@ async function runtime() {
         game_name: GAME_NAME,
         game_account: ACCOUNT
     });
-    assert.strictEqual(maintenanceBlock.blocked, true);
-    assert.strictEqual(maintenanceBlock.reason, 'blacklist:维护中');
+    assert.strictEqual(maintenanceBlock.blocked, false);
+    assert.strictEqual(maintenanceBlock.reason, '');
     await upsertBlacklistSource(USER_ID, ACCOUNT, 'order_cooldown', {
         game_id: GAME_ID,
         game_name: GAME_NAME,
@@ -303,14 +320,15 @@ async function runtime() {
     const activeBlocked = await reconcilePriceLadderAfterOrderSync(USER_ID, nextFinished.candidates, {
         now: localDate(nextDay), allow_apply: true, publisher
     });
-    assert.strictEqual(activeBlocked.reconciliation.blocked, 1);
-    assert.strictEqual(activeBlocked.reconciliation.list[0].reason, 'active_order');
+    assert.strictEqual(activeBlocked.reconciliation.applied, 1);
+    assert.strictEqual(activeBlocked.reconciliation.list[0].tier, 2);
     await writeOrder('active-next', '已撤单', nextDay);
+    const failedNext = await writeOrder('failed-next', '已完成', nextDay);
     publishMode = 'fail';
-    const failed = await reconcilePendingPriceLaddersByUser(USER_ID, {
+    const failed = await reconcilePriceLadderAfterOrderSync(USER_ID, failedNext.candidates, {
         now: localDate(nextDay), allow_apply: true, publisher
     });
-    assert.strictEqual(failed.failed, 1);
+    assert.strictEqual(failed.reconciliation.failed, 1);
     assert.strictEqual((await runtime()).status, 'failed');
     const tooSoon = await reconcilePendingPriceLaddersByUser(USER_ID, {
         now: localDate(nextDay, '08:10:00'), allow_apply: true, publisher
@@ -330,7 +348,7 @@ async function runtime() {
     const counts = await listBusinessDayFinishedOrderCountByAccounts(USER_ID, [{
         game_id: GAME_ID, game_account: ACCOUNT
     }], nextDay);
-    assert.strictEqual(counts[`${GAME_ID}::${ACCOUNT}`], 1);
+    assert.strictEqual(counts[`${GAME_ID}::${ACCOUNT}`], 2);
     const orderPage = await listOrders(USER_ID, 1, 500);
     assert(orderPage.total >= 6);
     assert(orderPage.list.some((item) => item.order_no === 'finished-next'));
@@ -342,7 +360,7 @@ async function runtime() {
     assert(Number(paidCounts[`${GAME_ID}::${ACCOUNT}`] || 0) >= 2);
     const dashboard = await getPriceLadderDashboardByUser(USER_ID, { game_id: GAME_ID, game_name: GAME_NAME });
     assert.strictEqual(dashboard.list[0].today_order_count, 2);
-    assert.strictEqual(dashboard.list[0].current_tier, 2);
+    assert.strictEqual(dashboard.list[0].current_tier, 3);
     assert.strictEqual(await getPriceLadderJobBusinessDate(USER_ID, _internal.DAILY_RESET_JOB_KEY), nextDay);
 
     const restricted = await getPriceLadderApplyBlock(USER_ID, {
@@ -354,8 +372,6 @@ async function runtime() {
     });
     assert.strictEqual(restricted.blocked, false);
     assert.strictEqual(restricted.reason, '');
-    assert(_internal.NON_BLOCKING_BLACKLIST_SOURCES.has('order_cooldown'));
-    assert(_internal.NON_BLOCKING_BLACKLIST_SOURCES.has('platform_face_verify'));
     assert.strictEqual(await initializePriceLadderRuntimeOnRuleSave(0, null), null);
 
     await upsertAccountPriceLadderRuntime(USER_ID, {

@@ -711,11 +711,20 @@ async function queryGoodsModifyPayloadByGoodsId(goodsId, auth = {}) {
         body: ''
     }, cfg.timeout_ms);
     if (!isApiSuccess(json) || String(json.responseCode || '') !== '0000') {
-        throw new Error(`U号租商品查询失败: ${json.responseMsg || json.message || json.msg || JSON.stringify(json).slice(0, 200)}`);
+        throw buildUhaozuApiError('U号租商品查询失败', json);
     }
     const raw = json && json.object && typeof json.object === 'object' ? json.object : null;
     if (!raw) throw new Error('U号租商品查询返回为空');
     return normalizeModifyPayloadFromQuery(id, raw);
+}
+
+function buildUhaozuApiError(prefix, response) {
+    const data = response && typeof response === 'object' ? response : { response };
+    const detail = data.responseMsg || data.message || data.msg || JSON.stringify(data).slice(0, 200);
+    const error = new Error(`${String(prefix || 'U号租接口失败').trim()}: ${detail}`);
+    error.code = String(data.responseCode || data.code || 'UHAOZU_API_ERROR').trim();
+    error.uhaozu_response = data;
+    return error;
 }
 
 async function modifyGoodsByGoodsId(goodsId, payload = {}, auth = {}) {
@@ -738,7 +747,7 @@ async function modifyGoodsByGoodsId(goodsId, payload = {}, auth = {}) {
         body: JSON.stringify(bodyPayload)
     }, cfg.timeout_ms);
     if (!isApiSuccess(json) || String(json.responseCode || '') !== '0000') {
-        throw new Error(`U号租商品修改失败: ${json.responseMsg || json.message || json.msg || JSON.stringify(json).slice(0, 200)}`);
+        throw buildUhaozuApiError('U号租商品修改失败', json);
     }
     return json;
 }
@@ -1163,6 +1172,7 @@ module.exports = {
     _internals: {
         formatV,
         requestJson,
+        buildUhaozuApiError,
         requestText,
         isApiSuccess,
         mapStatus,

@@ -200,8 +200,21 @@ async function main() {
         await page.click('[data-pricing-channel-tab="uhaozu"]');
         await page.waitForSelector('#pricingChannelSheet .pricing-package-row.is-active');
         await page.click('[data-pricing-result-view="logs"]');
-        await page.waitForSelector('[data-pricing-copy-error]');
+        await page.waitForSelector('[data-pricing-error-detail]');
         await page.waitForFunction(() => document.getElementById('pricingChannelBody').textContent.includes('包夜价格低于 U号租允许范围'));
+        await page.screenshot({
+            path: path.join(outputDir, 'pricing-channel-logs-desktop.png'),
+            fullPage: true
+        });
+        await page.click('[data-pricing-error-detail]');
+        await page.waitForSelector('#toast.show.toast-detail');
+        await new Promise((resolve) => setTimeout(resolve, 1400));
+        const detailToastVisible = await page.$eval('#toast', (node) => (
+            node.classList.contains('show') && node.textContent.includes('包夜价格低于 U号租允许范围')
+        ));
+        if (!detailToastVisible) throw new Error('错误详情 Toast 不应自动消失');
+        await page.click('#toast');
+        await page.waitForFunction(() => !document.getElementById('toast').classList.contains('show'));
         await page.click('[data-pricing-result-view="result"]');
         await page.waitForSelector('#pricingChannelSheet .pricing-package-row.is-active');
         await page.screenshot({

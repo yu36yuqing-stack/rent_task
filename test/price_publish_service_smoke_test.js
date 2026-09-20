@@ -231,6 +231,31 @@ async function createPublishUser(account, suffix, channelInfo = {}) {
         assert.strictEqual(ladderLogs[0].publish_status, 'success');
         assert.strictEqual(Number(ladderLogs[0].price_target_week || 0), 75);
 
+        const samePriceOut = await publishUhaozuAccountPriceSetByUser(1, {
+            game_id: '2',
+            game_name: '和平精英',
+            game_account: '10001',
+            tier: 2,
+            prices: { hour: 3, night: 10, day: 14, week: 75 },
+            trigger_source: 'daily_reset'
+        });
+        assert.strictEqual(samePriceOut.ok, true);
+        assert.strictEqual(samePriceOut.changed, false);
+        assert.strictEqual(samePriceOut.batch_id, '');
+
+        const forcedSamePriceOut = await publishUhaozuAccountPriceSetByUser(1, {
+            game_id: '2',
+            game_name: '和平精英',
+            game_account: '10001',
+            tier: 2,
+            prices: { hour: 3, night: 10, day: 14, week: 75 },
+            trigger_source: 'rule_saved',
+            force_publish: true
+        });
+        assert.strictEqual(forcedSamePriceOut.ok, true);
+        assert.strictEqual(forcedSamePriceOut.changed, true);
+        assert.strictEqual((await listPricePublishItemLogsByBatchId(forcedSamePriceOut.batch_id)).length, 1);
+
         fetchMode = 'platform_error';
         modifiedPrices = null;
         const ladderFailed = await publishUhaozuAccountPriceSetByUser(1, {
@@ -244,6 +269,9 @@ async function createPublishUser(account, suffix, channelInfo = {}) {
         assert(/包夜价格/.test(ladderFailed.message));
         const ladderFailedLogs = await listPricePublishItemLogsByBatchId(ladderFailed.batch_id);
         assert.strictEqual(ladderFailedLogs[0].publish_status, 'fail');
+        assert.strictEqual(ladderFailedLogs[0].response_data.stage, 'modify');
+        assert.strictEqual(ladderFailedLogs[0].response_data.code, 'PRICE_RANGE');
+        assert.strictEqual(ladderFailedLogs[0].response_data.uhaozu_response.responseMsg, '包夜价格超出允许范围');
 
         const missingGoodsUser = await createPublishUser('price_publish_missing_goods', 'missing-goods', {
             rentalByHour: 4
@@ -277,6 +305,7 @@ async function createPublishUser(account, suffix, channelInfo = {}) {
         assert(/包夜价格超出允许范围/.test(rejectedOut.list[0].message));
         const rejectedLogs = await listPricePublishItemLogsByBatchId(rejectedOut.batch_id);
         assert(rejectedLogs[0].request_data);
+        assert.strictEqual(rejectedLogs[0].response_data.uhaozu_response.responseCode, 'PRICE_RANGE');
         assert.strictEqual(Number(rejectedLogs[0].price_target_night || 0) > 0, true);
 
         const mismatchUser = await createPublishUser('price_publish_mismatch', 'mismatch', {

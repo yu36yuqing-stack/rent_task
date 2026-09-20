@@ -41,7 +41,9 @@ const {
 } = require('../database/account_channel_price_baseline_db');
 const {
     initPricePublishLogDb,
+    createPricePublishBatchLog,
     createPricePublishItemLog,
+    listPricePublishBatchLogsByUser,
     listPricePublishItemLogsByAccount
 } = require('../database/price_publish_log_db');
 const {
@@ -140,6 +142,12 @@ async function main() {
     });
 
     const day = businessDateText();
+    const rulePublishCalls = [];
+    const rulePublisher = async (_userId, input) => {
+        rulePublishCalls.push(input);
+        return { ok: true, changed: true, batch_id: `rule-save-${rulePublishCalls.length}`, prices: input.prices };
+    };
+    const saveOptions = { publisher: rulePublisher };
     await seedOrder('inside-paid', { startTime: `${day} 06:00:00` });
     await seedOrder('inside-renting', {
         channel: 'uuzuhao',
@@ -178,7 +186,7 @@ async function main() {
         game_account: 'hpjy-a',
         prices: [2.4, 3.4, 5.4, 10.4],
         expected_version: 0
-    });
+    }, saveOptions);
     assert.strictEqual(savedA.version, 1);
     assert.deepStrictEqual(savedA.prices, [2.4, 3.4, 5.4, 10.4]);
     assert.strictEqual(savedA.baseline_created, true);
@@ -193,7 +201,7 @@ async function main() {
         prices: [2.4, 4.4, 7.4, 12.4],
         expected_version: 0,
         copied_from_game_account: 'hpjy-a'
-    });
+    }, saveOptions);
     assert.strictEqual(savedB.copied_from_game_account, 'hpjy-a');
     assert.strictEqual(savedB.baseline_created, true);
 
@@ -202,9 +210,11 @@ async function main() {
         game_account: 'hpjy-a',
         prices: [2.5, 3.5, 5.5, 10.5],
         expected_version: 1
-    });
+    }, saveOptions);
     assert.strictEqual(updatedA.version, 2);
     assert.strictEqual(updatedA.baseline_created, false);
+    assert.strictEqual(rulePublishCalls.length, 3);
+    assert(rulePublishCalls.every((item) => item.force_publish === true));
 
     const conflict = await expectReject(() => savePriceLadderRuleByUser(8, {
         game_name: '和平精英',
@@ -243,6 +253,12 @@ async function main() {
         goods_id: 'goods-hpjy-a',
         publish_status: 'fail',
         fail_message: '包夜价格超出范围 token=should-not-be-expanded',
+        response_data: {
+            stage: 'modify',
+            code: 'PRICE_RANGE',
+            message: '包夜价格超出范围',
+            uhaozu_response: { responseCode: 'PRICE_RANGE', responseMsg: '包夜价格超出范围' }
+        },
         price_target_hour: 3.5,
         price_target_night: 14,
         price_target_day: 21,
@@ -280,9 +296,46 @@ async function main() {
         day: 21,
         week: 122.5
     });
-    assert.strictEqual(channelResult.channel_result.error_logs.length, 1);
-    assert(/包夜价格/.test(channelResult.channel_result.error_logs[0].fail_message));
+    assert.strictEqual(channelResult.channel_result.adjustment_logs.length, 2);
+    assert.strictEqual(channelResult.channel_result.adjustment_logs[0].publish_status, 'success');
+    assert(/包夜价格/.test(channelResult.channel_result.adjustment_logs[1].fail_message));
+    assert.strictEqual(channelResult.channel_result.adjustment_logs[1].error_detail.code, 'PRICE_RANGE');
     assert.strictEqual(channelResult.channel_result.apply_status, 'manual');
+
+    for (let index = 1; index <= 25; index += 1) {
+        await createPricePublishBatchLog({
+            batch_id: `retention-${index}`,
+            user_id: 8,
+            channel: 'uhaozu',
+            game_name: '和平精英',
+            trigger_source: 'order_finished_changed',
+            status: index % 2 === 0 ? 'success' : 'fail'
+        });
+        await createPricePublishItemLog({
+            batch_id: `retention-${index}`,
+            user_id: 8,
+            channel: 'uhaozu',
+            game_name: '和平精英',
+            game_account: 'retention-account',
+            publish_status: index % 2 === 0 ? 'success' : 'fail',
+            fail_message: index % 2 === 0 ? '' : `failure-${index}`
+        });
+    }
+    const retainedLogs = await listPricePublishItemLogsByAccount(8, {
+        channel: 'uhaozu',
+        game_name: '和平精英',
+        game_account: 'retention-account',
+        limit: 100
+    });
+    assert.strictEqual(retainedLogs.length, 20);
+    assert.strictEqual(retainedLogs[0].batch_id, 'retention-25');
+    assert.strictEqual(retainedLogs.at(-1).batch_id, 'retention-6');
+    const retainedBatches = await listPricePublishBatchLogsByUser(8, {
+        channel: 'uhaozu',
+        game_name: '和平精英',
+        page_size: 100
+    });
+    assert.strictEqual(retainedBatches.list.filter((item) => item.batch_id.startsWith('retention-')).length, 20);
 
     await seedAccount({ account: 'hpjy-incomplete', remark: '套餐缺失', price: 3, night: 0, day: 0, week: 0 });
     const incompleteSaved = await savePriceLadderRuleByUser(8, {
@@ -290,7 +343,7 @@ async function main() {
         game_account: 'hpjy-incomplete',
         prices: [3, 4, 5, 6],
         expected_version: 0
-    });
+    }, saveOptions);
     assert.strictEqual(incompleteSaved.baseline_ready, false);
     const incompleteResult = await getPriceLadderChannelResultByUser(8, {
         game_name: '和平精英',
@@ -338,7 +391,7 @@ async function main() {
         game_account: 'hpjy-a',
         prices: [2.7, 3.7, 5.7, 10.7],
         expected_version: 0
-    });
+    }, saveOptions);
     assert.strictEqual(resavedA.version, 1);
     assert.strictEqual(resavedA.baseline_created, true);
     const clearedAgain = await savePriceLadderRuleByUser(8, {

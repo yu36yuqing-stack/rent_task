@@ -35,6 +35,47 @@ assert.strictEqual(helpers.pricingApplyStatusText('unknown'), '套餐数据暂�
 assert.strictEqual(helpers.pricingTierLabel(1), '第 1 单价（完成 0 单）');
 assert.strictEqual(helpers.pricingTierLabel(2), '第 2 单价（完成 1 单后）');
 assert.strictEqual(helpers.pricingTierLabel(9), '第 4 单价（完成 3 单后）');
+assert.strictEqual(helpers.pricingLogStatusText('success'), '成功');
+assert.strictEqual(helpers.pricingLogStatusText('fail'), '失败');
+assert.strictEqual(helpers.pricingLogTriggerText('rule_saved'), '保存策略');
+assert.strictEqual(helpers.pricingLogTriggerText('daily_reset'), '06:00重置');
+assert.strictEqual(helpers.pricingLogTriggerText('unknown'), '阶梯调价');
+
+const errorDetail = helpers.formatPricingErrorDetail({
+    fail_message: '商品更新失败',
+    error_detail: {
+        stage: 'modify',
+        code: 'PRICE_RANGE',
+        uhaozu_response: { responseCode: 'PRICE_RANGE', responseMsg: '包夜价超限' }
+    }
+});
+assert(errorDetail.includes('失败阶段：modify'));
+assert(errorDetail.includes('错误代码：PRICE_RANGE'));
+assert(errorDetail.includes('包夜价超限'));
+const logHtml = helpers.renderPricingChannelLogs({
+    adjustment_logs: [
+        {
+            id: 1,
+            publish_status: 'success',
+            trigger_source: 'daily_reset',
+            create_date: '2026-09-20 06:00:00',
+            before_prices: { hour: 3 },
+            target_prices: { hour: 2.4, night: 9.6, day: 14.4, week: 84 },
+            remote_prices: { hour: 2.4 }
+        },
+        {
+            id: 2,
+            publish_status: 'fail',
+            trigger_source: 'order_finished_changed',
+            fail_message: '范围错误',
+            target_prices: { hour: 3 }
+        }
+    ]
+});
+assert(logHtml.includes('06:00重置'));
+assert(logHtml.includes('data-pricing-error-detail="2"'));
+assert(!logHtml.includes('data-pricing-error-detail="1"'));
+assert(helpers.renderPricingChannelLogs({ adjustment_logs: [] }).includes('暂无 U号租调价记录'));
 
 const filteredByName = helpers.filterPricingItems([
     { display_name: '呆小姚', game_account: '2630403808' },

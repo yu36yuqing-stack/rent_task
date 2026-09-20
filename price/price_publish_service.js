@@ -152,47 +152,71 @@ async function publishUhaozuAccountPriceSetByUser(userId, input = {}, options = 
     const goodsId = String(input.goods_id || info.prd_id || info.goods_id || '').trim();
     if (!goodsId) throw new Error('缺少 U号租商品ID');
 
-    const auth = options.auth || await getUhaozuAuthPayloadByUser(uid);
     const queryGoods = options.query_goods || queryGoodsModifyPayloadByGoodsId;
     const modifyGoods = options.modify_goods || modifyUhaozuGoods;
     const batchId = String(input.batch_id || buildPublishBatchId(uid, 'uhaozu-ladder')).trim();
+    const triggerSource = String(input.trigger_source || 'price_ladder').trim();
+    const forcePublish = input.force_publish === true;
     const startedAt = nowText();
-    await createPricePublishBatchLog({
-        batch_id: batchId,
-        user_id: uid,
-        channel: 'uhaozu',
-        game_name: gameName,
-        trigger_source: String(input.trigger_source || 'price_ladder').trim(),
-        request_snapshot: {
-            game_id: gameId,
-            game_account: gameAccount,
-            tier: Number(input.tier || 0),
-            prices: targetPrices
-        },
-        total_count: 1,
-        success_count: 0,
-        fail_count: 0,
-        status: 'running',
-        start_time: startedAt,
-        desc: 'publish account price ladder'
-    });
-
+    let batchCreated = false;
     let beforePayload = null;
     let afterPayload = null;
     let modifyOutput = null;
+    let failureStage = 'authorization';
+    const ensureBatch = async () => {
+        if (batchCreated) return;
+        await createPricePublishBatchLog({
+            batch_id: batchId,
+            user_id: uid,
+            channel: 'uhaozu',
+            game_name: gameName,
+            trigger_source: triggerSource,
+            request_snapshot: {
+                game_id: gameId,
+                game_account: gameAccount,
+                tier: Number(input.tier || 0),
+                prices: targetPrices,
+                force_publish: forcePublish
+            },
+            total_count: 1,
+            success_count: 0,
+            fail_count: 0,
+            status: 'running',
+            start_time: startedAt,
+            desc: 'publish account price ladder'
+        });
+        batchCreated = true;
+    };
     try {
+        const auth = options.auth || await getUhaozuAuthPayloadByUser(uid);
+        failureStage = 'query_before';
         beforePayload = await queryGoods(goodsId, auth);
+        const beforePrices = pickPriceFields(beforePayload);
+        if (!forcePublish && samePublishPriceSet(targetPrices, beforePrices)) {
+            return {
+                ok: true,
+                changed: false,
+                batch_id: '',
+                goods_id: goodsId,
+                prices: beforePrices,
+                reason: 'already_matches'
+            };
+        }
+        await ensureBatch();
         const beforeInfo = beforePayload && beforePayload.info && typeof beforePayload.info === 'object'
             ? beforePayload.info
             : {};
+        failureStage = 'modify';
         modifyOutput = await modifyGoods(goodsId, {
             info: {
                 ...targetPrices,
                 deposit: Number(beforeInfo.deposit || 0)
             }
         }, auth);
+        failureStage = 'query_after';
         afterPayload = await queryGoods(goodsId, auth);
         const afterPrices = pickPriceFields(afterPayload);
+        failureStage = 'verify_after';
         if (!samePublishPriceSet(targetPrices, afterPrices)) {
             throw new Error(`U号租价格回读不一致: target=${JSON.stringify(targetPrices)} actual=${JSON.stringify(afterPrices)}`);
         }
@@ -217,7 +241,6 @@ async function publishUhaozuAccountPriceSetByUser(userId, input = {}, options = 
             },
             desc: 'publish account price ladder to uhaozu'
         });
-        const beforePrices = pickPriceFields(beforePayload);
         await createPricePublishItemLog({
             batch_id: batchId,
             user_id: uid,
@@ -254,11 +277,15 @@ async function publishUhaozuAccountPriceSetByUser(userId, input = {}, options = 
             end_time: nowText(),
             desc: 'publish account price ladder completed'
         });
-        return { ok: true, batch_id: batchId, goods_id: goodsId, prices: afterPrices };
+        return { ok: true, changed: true, batch_id: batchId, goods_id: goodsId, prices: afterPrices };
     } catch (error) {
         const message = String(error && error.message ? error.message : error);
+        await ensureBatch();
         const beforePrices = pickPriceFields(beforePayload);
         const afterPrices = pickPriceFields(afterPayload);
+        const remoteResponse = error && error.uhaozu_response
+            ? error.uhaozu_response
+            : (modifyOutput && modifyOutput.result ? modifyOutput.result : null);
         await createPricePublishItemLog({
             batch_id: batchId,
             user_id: uid,
@@ -270,7 +297,12 @@ async function publishUhaozuAccountPriceSetByUser(userId, input = {}, options = 
             fail_message: message,
             before_data: sanitizePriceLogPayload(beforePayload),
             request_data: sanitizePriceLogPayload(modifyOutput && modifyOutput.payload || { info: targetPrices }),
-            response_data: sanitizePriceLogPayload(modifyOutput && modifyOutput.result),
+            response_data: sanitizePriceLogPayload({
+                stage: failureStage,
+                code: String(error && error.code || '').trim(),
+                message,
+                uhaozu_response: remoteResponse
+            }),
             after_data: sanitizePriceLogPayload(afterPayload),
             price_before_hour: beforePrices.rentalByHour,
             price_before_night: beforePrices.rentalByNight,
@@ -296,7 +328,19 @@ async function publishUhaozuAccountPriceSetByUser(userId, input = {}, options = 
             end_time: nowText(),
             desc: 'publish account price ladder failed'
         });
-        return { ok: false, batch_id: batchId, goods_id: goodsId, message };
+        return {
+            ok: false,
+            changed: false,
+            batch_id: batchId,
+            goods_id: goodsId,
+            message,
+            error_detail: sanitizePriceLogPayload({
+                stage: failureStage,
+                code: String(error && error.code || '').trim(),
+                message,
+                uhaozu_response: remoteResponse
+            })
+        };
     }
 }
 
@@ -472,6 +516,11 @@ async function publishUhaozuPricingByUser(userId, options = {}) {
                     fail_message: result.message,
                     before_data: sanitizePriceLogPayload(beforePayload),
                     request_data: targetPrices ? sanitizePriceLogPayload({ info: targetPrices }) : null,
+                    response_data: sanitizePriceLogPayload({
+                        message: result.message,
+                        code: String(e && e.code || '').trim(),
+                        uhaozu_response: e && e.uhaozu_response ? e.uhaozu_response : null
+                    }),
                     after_data: sanitizePriceLogPayload(afterPayload),
                     price_before_hour: pickPriceFields(beforePayload).rentalByHour,
                     price_before_night: pickPriceFields(beforePayload).rentalByNight,

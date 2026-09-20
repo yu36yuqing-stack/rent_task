@@ -2128,6 +2128,29 @@
       gap: 6px;
     }
 
+    .pricing-error-log-item.is-success .pricing-error-log-head strong {
+      color: var(--ok);
+    }
+
+    .pricing-error-log-item.is-failed .pricing-error-log-head strong {
+      color: var(--danger);
+    }
+
+    .pricing-log-detail-btn {
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      border: 1px solid #b9c7d6;
+      border-radius: 50%;
+      background: #fff;
+      color: #465d76;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 20px;
+      text-align: center;
+      cursor: pointer;
+    }
+
     .pricing-error-log-item p {
       margin: 0;
       color: #a63f3f;
@@ -3625,6 +3648,8 @@
       bottom: auto;
       transform: translate(-50%, -50%);
       min-width: min(240px, calc(100vw - 32px));
+      max-height: calc(100vh - 48px);
+      overflow-y: auto;
       pointer-events: auto;
       cursor: pointer;
     }

@@ -124,27 +124,56 @@ function filterPricingItems(items = [], query = '') {
   ));
 }
 
+function pricingLogStatusText(status) {
+  return status === 'success' ? '成功' : '失败';
+}
+
+function pricingLogTriggerText(source) {
+  const labels = {
+    rule_saved: '保存策略',
+    order_finished_changed: '订单换挡',
+    daily_reset: '06:00重置',
+    feature_enabled_reconcile: '功能启用校准',
+    pricing_h5: '手工发布'
+  };
+  return labels[String(source || '').trim()] || '阶梯调价';
+}
+
+function formatPricingErrorDetail(log = {}) {
+  const detail = log.error_detail && typeof log.error_detail === 'object' ? log.error_detail : null;
+  const lines = [String(log.fail_message || 'U号租未返回明确错误信息')];
+  if (detail) {
+    if (detail.stage) lines.push(`失败阶段：${detail.stage}`);
+    if (detail.code) lines.push(`错误代码：${detail.code}`);
+    if (detail.uhaozu_response) {
+      const raw = JSON.stringify(detail.uhaozu_response, null, 2);
+      lines.push(`U号租返回：\n${raw.length > 4000 ? `${raw.slice(0, 4000)}\n...` : raw}`);
+    }
+  }
+  return lines.join('\n');
+}
+
 function renderPricingChannelLogs(result = {}) {
-  const logs = Array.isArray(result.error_logs) ? result.error_logs : [];
+  const logs = Array.isArray(result.adjustment_logs) ? result.adjustment_logs : [];
   if (logs.length === 0) {
-    return '<div class="pricing-channel-empty">当前账号暂无 U号租价格设置错误。</div>';
+    return '<div class="pricing-channel-empty">当前账号暂无 U号租调价记录。</div>';
   }
   return `<div class="pricing-error-log-list">${logs.map((log) => `
-    <article class="pricing-error-log-item">
+    <article class="pricing-error-log-item ${log.publish_status === 'success' ? 'is-success' : 'is-failed'}">
       <div class="pricing-error-log-head">
-        <span>${escapePricingHtml(log.create_date || '-')}</span>
+        <span><strong>${escapePricingHtml(pricingLogStatusText(log.publish_status))}</strong> · ${escapePricingHtml(pricingLogTriggerText(log.trigger_source))}</span>
         <span class="pricing-error-log-tools">
-          <span>批次 ${escapePricingHtml(log.batch_id || '-')}</span>
-          <button class="copy-btn" data-pricing-copy-error="${Number(log.id || 0)}" type="button">复制错误</button>
+          <span>${escapePricingHtml(log.create_date || '-')}</span>
+          ${log.publish_status === 'fail' ? `<button class="pricing-log-detail-btn" data-pricing-error-detail="${Number(log.id || 0)}" type="button" title="查看U号租错误详情" aria-label="查看U号租错误详情">?</button>` : ''}
         </span>
       </div>
-      <p>${escapePricingHtml(log.fail_message || 'U号租未返回明确错误信息')}</p>
+      ${log.publish_status === 'fail' ? `<p>${escapePricingHtml(log.fail_message || 'U号租未返回明确错误信息')}</p>` : ''}
       <div class="pricing-error-log-prices">
+        调整前：时租 ${escapePricingHtml(formatPricingResultMoney(log.before_prices && log.before_prices.hour))} ·
         目标：时租 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.hour))} ·
-        包夜 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.night))} ·
-        包天 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.day))} ·
-        包周 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.week))}
+        调整后：时租 ${escapePricingHtml(formatPricingResultMoney(log.remote_prices && log.remote_prices.hour))}
       </div>
+      <div class="pricing-error-log-prices">目标套餐：包夜 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.night))} · 包天 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.day))} · 包周 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.week))}</div>
     </article>
   `).join('')}</div>`;
 }
@@ -154,11 +183,11 @@ function renderUhaozuChannelResult(payload = {}) {
   const sheetState = ensurePricingLadderState().channel_sheet;
   const remote = result.remote_current || {};
   const tiers = Array.isArray(result.tiers) ? result.tiers : [];
-  const errors = Array.isArray(result.error_logs) ? result.error_logs : [];
+  const logs = Array.isArray(result.adjustment_logs) ? result.adjustment_logs : [];
   const viewTabs = `
     <div class="orders-tabs pricing-result-tabs">
       <button class="orders-tab header-tab ${sheetState.view === 'result' ? 'active' : ''}" data-pricing-result-view="result" type="button">套餐结果</button>
-      <button class="orders-tab header-tab ${sheetState.view === 'logs' ? 'active' : ''}" data-pricing-result-view="logs" type="button">错误日志${errors.length ? ` (${errors.length})` : ''}</button>
+      <button class="orders-tab header-tab ${sheetState.view === 'logs' ? 'active' : ''}" data-pricing-result-view="logs" type="button">调价记录${logs.length ? ` (${logs.length})` : ''}</button>
     </div>
   `;
   if (sheetState.view === 'logs') return `${viewTabs}${renderPricingChannelLogs(result)}`;
@@ -239,15 +268,14 @@ function renderPricingChannelSheet() {
       renderPricingChannelSheet();
     };
   });
-  Array.from(nodes.body.querySelectorAll('[data-pricing-copy-error]')).forEach((button) => {
-    button.onclick = async () => {
-      const id = Number(button.getAttribute('data-pricing-copy-error') || 0);
+  Array.from(nodes.body.querySelectorAll('[data-pricing-error-detail]')).forEach((button) => {
+    button.onclick = () => {
+      const id = Number(button.getAttribute('data-pricing-error-detail') || 0);
       const logs = sheetState.payload && sheetState.payload.channel_result
-        ? sheetState.payload.channel_result.error_logs || []
+        ? sheetState.payload.channel_result.adjustment_logs || []
         : [];
       const log = logs.find((item) => Number(item.id || 0) === id);
-      const ok = log ? await copyTextToClipboard(log.fail_message || '') : false;
-      showToast(ok ? '错误信息已复制' : '复制失败');
+      if (log) showToast(formatPricingErrorDetail(log), 0, 'detail');
     };
   });
 }
@@ -439,7 +467,12 @@ async function savePricingAccount(account, card) {
     item.copied_from_game_account = item.configured ? String(saved.copied_from_game_account || '') : '';
     pricing.editing[account] = false;
     delete pricing.drafts[account];
-    showToast(item.configured ? '阶梯价格已保存' : '已清空，账号回到待配置状态');
+    const publishResult = saved.publish_result || {};
+    const published = Number(publishResult.applied || 0) > 0;
+    const publishFailed = Number(publishResult.failed || 0) > 0;
+    showToast(item.configured
+      ? (published ? '阶梯价格已保存，渠道价格更新成功' : (publishFailed ? '阶梯价格已保存，渠道价格更新失败并进入重试' : '阶梯价格已保存'))
+      : '已清空，账号回到待配置状态');
   } catch (e) {
     showToast(e.message || '阶梯价格保存失败');
   } finally {
@@ -652,5 +685,9 @@ window.__pricingLadderTest = {
   validatePricingDraft,
   pricingApplyStatusText,
   pricingTierLabel,
-  filterPricingItems
+  filterPricingItems,
+  pricingLogStatusText,
+  pricingLogTriggerText,
+  formatPricingErrorDetail,
+  renderPricingChannelLogs
 };

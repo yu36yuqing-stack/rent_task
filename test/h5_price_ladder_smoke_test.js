@@ -105,6 +105,9 @@ async function main() {
         assert.strictEqual(channelJson.channel_result.baseline_status, 'saved');
         assert.strictEqual(channelJson.channel_result.tiers.length, 4);
         assert.strictEqual(channelJson.channels.length, 3);
+        assert.strictEqual(channelJson.channel_result.adjustment_logs.length, 1);
+        assert.strictEqual(channelJson.channel_result.adjustment_logs[0].publish_status, 'fail');
+        assert.strictEqual(channelJson.channel_result.adjustment_logs[0].error_detail.stage, 'authorization');
 
         const missingAccountRes = await fetch(`${baseUrl}/api/pricing/ladder/channel-result?game_name=${encodeURIComponent('和平精英')}`, { headers });
         assert.strictEqual(missingAccountRes.status, 400);

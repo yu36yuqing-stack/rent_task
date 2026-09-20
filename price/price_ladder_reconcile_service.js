@@ -2,7 +2,6 @@
 
 const {
     listBusinessDayFinishedOrderCountByAccounts,
-    listRentingOrderWindowByAccounts,
     _internal: { businessDateText, isFinishedPriceLadderStatus }
 } = require('../database/order_db');
 const {
@@ -25,7 +24,6 @@ const {
     getPriceLadderFeatureConfig,
     markPriceLadderFeatureReconciled
 } = require('../database/price_ladder_feature_config_db');
-const { listBlacklistSourcesByUserAndAccounts } = require('../database/user_blacklist_source_db');
 const { listUserGameAccounts } = require('../database/user_game_account_db');
 const { publishUhaozuAccountPriceSetByUser } = require('./price_publish_service');
 const { _internal: priceInternal } = require('./price_ladder_service');
@@ -33,7 +31,6 @@ const { _internal: priceInternal } = require('./price_ladder_service');
 const CHANNEL = 'uhaozu';
 const DAILY_RESET_JOB_KEY = 'price_ladder_daily_reset';
 const RETRY_DELAY_MINUTES = 30;
-const NON_BLOCKING_BLACKLIST_SOURCES = new Set(['order_cooldown', 'platform_face_verify']);
 
 function tierByCompletedCount(count) {
     return Math.min(4, Math.max(1, Math.floor(Number(count || 0)) + 1));
@@ -152,13 +149,16 @@ async function initializePriceLadderRuntimeOnRuleSave(userId, rule, options = {}
         channel: CHANNEL,
         business_date: day,
         completed_order_count: count,
-        desired_tier: current ? current.desired_tier : tier,
-        applied_tier: current && current.applied_tier ? current.applied_tier : tier,
-        pending_count_delta: current ? current.pending_count_delta : 0,
+        desired_tier: tier,
+        applied_tier: current ? current.applied_tier : 0,
+        pending_count_delta: 0,
         rule_version: rule.version,
-        status: current ? current.status : 'applied',
-        trigger_source: current ? current.trigger_source : 'rule_initialized'
-    }, { desc: 'initialize ladder runtime without changing channel price' });
+        status: 'pending',
+        trigger_source: String(options.trigger_source || 'rule_saved').trim() || 'rule_saved',
+        last_error: '',
+        retry_count: 0,
+        next_retry_at: ''
+    }, { desc: 'queue ladder runtime after rule save' });
 }
 
 async function enqueueDailyResetIfDue(userId, options = {}) {
@@ -182,7 +182,7 @@ async function enqueueDailyResetIfDue(userId, options = {}) {
             applied_tier: appliedTier,
             pending_count_delta: 0,
             rule_version: rule.version,
-            status: appliedTier === 1 ? 'applied' : 'pending',
+            status: 'pending',
             trigger_source: 'daily_reset',
             last_error: '',
             next_retry_at: ''
@@ -229,7 +229,10 @@ async function enqueueFeatureActivationReconcile(userId, options = {}) {
     for (const rule of rules) {
         const runtime = await getAccountPriceLadderRuntime(uid, rule.game_id, rule.game_account, CHANNEL);
         if (!runtime) {
-            await initializePriceLadderRuntimeOnRuleSave(uid, rule, options);
+            await initializePriceLadderRuntimeOnRuleSave(uid, rule, {
+                ...options,
+                trigger_source: 'feature_enabled_reconcile'
+            });
             initialized += 1;
             continue;
         }
@@ -248,26 +251,8 @@ async function enqueueFeatureActivationReconcile(userId, options = {}) {
 }
 
 async function getPriceLadderApplyBlock(userId, accountRow = {}) {
-    const uid = Number(userId || 0);
-    const key = {
-        game_id: String(accountRow.game_id || '').trim(),
-        game_name: String(accountRow.game_name || '').trim(),
-        game_account: String(accountRow.game_account || '').trim()
-    };
-    const [blacklistRows, renting] = await Promise.all([
-        listBlacklistSourcesByUserAndAccounts(uid, [key], { active_only: true }),
-        listRentingOrderWindowByAccounts(uid, [key])
-    ]);
-    const blockingBlacklist = blacklistRows.find((row) => (
-        !NON_BLOCKING_BLACKLIST_SOURCES.has(String(row && row.source || '').trim())
-    ));
-    if (blockingBlacklist) {
-        return {
-            blocked: true,
-            reason: `blacklist:${String(blockingBlacklist.reason || blockingBlacklist.source || '').trim()}`
-        };
-    }
-    if (renting[`${key.game_id}::${key.game_account}`]) return { blocked: true, reason: 'active_order' };
+    void userId;
+    void accountRow;
     return { blocked: false, reason: '' };
 }
 
@@ -277,9 +262,16 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
     const now = options.now || new Date();
     const day = businessDateText(6, now);
     const allowApply = options.allow_apply !== false;
+    const accountKeys = new Set((Array.isArray(options.accounts) ? options.accounts : [])
+        .map((item) => `${String(item && item.game_id || '').trim()}::${String(item && item.game_account || '').trim()}`)
+        .filter((key) => key !== '::'));
     const runtimes = (await listAccountPriceLadderRuntimesByUser(uid, {
         statuses: ['pending', 'blocked', 'failed']
-    })).filter((row) => row.business_date === day && (row.status !== 'failed' || isRetryDue(row, now)));
+    })).filter((row) => (
+        row.business_date === day
+        && (row.status !== 'failed' || isRetryDue(row, now))
+        && (accountKeys.size === 0 || accountKeys.has(`${row.game_id}::${row.game_account}`))
+    ));
     if (runtimes.length === 0) return { scanned: 0, applied: 0, unchanged: 0, blocked: 0, failed: 0, pending: 0, list: [] };
 
     const accountRows = await listAllAccountsByUser(uid);
@@ -299,7 +291,11 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
         const count = Number(counts[key] || 0);
         const desiredTier = tierByCompletedCount(count);
         const inferredPreviousCount = Math.max(0, count - Number(runtime.pending_count_delta || 0));
-        const appliedTier = runtime.applied_tier || tierByCompletedCount(inferredPreviousCount);
+        const runtimeTrigger = String(runtime.trigger_source || '').trim();
+        const storedAppliedTier = Number(runtime.applied_tier || 0);
+        const appliedTier = storedAppliedTier > 0
+            ? storedAppliedTier
+            : (runtimeTrigger === 'rule_saved' ? 0 : tierByCompletedCount(inferredPreviousCount));
         if (!rule || !accountRow) {
             await upsertAccountPriceLadderRuntime(uid, {
                 ...runtime,
@@ -321,7 +317,8 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
         const tiers = baseline ? priceInternal.buildUhaozuTierPrices(rule.prices, baseline.prices) : [];
         const desired = tiers.find((item) => item.tier === desiredTier) || null;
         const signature = desired ? priceSignature(desiredTier, desired.prices, rule.version, baseline.version) : '';
-        if (desiredTier === appliedTier) {
+        const verifyRemote = ['daily_reset', 'rule_saved', 'feature_enabled_reconcile'].includes(runtimeTrigger);
+        if (desiredTier === appliedTier && !verifyRemote) {
             await upsertAccountPriceLadderRuntime(uid, {
                 ...runtime,
                 business_date: day,
@@ -371,26 +368,6 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
             summary.list.push({ game_account: runtime.game_account, status: 'failed', reason: 'baseline_unavailable' });
             continue;
         }
-        const block = await getPriceLadderApplyBlock(uid, accountRow);
-        if (block.blocked) {
-            await upsertAccountPriceLadderRuntime(uid, {
-                ...runtime,
-                completed_order_count: count,
-                desired_tier: desiredTier,
-                applied_tier: appliedTier,
-                pending_count_delta: 0,
-                rule_version: rule.version,
-                baseline_version: baseline.version,
-                desired_price_signature: signature,
-                status: 'blocked',
-                last_error: block.reason,
-                next_retry_at: ''
-            }, { desc: 'price ladder blocked by shelf safety gate' });
-            summary.blocked += 1;
-            summary.list.push({ game_account: runtime.game_account, status: 'blocked', reason: block.reason });
-            continue;
-        }
-
         const latestFeature = await featureGuard(uid);
         if (!latestFeature || latestFeature.enabled !== true) {
             summary.pending += 1;
@@ -417,7 +394,8 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
                 goods_id: baseline.goods_id,
                 tier: desiredTier,
                 prices: desired.prices,
-                trigger_source: runtime.trigger_source || 'price_ladder'
+                trigger_source: runtime.trigger_source || 'price_ladder',
+                force_publish: runtimeTrigger === 'rule_saved'
             });
         } catch (error) {
             published = { ok: false, message: String(error && error.message ? error.message : error) };
@@ -440,8 +418,13 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
                 next_retry_at: '',
                 last_apply_date: new Date(now).toISOString()
             }, { desc: 'price ladder applied to uhaozu' });
-            summary.applied += 1;
-            summary.list.push({ game_account: runtime.game_account, status: 'applied', tier: desiredTier, batch_id: published.batch_id || '' });
+            if (published.changed === false) {
+                summary.unchanged += 1;
+                summary.list.push({ game_account: runtime.game_account, status: 'unchanged', tier: desiredTier });
+            } else {
+                summary.applied += 1;
+                summary.list.push({ game_account: runtime.game_account, status: 'applied', tier: desiredTier, batch_id: published.batch_id || '' });
+            }
         } else {
             const message = String(published && published.message || '价格发布失败');
             await upsertAccountPriceLadderRuntime(uid, {
@@ -497,7 +480,6 @@ module.exports = {
         retryAtText,
         isRetryDue,
         listAllAccountsByUser,
-        NON_BLOCKING_BLACKLIST_SOURCES,
         CHANNEL,
         DAILY_RESET_JOB_KEY
     }

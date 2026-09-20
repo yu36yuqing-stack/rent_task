@@ -76,7 +76,10 @@
       node.classList.toggle('toast-detail', centered);
       node.onclick = centered ? hide : null;
       node.classList.add('show');
-      toastTimer = setTimeout(hide, Math.max(800, Number(durationMs || 1200)));
+      const duration = Number(durationMs);
+      if (!(centered && duration <= 0)) {
+        toastTimer = setTimeout(hide, Math.max(800, Number.isFinite(duration) ? duration : 1200));
+      }
     }
 
     async function copyTextToClipboard(text) {
