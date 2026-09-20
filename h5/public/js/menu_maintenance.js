@@ -40,19 +40,136 @@ function maintenanceResult(row) {
   }
 }
 
-function renderMaintenanceTargets(row) {
+function formatMaintenanceMetricBytes(value) {
+  return value === undefined || value === null ? '-' : formatMaintenanceBytes(value);
+}
+
+function maintenanceCleanupResult(item, processedCount) {
+  const freedBytes = Math.max(0, Number(item && item.freed_bytes || 0));
+  if (freedBytes > 0) return `释放 ${formatMaintenanceBytes(freedBytes)}`;
+  const estimatedBytes = Math.max(0, Number(item && item.estimated_deleted_bytes || 0));
+  if (estimatedBytes > 0) return `预计释放 ${formatMaintenanceBytes(estimatedBytes)}`;
+  return processedCount > 0 ? '处理完成' : '无可清理数据';
+}
+
+function buildMaintenanceDetailRows(row) {
   const result = maintenanceResult(row);
   const runtime = result && result.runtime_task;
+  const blacklistHistory = result && result.user_blacklist_history;
+  const onoffHistory = result && result.product_onoff_history;
+  const orderDetailHtml = result && result.order_detail_html;
   const applicationLogs = result && result.application_logs;
-  if (!runtime && !applicationLogs) return '';
+  const compactions = result && Array.isArray(result.database_compaction)
+    ? result.database_compaction
+    : [];
+  const rows = [];
+  const addCleanupRow = (label, item, actionLabel, countKey = 'deleted_rows', countUnit = '条') => {
+    if (!item) return;
+    const count = Math.max(0, Number(item[countKey] || 0));
+    rows.push({
+      label,
+      policy: `${Math.max(0, Number(item.retention_days || 0)) || '-'}天`,
+      processed: `${actionLabel}${count} ${countUnit}`,
+      before: formatMaintenanceMetricBytes(item.before_bytes),
+      after: formatMaintenanceMetricBytes(item.after_bytes),
+      result: maintenanceCleanupResult(item, count),
+      result_class: count > 0 || Number(item.freed_bytes || 0) > 0 ? 'success' : 'muted'
+    });
+  };
+  addCleanupRow('运行任务', runtime, '删除 ');
+  addCleanupRow('黑名单历史', blacklistHistory, '删除 ');
+  addCleanupRow('上下架历史', onoffHistory, '删除 ');
+  addCleanupRow('订单详情 HTML', orderDetailHtml, '清空 ', 'cleared_rows');
+
   const files = applicationLogs && Array.isArray(applicationLogs.files)
     ? applicationLogs.files.filter((item) => item && !item.skipped)
     : [];
+  files.forEach((item) => {
+    const removedLines = Math.max(0, Number(item.removed_lines || 0));
+    rows.push({
+      label: String(item.file_name || '应用日志'),
+      policy: `${Math.max(0, Number(item.retention_days || applicationLogs.retention_days || 0)) || '-'}天`,
+      processed: `删除 ${removedLines} 行`,
+      before: formatMaintenanceMetricBytes(item.before_bytes),
+      after: formatMaintenanceMetricBytes(item.after_bytes),
+      result: maintenanceCleanupResult(item, removedLines),
+      result_class: removedLines > 0 || Number(item.freed_bytes || 0) > 0 ? 'success' : 'muted'
+    });
+  });
+  if (applicationLogs && files.length === 0) {
+    addCleanupRow('应用日志', applicationLogs, '删除 ', 'deleted_rows', '行');
+  }
+
+  const databaseLabels = { main: '主库', order: '订单库', runtime: '运行库' };
+  compactions.forEach((item) => {
+    const status = String(item && item.status || '');
+    const reason = String(item && item.reason || '');
+    let resultText = '未达到压缩阈值';
+    let resultClass = 'muted';
+    if (status === 'compacted') {
+      resultText = Number(item.freed_bytes || 0) > 0
+        ? `释放 ${formatMaintenanceBytes(item.freed_bytes)}`
+        : '压缩完成';
+      resultClass = 'success';
+    } else if (reason === 'database_busy') {
+      resultText = '数据库忙，已跳过';
+      resultClass = 'warning';
+    }
+    rows.push({
+      label: `${databaseLabels[String(item && item.database_name || '')] || String(item && item.database_name || '数据库')}压缩`,
+      policy: '阈值触发',
+      processed: '-',
+      before: formatMaintenanceMetricBytes(item && item.before && item.before.file_bytes),
+      after: formatMaintenanceMetricBytes(item && item.after && item.after.file_bytes),
+      result: resultText,
+      result_class: resultClass
+    });
+  });
+
+  if (rows.length === 0) {
+    const processedCount = Math.max(0, Number(row && row.deleted_rows || 0));
+    rows.push({
+      label: '清理汇总',
+      policy: `${Math.max(0, Number(row && row.retention_days || 0)) || '-'}天`,
+      processed: `处理 ${processedCount} 条/行`,
+      before: formatMaintenanceMetricBytes(row && row.before_bytes),
+      after: formatMaintenanceMetricBytes(row && row.after_bytes),
+      result: maintenanceCleanupResult(row || {}, processedCount),
+      result_class: processedCount > 0 || Number(row && row.freed_bytes || 0) > 0 ? 'success' : 'muted'
+    });
+  }
+  return rows;
+}
+
+function renderMaintenanceTargets(row) {
+  const rows = buildMaintenanceDetailRows(row);
   return `
-    <div class="maintenance-log-grid">
-      ${runtime ? `<span>runtime_task：删除 ${Number(runtime.deleted_rows || 0)} 条</span>` : ''}
-      ${applicationLogs ? `<span>应用日志：释放 ${formatMaintenanceBytes(applicationLogs.freed_bytes)}</span>` : ''}
-      ${files.map((item) => `<span>${escapeMaintenanceHtml(item.file_name || '-')}：${formatMaintenanceBytes(item.before_bytes)} → ${formatMaintenanceBytes(item.after_bytes)}</span>`).join('')}
+    <div class="maintenance-detail-table-wrap">
+      <table class="maintenance-detail-table">
+        <caption>本次清理明细</caption>
+        <thead>
+          <tr>
+            <th scope="col">清理项目</th>
+            <th scope="col">保留策略</th>
+            <th scope="col">处理数量</th>
+            <th scope="col">清理前</th>
+            <th scope="col">清理后</th>
+            <th scope="col">释放/结果</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((item) => `
+            <tr>
+              <th scope="row">${escapeMaintenanceHtml(item.label)}</th>
+              <td>${escapeMaintenanceHtml(item.policy)}</td>
+              <td>${escapeMaintenanceHtml(item.processed)}</td>
+              <td>${escapeMaintenanceHtml(item.before)}</td>
+              <td>${escapeMaintenanceHtml(item.after)}</td>
+              <td class="maintenance-result-${escapeMaintenanceHtml(item.result_class)}">${escapeMaintenanceHtml(item.result)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
     </div>
   `;
 }
@@ -155,14 +272,9 @@ function renderMaintenanceCleanup() {
         </div>
         <span class="maintenance-status-pill maintenance-status-${escapeMaintenanceHtml(row.status)}">${escapeMaintenanceHtml(maintenanceStatusLabel(row.status))}</span>
       </div>
-      <div class="maintenance-log-grid">
-        <span>清理目标：${escapeMaintenanceHtml(row.target_table || '-')}</span>
-        <span>保留：${Number(row.retention_days || 0)} 天</span>
-        <span>删除：${Number(row.deleted_rows || 0)} 条/行</span>
+      <div class="maintenance-log-meta">
         <span>耗时：${Number(row.duration_ms || 0)} ms</span>
-        <span>清理前：${formatMaintenanceBytes(row.before_bytes)}</span>
-        <span>清理后：${formatMaintenanceBytes(row.after_bytes)}</span>
-        <span>估算清理：${formatMaintenanceBytes(row.estimated_deleted_bytes)}</span>
+        <span>处理：${Number(row.deleted_rows || 0)} 条/行</span>
         <span>实际释放：${formatMaintenanceBytes(row.freed_bytes)}</span>
         <span>触发人：${Number(row.trigger_user_id || 0) || '-'}</span>
       </div>

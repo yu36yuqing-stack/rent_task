@@ -24,18 +24,59 @@ async function pruneProductOnoffHistory(options = {}) {
         `);
         if (!tableRow || tableRow.length <= 0) {
             return {
+                target: 'product_onoff_history',
                 retain_days: retainDays,
+                retention_days: retainDays,
                 cutoff_ms: cutoffMs,
                 cutoff_text: cutoffText,
                 before: 0,
                 after: 0,
-                deleted: 0
+                deleted: 0,
+                deleted_rows: 0,
+                before_bytes: 0,
+                after_bytes: 0,
+                estimated_deleted_bytes: 0,
+                freed_bytes: 0
             };
         }
+        const beforeBytes = await getProductOnoffHistoryBytes(db);
         const beforeRows = await all(db, `SELECT COUNT(*) AS total FROM product_onoff_history`);
         const before = Number((((beforeRows || [])[0] || {}).total) || 0);
+        const staleRows = await all(db, `
+            SELECT COUNT(*) AS total
+            FROM product_onoff_history
+            WHERE NOT (
+                (COALESCE(event_time, 0) > 0 AND event_time >= ?)
+                OR (
+                    COALESCE(event_time, 0) <= 0
+                    AND (
+                        COALESCE(modify_date, create_date, '') = ''
+                        OR datetime(COALESCE(modify_date, create_date)) >= datetime(?)
+                    )
+                )
+            )
+        `, [cutoffMs, cutoffText]);
+        const stale = Math.max(0, Number((((staleRows || [])[0] || {}).total) || 0));
+        if (stale <= 0) {
+            return {
+                target: 'product_onoff_history',
+                retain_days: retainDays,
+                retention_days: retainDays,
+                cutoff_ms: cutoffMs,
+                cutoff_text: cutoffText,
+                before,
+                after: before,
+                deleted: 0,
+                deleted_rows: 0,
+                before_bytes: beforeBytes,
+                after_bytes: beforeBytes,
+                estimated_deleted_bytes: 0,
+                freed_bytes: 0
+            };
+        }
         await run(db, 'BEGIN IMMEDIATE');
         try {
+            await run(db, 'DROP TABLE IF EXISTS product_onoff_history_prune_tmp');
             await run(db, `
                 CREATE TABLE product_onoff_history_prune_tmp (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,13 +129,22 @@ async function pruneProductOnoffHistory(options = {}) {
         }
         const afterRows = await all(db, `SELECT COUNT(*) AS total FROM product_onoff_history`);
         const after = Number((((afterRows || [])[0] || {}).total) || 0);
+        const afterBytes = await getProductOnoffHistoryBytes(db);
+        const deleted = Math.max(0, before - after);
         return {
+            target: 'product_onoff_history',
             retain_days: retainDays,
+            retention_days: retainDays,
             cutoff_ms: cutoffMs,
             cutoff_text: cutoffText,
             before,
             after,
-            deleted: Math.max(0, before - after)
+            deleted,
+            deleted_rows: deleted,
+            before_bytes: beforeBytes,
+            after_bytes: afterBytes,
+            estimated_deleted_bytes: Math.max(0, beforeBytes - afterBytes),
+            freed_bytes: 0
         };
     } finally {
         db.close();
@@ -117,6 +167,28 @@ function all(db, sql, params = []) {
             resolve(rows || []);
         });
     });
+}
+
+function get(db, sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.get(sql, params, (err, row) => {
+            if (err) return reject(err);
+            resolve(row || null);
+        });
+    });
+}
+
+async function getProductOnoffHistoryBytes(db) {
+    try {
+        const row = await get(db, `
+            SELECT COALESCE(SUM(pgsize), 0) AS bytes
+            FROM dbstat
+            WHERE name IN ('product_onoff_history', 'idx_product_onoff_history_user_time')
+        `);
+        return Math.max(0, Number(row && row.bytes || 0));
+    } catch {
+        return 0;
+    }
 }
 
 function detectPlatformByActionType(actionType) {

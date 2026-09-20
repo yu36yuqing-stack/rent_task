@@ -39,6 +39,19 @@ function get(db, sql, params = []) {
     });
 }
 
+async function getBlacklistHistoryBytes(db) {
+    try {
+        const row = await get(db, `
+            SELECT COALESCE(SUM(pgsize), 0) AS bytes
+            FROM dbstat
+            WHERE name IN ('user_blacklist_history', 'idx_user_blacklist_history_user')
+        `);
+        return Math.max(0, Number(row && row.bytes || 0));
+    } catch {
+        return 0;
+    }
+}
+
 async function inTx(db, fn) {
     await run(db, 'BEGIN');
     try {
@@ -247,13 +260,21 @@ async function pruneUserBlacklistHistory(options = {}) {
         `);
         if (!tableRow) {
             return {
+                target: 'user_blacklist_history',
                 retain_days: retainDays,
+                retention_days: retainDays,
                 cutoff_text: cutoffText,
                 before: 0,
                 after: 0,
-                deleted: 0
+                deleted: 0,
+                deleted_rows: 0,
+                before_bytes: 0,
+                after_bytes: 0,
+                estimated_deleted_bytes: 0,
+                freed_bytes: 0
             };
         }
+        const beforeBytes = await getBlacklistHistoryBytes(db);
         const beforeRow = await get(db, `SELECT COUNT(*) AS total FROM user_blacklist_history`);
         const staleRow = await get(db, `
             SELECT COUNT(*) AS total
@@ -265,15 +286,23 @@ async function pruneUserBlacklistHistory(options = {}) {
         const stale = Number((staleRow && staleRow.total) || 0);
         if (stale <= 0) {
             return {
+                target: 'user_blacklist_history',
                 retain_days: retainDays,
+                retention_days: retainDays,
                 cutoff_text: cutoffText,
                 before,
                 after: before,
-                deleted: 0
+                deleted: 0,
+                deleted_rows: 0,
+                before_bytes: beforeBytes,
+                after_bytes: beforeBytes,
+                estimated_deleted_bytes: 0,
+                freed_bytes: 0
             };
         }
         await run(db, 'BEGIN IMMEDIATE');
         try {
+            await run(db, 'DROP TABLE IF EXISTS user_blacklist_history_prune_tmp');
             await run(db, `
                 CREATE TABLE user_blacklist_history_prune_tmp (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -313,12 +342,21 @@ async function pruneUserBlacklistHistory(options = {}) {
         }
         const afterRow = await get(db, `SELECT COUNT(*) AS total FROM user_blacklist_history`);
         const after = Number((afterRow && afterRow.total) || 0);
+        const afterBytes = await getBlacklistHistoryBytes(db);
+        const deleted = Math.max(0, before - after);
         return {
+            target: 'user_blacklist_history',
             retain_days: retainDays,
+            retention_days: retainDays,
             cutoff_text: cutoffText,
             before,
             after,
-            deleted: Math.max(0, before - after)
+            deleted,
+            deleted_rows: deleted,
+            before_bytes: beforeBytes,
+            after_bytes: afterBytes,
+            estimated_deleted_bytes: Math.max(0, beforeBytes - afterBytes),
+            freed_bytes: 0
         };
     } finally {
         db.close();
@@ -705,23 +743,27 @@ async function upsertUserBlacklistEntry(userId, entry, opts = {}) {
             `, [uid, normalized.game_id, normalized.game_account]);
             const newPayload = rowToPublicEntry(newRow || {});
 
-            await run(db, `
-                INSERT INTO user_blacklist_history
-                (user_id, event_type, game_account, game_id, game_name, before_data, after_data, source, operator, modify_date, desc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `, [
-                uid,
-                eventType,
-                normalized.game_account,
-                normalized.game_id,
-                normalized.game_name,
-                stableJson(oldPayload),
-                stableJson(newPayload),
-                source,
-                operator,
-                now,
-                desc
-            ]);
+            const beforeJson = stableJson(oldPayload);
+            const afterJson = stableJson(newPayload);
+            if (beforeJson !== afterJson) {
+                await run(db, `
+                    INSERT INTO user_blacklist_history
+                    (user_id, event_type, game_account, game_id, game_name, before_data, after_data, source, operator, modify_date, desc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `, [
+                    uid,
+                    eventType,
+                    normalized.game_account,
+                    normalized.game_id,
+                    normalized.game_name,
+                    beforeJson,
+                    afterJson,
+                    source,
+                    operator,
+                    now,
+                    desc
+                ]);
+            }
 
             try {
                 await mirrorSourceShadowUpsert(uid, normalized.game_account, normalized.reason, {

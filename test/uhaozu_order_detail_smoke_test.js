@@ -11,7 +11,12 @@ process.env.RUNTIME_DB_FILE_PATH = path.join(tempDir, 'rent_robot_runtime.db');
 process.env.ORDER_DB_FILE_PATH = path.join(tempDir, 'rent_robot_order.db');
 
 const { initOrderDb, upsertOrder, listOrders, updateOrderRecAmount } = require('../database/order_db');
-const { initOrderDetailDb, upsertOrderDetail, getOrderDetailByOrder } = require('../database/order_detail_db');
+const {
+    initOrderDetailDb,
+    upsertOrderDetail,
+    getOrderDetailByOrder,
+    listPendingUhaozuOrderDetailsByUser
+} = require('../database/order_detail_db');
 const { parseUhaozuOrderDetailHtml } = require('../uhaozu/uhaozu_api');
 
 function assertEqual(actual, expected, msg) {
@@ -92,6 +97,34 @@ async function main() {
         detail_query_time: '2026-03-17 16:00:00',
         desc: 'uhaozu detail smoke'
     });
+    await upsertOrderDetail({
+        user_id: 8,
+        channel: 'uhaozu',
+        order_no: '122377087088',
+        order_detail_no: '122377087088',
+        detail_status: parsed.detail_status,
+        actual_rent_amount: parsed.actual_rent_amount,
+        service_fee_amount: parsed.service_fee_amount,
+        net_rent_amount: parsed.net_rent_amount,
+        complete_time: parsed.complete_time,
+        complaint_result_text: parsed.complaint_result_text,
+        detail_html: html,
+        detail_snapshot: parsed,
+        detail_query_time: '2026-03-17 16:01:00',
+        desc: 'uhaozu detail smoke update'
+    });
+
+    await upsertOrder({
+        user_id: 8,
+        channel: 'uhaozu',
+        order_no: 'pending_detail_order',
+        game_id: '2',
+        game_name: '和平精英',
+        game_account: 'acct_2',
+        order_status: '已完成',
+        rec_amount: 0,
+        create_date: '2026-03-18 14:43:41'
+    });
 
     await updateOrderRecAmount(8, 'uhaozu', '122377087088', parsed.net_rent_amount, 'rewrite by smoke');
 
@@ -100,8 +133,15 @@ async function main() {
     assertEqual(Number(detailRow.net_rent_amount), 4.47, 'detail net amount saved');
 
     const orders = await listOrders(8, 1, 10);
-    assertEqual(orders.total, 1, 'order total');
-    assertEqual(Number(orders.list[0].rec_amount), 4.47, 'order rec_amount rewritten');
+    assertEqual(orders.total, 2, 'order total');
+    const rewritten = orders.list.find((row) => row.order_no === '122377087088');
+    assertEqual(Number(rewritten.rec_amount), 4.47, 'order rec_amount rewritten');
+
+    const pendingAll = await listPendingUhaozuOrderDetailsByUser(8);
+    assertEqual(pendingAll.length, 1, '无详情的已完成订单应进入待拉取列表');
+    const pendingFiltered = await listPendingUhaozuOrderDetailsByUser(8, ['pending_detail_order', 'pending_detail_order', '']);
+    assertEqual(pendingFiltered.length, 1, '订单号过滤与去重应生效');
+    await require('assert').rejects(() => listPendingUhaozuOrderDetailsByUser(0), /user_id/);
 
     console.log('[PASS] uhaozu_order_detail_smoke_test');
 }

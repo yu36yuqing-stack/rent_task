@@ -230,9 +230,78 @@ async function listPendingUhaozuOrderDetailsByUser(userId, orderNos = []) {
     }
 }
 
+async function pruneOrderDetailHtml(options = {}) {
+    await initOrderDetailDb();
+    const retainDays = Math.max(1, Math.floor(Number(options.retain_days || options.retainDays || 30)));
+    const cutoff = `-${retainDays} days`;
+    const ageExpr = `COALESCE(NULLIF(detail_query_time, ''), NULLIF(modify_date, ''), create_date)`;
+    const db = openOrderDatabase();
+    try {
+        const before = await get(db, `
+            SELECT COUNT(*) AS total_rows,
+                   COALESCE(SUM(length(detail_html)), 0) AS html_bytes
+            FROM order_detail
+            WHERE COALESCE(detail_html, '') <> ''
+        `);
+        const eligible = await get(db, `
+            SELECT COUNT(*) AS rows,
+                   COALESCE(SUM(length(detail_html)), 0) AS bytes
+            FROM order_detail
+            WHERE COALESCE(detail_html, '') <> ''
+              AND datetime(${ageExpr}) < datetime('now', 'localtime', ?)
+        `, [cutoff]);
+        const eligibleRows = Math.max(0, Number(eligible && eligible.rows || 0));
+        const eligibleBytes = Math.max(0, Number(eligible && eligible.bytes || 0));
+        if (eligibleRows <= 0) {
+            const currentBytes = Math.max(0, Number(before && before.html_bytes || 0));
+            return {
+                target: 'order_detail.detail_html',
+                retention_days: retainDays,
+                cutoff_expr: cutoff,
+                before_rows: Math.max(0, Number(before && before.total_rows || 0)),
+                cleared_rows: 0,
+                deleted_rows: 0,
+                before_bytes: currentBytes,
+                after_bytes: currentBytes,
+                estimated_deleted_bytes: 0,
+                freed_bytes: 0
+            };
+        }
+        const result = await run(db, `
+            UPDATE order_detail
+            SET detail_html = ''
+            WHERE COALESCE(detail_html, '') <> ''
+              AND datetime(${ageExpr}) < datetime('now', 'localtime', ?)
+        `, [cutoff]);
+        const clearedRows = Math.max(0, Number(result && result.changes || 0));
+        const after = await get(db, `
+            SELECT COUNT(*) AS total_rows,
+                   COALESCE(SUM(length(detail_html)), 0) AS html_bytes
+            FROM order_detail
+            WHERE COALESCE(detail_html, '') <> ''
+        `);
+        return {
+            target: 'order_detail.detail_html',
+            retention_days: retainDays,
+            cutoff_expr: cutoff,
+            before_rows: Math.max(0, Number(before && before.total_rows || 0)),
+            after_rows: Math.max(0, Number(after && after.total_rows || 0)),
+            cleared_rows: clearedRows,
+            deleted_rows: clearedRows,
+            before_bytes: Math.max(0, Number(before && before.html_bytes || 0)),
+            after_bytes: Math.max(0, Number(after && after.html_bytes || 0)),
+            estimated_deleted_bytes: eligibleBytes,
+            freed_bytes: 0
+        };
+    } finally {
+        db.close();
+    }
+}
+
 module.exports = {
     initOrderDetailDb,
     upsertOrderDetail,
     getOrderDetailByOrder,
-    listPendingUhaozuOrderDetailsByUser
+    listPendingUhaozuOrderDetailsByUser,
+    pruneOrderDetailHtml
 };

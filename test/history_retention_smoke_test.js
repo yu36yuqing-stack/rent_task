@@ -12,7 +12,11 @@ process.env.ORDER_DB_FILE_PATH = path.join(tempDir, 'rent_robot_order.db');
 
 const { openDatabase } = require('../database/sqlite_client');
 const { initUserGameAccountDb } = require('../database/user_game_account_db');
-const { initUserBlacklistDb, pruneUserBlacklistHistory } = require('../database/user_blacklist_db');
+const {
+    initUserBlacklistDb,
+    pruneUserBlacklistHistory,
+    upsertUserBlacklistEntry
+} = require('../database/user_blacklist_db');
 const { initProductOnoffHistoryDb, pruneProductOnoffHistory } = require('../database/product_onoff_history_db');
 
 function run(db, sql, params = []) {
@@ -76,18 +80,56 @@ async function main() {
     }
 
     const blacklistRet = await pruneUserBlacklistHistory({ retain_days: 30 });
-    const onoffRet = await pruneProductOnoffHistory({ retain_days: 30 });
+    const onoffRet = await pruneProductOnoffHistory({ retain_days: 7 });
     assertEqual(Number(blacklistRet.deleted || 0), 1, 'blacklist history 应只删除 1 条旧数据');
     assertEqual(Number(onoffRet.deleted || 0), 1, 'product onoff history 应只删除 1 条旧数据');
+    const blacklistSecondRet = await pruneUserBlacklistHistory({ retain_days: 30 });
+    assertEqual(Number(blacklistSecondRet.deleted || 0), 0, '无过期黑名单历史时不应重建表');
+    const onoffSecondRet = await pruneProductOnoffHistory({ retain_days: 7 });
+    assertEqual(Number(onoffSecondRet.deleted || 0), 0, '无过期上下架历史时不应重建表');
 
     const verifyDb = openDatabase();
     try {
         const blCount = await get(verifyDb, `SELECT COUNT(*) AS total FROM user_blacklist_history`);
         const onoffCount = await get(verifyDb, `SELECT COUNT(*) AS total FROM product_onoff_history`);
         assertEqual(Number((blCount && blCount.total) || 0), 1, 'blacklist history 应保留最近 30 天数据');
-        assertEqual(Number((onoffCount && onoffCount.total) || 0), 1, 'product onoff history 应保留最近 30 天数据');
+        assertEqual(Number((onoffCount && onoffCount.total) || 0), 1, 'product onoff history 应保留最近 7 天数据');
     } finally {
         verifyDb.close();
+    }
+
+    await upsertUserBlacklistEntry(991, {
+        game_account: 'same_account',
+        game_id: '1',
+        game_name: 'WZRY',
+        remark: 'same_role',
+        reason: '人工维护'
+    }, { source: 'smoke', operator: 'tester', desc: 'first' });
+    await upsertUserBlacklistEntry(991, {
+        game_account: 'same_account',
+        game_id: '1',
+        game_name: 'WZRY',
+        remark: 'same_role',
+        reason: '人工维护'
+    }, { source: 'smoke', operator: 'tester', desc: 'same payload' });
+    await upsertUserBlacklistEntry(991, {
+        game_account: 'same_account',
+        game_id: '1',
+        game_name: 'WZRY',
+        remark: 'same_role',
+        reason: '账号找回'
+    }, { source: 'smoke', operator: 'tester', desc: 'changed payload' });
+
+    const historyDb = openDatabase();
+    try {
+        const historyCount = await get(historyDb, `
+            SELECT COUNT(*) AS total
+            FROM user_blacklist_history
+            WHERE user_id = 991 AND game_account = 'same_account'
+        `);
+        assertEqual(Number(historyCount && historyCount.total || 0), 2, '相同内容重复 upsert 不应追加历史，真实变化应追加');
+    } finally {
+        historyDb.close();
     }
 
     console.log(`[PASS] history_retention_smoke_test temp_dir=${tempDir}`);

@@ -170,7 +170,7 @@
       <div class="maintenance-top-row">
         <div>
           <p class="auth-title">数据清理</p>
-          <p class="head-summary-text">当前策略：runtime_task 已结束任务与应用日志均保留最近 7 天，历史日志自动压缩。</p>
+          <p class="head-summary-text">当前策略：任务与日志保留7天，黑名单历史和订单原始HTML保留30天，上下架历史保留7天；数据库空闲页达到阈值后压缩。</p>
         </div>
         <button id="maintenanceCleanupRunBtn" class="btn btn-ghost btn-page-action">立即清理一次</button>
       </div>
@@ -806,6 +806,6 @@
   <script defer src="/js/menu_stats.js?v=20260329b"></script>
   <script defer src="/js/menu_price.js?v=20260918b"></script>
   <script defer src="/js/menu_board.js?v=20260329a"></script>
-  <script defer src="/js/menu_maintenance.js?v=20260816a"></script>
+  <script defer src="/js/menu_maintenance.js?v=20260920b"></script>
 </body>
 </html>
