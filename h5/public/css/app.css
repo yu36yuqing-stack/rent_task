@@ -2239,10 +2239,10 @@
         grid-column: 1 / -1;
       }
 
-      .pricing-package-value:nth-of-type(1)::before { content: '时租 '; color: #7a899a; }
-      .pricing-package-value:nth-of-type(2)::before { content: '包夜 '; color: #7a899a; }
-      .pricing-package-value:nth-of-type(3)::before { content: '包天 '; color: #7a899a; }
-      .pricing-package-value:nth-of-type(4)::before { content: '包周 '; color: #7a899a; }
+      .pricing-package-value::before {
+        content: attr(data-label) ' ';
+        color: #7a899a;
+      }
 
     }
 

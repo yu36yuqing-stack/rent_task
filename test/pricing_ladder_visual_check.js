@@ -193,7 +193,7 @@ async function main() {
             sheetText: document.getElementById('pricingChannelBody').textContent,
             hasBaselineAction: Boolean(document.querySelector('[data-pricing-refresh-baseline]'))
         }));
-        if (desktopChannelState.channelTabs.join(',') !== 'U号租,租号玩,悠悠租号'
+        if (desktopChannelState.channelTabs.join(',') !== 'U号租,租号王,悠悠租号'
             || desktopChannelState.tierRows !== 4
             || desktopChannelState.hasBaselineAction
             || desktopChannelState.sheetText.includes('已冻结基准')
@@ -206,12 +206,14 @@ async function main() {
         await page.waitForSelector('#pricingChannelSheet .pricing-package-row.package-count-9.is-active');
         const uuzuhaoDesktop = await page.evaluate(() => ({
             text: document.getElementById('pricingChannelBody').textContent,
+            packageLabels: Array.from(document.querySelectorAll('.pricing-package-header span')).map((node) => node.textContent.trim()),
             packageColumns: getComputedStyle(document.querySelector('.pricing-package-row.package-count-9')).gridTemplateColumns.split(' ').filter(Boolean).length,
             scrollWidth: document.querySelector('.pricing-package-scroll').scrollWidth,
             clientWidth: document.querySelector('.pricing-package-scroll').clientWidth
         }));
         if (!uuzuhaoDesktop.text.includes('时租价已回读验证')
             || !uuzuhaoDesktop.text.includes('起租 2 小时')
+            || uuzuhaoDesktop.packageLabels.join(',') !== '时租,2小时,3小时,5小时,7小时,9小时,10小时,24小时,168小时'
             || uuzuhaoDesktop.packageColumns !== 10) {
             throw new Error(`悠悠租号套餐展示错误: ${JSON.stringify(uuzuhaoDesktop)}`);
         }
@@ -317,6 +319,8 @@ async function main() {
             return {
                 documentWidth: document.documentElement.scrollWidth,
                 viewportWidth: window.innerWidth,
+                packageLabels: Array.from(table.querySelectorAll('.pricing-package-row:not(.pricing-package-header)')[0].querySelectorAll('.pricing-package-value'))
+                    .map((node) => node.dataset.label),
                 scrollable: scroller.scrollWidth > scroller.clientWidth,
                 scrolled: scroller.scrollLeft > 0,
                 scrollerLeft: scrollerRect.left,
@@ -326,6 +330,7 @@ async function main() {
         });
         if (uuzuhaoMobile.documentWidth > uuzuhaoMobile.viewportWidth
             || !uuzuhaoMobile.scrollable || !uuzuhaoMobile.scrolled
+            || uuzuhaoMobile.packageLabels.join(',') !== '时租,2小时,3小时,5小时,7小时,9小时,10小时,24小时,168小时'
             || uuzuhaoMobile.scrollerLeft < 0 || uuzuhaoMobile.scrollerRight > uuzuhaoMobile.viewportWidth) {
             throw new Error(`悠悠租号移动端套餐溢出: ${JSON.stringify(uuzuhaoMobile)}`);
         }

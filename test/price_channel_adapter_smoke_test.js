@@ -33,7 +33,9 @@ assert.strictEqual(getPriceChannelAdapter('uuzuhao'), uuzuhao);
 assert.strictEqual(getPriceChannelAdapter('missing'), null);
 assert.deepStrictEqual(listEnabledPriceChannelAdapters(account).map((item) => item.channel), ['uhaozu', 'uuzuhao']);
 assert.deepStrictEqual(listEnabledPriceChannelAdapters({ channel_prd_info: {} }), []);
-assert.strictEqual(listPriceChannelCapabilities().find((item) => item.channel === 'zuhaowang').enabled, false);
+const zuhaowangCapability = listPriceChannelCapabilities().find((item) => item.channel === 'zuhaowang');
+assert.strictEqual(zuhaowangCapability.enabled, false);
+assert.strictEqual(zuhaowangCapability.label, '租号王');
 
 assert.deepStrictEqual(uhaozu.pickCurrentPriceSet(account).prices, {
     hour: 2,
@@ -80,6 +82,17 @@ assert.deepStrictEqual(uuzuhao.buildPriceSet(2), {
     p168: 201.6
 });
 assert.strictEqual(uuzuhao.buildTierPrices([2, 3, 4, 5]).length, 4);
+assert.deepStrictEqual(uuzuhao.capability.package_labels, {
+    hour: '时租',
+    p2: '2小时',
+    p3: '3小时',
+    p5: '5小时',
+    p7: '7小时',
+    p9: '9小时',
+    p10: '10小时',
+    p24: '24小时',
+    p168: '168小时'
+});
 assert.strictEqual(uuzuhao.samePriceSet({ hour: 2, p2: 3.6 }, { hour: 2, p2: 99 }), true);
 assert.strictEqual(uuzuhao.shouldForcePublish('daily_reset'), true);
 assert.strictEqual(uuzuhao.shouldForcePublish('order_finished_changed'), true);

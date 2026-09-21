@@ -7,7 +7,7 @@ const adapters = Object.freeze([uhaozu, uuzuhao]);
 const disabledCapabilities = Object.freeze([
     {
         channel: 'zuhaowang',
-        label: '租号玩',
+        label: '租号王',
         enabled: false,
         package_keys: ['hour', 'day'],
         package_labels: { hour: '时租', day: '日租' }

@@ -94,7 +94,17 @@ const uuzuhaoResultHtml = helpers.renderPricingChannelResult({ current_tier: 2 }
     label: '悠悠租号',
     available: true,
     package_keys: ['hour', 'p2', 'p3', 'p5', 'p7', 'p9', 'p10', 'p24', 'p168'],
-    package_labels: { hour: '时租', p2: '2小时', p168: '包周' },
+    package_labels: {
+        hour: '时租',
+        p2: '2小时',
+        p3: '3小时',
+        p5: '5小时',
+        p7: '7小时',
+        p9: '9小时',
+        p10: '10小时',
+        p24: '24小时',
+        p168: '168小时'
+    },
     remote_current: { hour: 3 },
     current_tier: 2,
     apply_status: 'effective_partial',
@@ -107,6 +117,17 @@ const uuzuhaoResultHtml = helpers.renderPricingChannelResult({ current_tier: 2 }
 assert(uuzuhaoResultHtml.includes('package-count-9'));
 assert(uuzuhaoResultHtml.includes('时租价已回读验证'));
 assert(uuzuhaoResultHtml.includes('起租 2 小时'));
+assert(uuzuhaoResultHtml.includes('data-label="2小时"'));
+assert(uuzuhaoResultHtml.includes('data-label="24小时"'));
+assert(uuzuhaoResultHtml.includes('data-label="168小时"'));
+assert(!uuzuhaoResultHtml.includes('包周'));
+const uhaozuValuesHtml = helpers.renderPricingPackageValues(
+    { hour: 2, night: 8, day: 12, week: 70 },
+    ['hour', 'night', 'day', 'week'],
+    { hour: '时租', night: '包夜', day: '包天', week: '包周' }
+);
+assert(uhaozuValuesHtml.includes('data-label="包夜"'));
+assert(uhaozuValuesHtml.includes('data-label="包周"'));
 
 const filteredByName = helpers.filterPricingItems([
     { display_name: '呆小姚', game_account: '2630403808' },

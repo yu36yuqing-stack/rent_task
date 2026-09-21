@@ -93,9 +93,9 @@ function closePricingChannelSheet() {
   nodes.sheet.setAttribute('aria-hidden', 'true');
 }
 
-function renderPricingPackageValues(prices = {}, packageKeys = ['hour', 'night', 'day', 'week']) {
+function renderPricingPackageValues(prices = {}, packageKeys = ['hour', 'night', 'day', 'week'], packageLabels = {}) {
   return packageKeys.map((key) => `
-    <span class="pricing-package-value">${escapePricingHtml(formatPricingResultMoney(prices[key]))}</span>
+    <span class="pricing-package-value" data-label="${escapePricingHtml(packageLabels[key] || key)}">${escapePricingHtml(formatPricingResultMoney(prices[key]))}</span>
   `).join('');
 }
 
@@ -209,7 +209,7 @@ function renderPricingChannelResult(payload = {}, result = {}) {
   const tierRows = tiers.map((tier) => `
     <div class="pricing-package-row ${packageCountClass} ${Number(tier.tier) === Number(result.current_tier || payload.current_tier) ? 'is-active' : ''}">
       <strong>${escapePricingHtml(pricingTierLabel(tier.tier))}${Number(tier.tier) === Number(result.current_tier || payload.current_tier) ? ' · 当前使用' : ''}</strong>
-      ${renderPricingPackageValues(tier.prices, packageKeys)}
+      ${renderPricingPackageValues(tier.prices, packageKeys, packageLabels)}
     </div>
   `).join('');
   return `
@@ -250,7 +250,7 @@ function renderPricingChannelSheet() {
     ? sheetState.payload.channels
     : [
         { channel: 'uhaozu', label: 'U号租', enabled: true },
-        { channel: 'zuhaowang', label: '租号玩', enabled: false },
+        { channel: 'zuhaowang', label: '租号王', enabled: false },
         { channel: 'uuzuhao', label: '悠悠租号', enabled: true }
       ];
   nodes.tabs.innerHTML = channels.map((channel) => `
