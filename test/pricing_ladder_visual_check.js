@@ -273,10 +273,16 @@ async function main() {
             const body = document.getElementById('pricingChannelBody');
             const rows = Array.from(document.querySelectorAll('#pricingChannelSheet .pricing-package-row:not(.pricing-package-header)'));
             const packageLine = document.querySelector('#pricingChannelSheet .pricing-package-line');
+            const scroller = document.querySelector('#pricingChannelSheet .pricing-package-scroll');
+            const header = document.querySelector('#pricingChannelSheet .pricing-package-header');
             const rect = sheet.getBoundingClientRect();
             body.scrollTop = body.scrollHeight;
+            scroller.scrollLeft = scroller.scrollWidth;
             const bodyRect = body.getBoundingClientRect();
             const lastRowRect = rows.at(-1).getBoundingClientRect();
+            const scrollerRect = scroller.getBoundingClientRect();
+            const bodyScrollable = body.scrollHeight > body.clientHeight;
+            const lastRowVisible = lastRowRect.bottom <= bodyRect.bottom + 1 && lastRowRect.top >= bodyRect.top - 1;
             return {
                 documentWidth: document.documentElement.scrollWidth,
                 viewportWidth: window.innerWidth,
@@ -287,23 +293,28 @@ async function main() {
                 bodyHeight: bodyRect.height,
                 bodyClientHeight: body.clientHeight,
                 bodyScrollHeight: body.scrollHeight,
-                bodyScrollable: body.scrollHeight > body.clientHeight,
+                bodyScrollable,
                 bodyScrolled: body.scrollTop > 0,
-                lastRowVisible: lastRowRect.bottom <= bodyRect.bottom + 1 && lastRowRect.top >= bodyRect.top - 1,
+                lastRowVisible,
+                contentReachable: lastRowVisible && (!bodyScrollable || body.scrollTop > 0),
                 packageColumns: getComputedStyle(packageLine).gridTemplateColumns.split(' ').filter(Boolean).length,
                 rowColumns: getComputedStyle(rows[0]).gridTemplateColumns.split(' ').filter(Boolean).length,
-                rowsInside: rows.every((row) => {
-                    const rowRect = row.getBoundingClientRect();
-                    return rowRect.left >= rect.left && rowRect.right <= rect.right;
-                })
+                headerDisplay: getComputedStyle(header).display,
+                headerLabels: Array.from(header.querySelectorAll('span')).map((node) => node.textContent.trim()),
+                tableScrollable: scroller.scrollWidth > scroller.clientWidth,
+                tableScrolled: scroller.scrollLeft > 0,
+                scrollerInside: scrollerRect.left >= rect.left && scrollerRect.right <= rect.right
             };
         });
         if (channelLayout.documentWidth > channelLayout.viewportWidth || channelLayout.sheetLeft < 0
-            || channelLayout.sheetRight > channelLayout.viewportWidth || !channelLayout.rowsInside
-            || !channelLayout.bodyScrollable || !channelLayout.bodyScrolled || !channelLayout.lastRowVisible
-            || channelLayout.packageColumns !== 3 || channelLayout.rowColumns !== 3) {
+            || channelLayout.sheetRight > channelLayout.viewportWidth || !channelLayout.scrollerInside
+            || !channelLayout.contentReachable || !channelLayout.tableScrollable || !channelLayout.tableScrolled
+            || channelLayout.headerDisplay !== 'grid'
+            || channelLayout.headerLabels.join(',') !== '时租,包夜,包天,包周'
+            || channelLayout.packageColumns !== 3 || channelLayout.rowColumns !== 5) {
             throw new Error(`移动端渠道价格溢出: ${JSON.stringify(channelLayout)}`);
         }
+        await page.$eval('#pricingChannelSheet .pricing-package-scroll', (node) => { node.scrollLeft = 0; });
         await page.screenshot({
             path: path.join(outputDir, 'pricing-channel-mobile.png'),
             fullPage: true
@@ -313,14 +324,19 @@ async function main() {
         const uuzuhaoMobile = await page.evaluate(() => {
             const scroller = document.querySelector('.pricing-package-scroll');
             const table = document.querySelector('.pricing-package-table.package-count-9');
+            const header = table.querySelector('.pricing-package-header');
+            const row = table.querySelector('.pricing-package-row:not(.pricing-package-header)');
             scroller.scrollLeft = scroller.scrollWidth;
             const scrollerRect = scroller.getBoundingClientRect();
             const tableRect = table.getBoundingClientRect();
             return {
                 documentWidth: document.documentElement.scrollWidth,
                 viewportWidth: window.innerWidth,
-                packageLabels: Array.from(table.querySelectorAll('.pricing-package-row:not(.pricing-package-header)')[0].querySelectorAll('.pricing-package-value'))
+                packageLabels: Array.from(row.querySelectorAll('.pricing-package-value'))
                     .map((node) => node.dataset.label),
+                headerDisplay: getComputedStyle(header).display,
+                headerLabels: Array.from(header.querySelectorAll('span')).map((node) => node.textContent.trim()),
+                rowColumns: getComputedStyle(row).gridTemplateColumns.split(' ').filter(Boolean).length,
                 scrollable: scroller.scrollWidth > scroller.clientWidth,
                 scrolled: scroller.scrollLeft > 0,
                 scrollerLeft: scrollerRect.left,
@@ -330,10 +346,14 @@ async function main() {
         });
         if (uuzuhaoMobile.documentWidth > uuzuhaoMobile.viewportWidth
             || !uuzuhaoMobile.scrollable || !uuzuhaoMobile.scrolled
+            || uuzuhaoMobile.headerDisplay !== 'grid'
+            || uuzuhaoMobile.headerLabels.join(',') !== '时租,2小时,3小时,5小时,7小时,9小时,10小时,24小时,168小时'
+            || uuzuhaoMobile.rowColumns !== 10
             || uuzuhaoMobile.packageLabels.join(',') !== '时租,2小时,3小时,5小时,7小时,9小时,10小时,24小时,168小时'
             || uuzuhaoMobile.scrollerLeft < 0 || uuzuhaoMobile.scrollerRight > uuzuhaoMobile.viewportWidth) {
             throw new Error(`悠悠租号移动端套餐溢出: ${JSON.stringify(uuzuhaoMobile)}`);
         }
+        await page.$eval('#pricingChannelSheet .pricing-package-scroll', (node) => { node.scrollLeft = 0; });
         await page.screenshot({
             path: path.join(outputDir, 'pricing-channel-uuzuhao-mobile.png'),
             fullPage: true

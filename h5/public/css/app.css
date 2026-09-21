@@ -2065,6 +2065,10 @@
       min-width: 700px;
     }
 
+    .pricing-package-table.package-count-4 {
+      min-width: 420px;
+    }
+
     .pricing-package-row {
       display: grid;
       grid-template-columns: minmax(92px, 1.2fr) repeat(4, minmax(58px, 1fr));
@@ -2217,31 +2221,6 @@
 
       .pricing-package-line {
         grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
-
-      .pricing-package-header {
-        display: none;
-      }
-
-      .pricing-package-row {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        min-height: 90px;
-        align-content: start;
-        padding: 8px;
-      }
-
-      .pricing-package-row > * {
-        padding: 4px;
-        text-align: left;
-      }
-
-      .pricing-package-row > strong {
-        grid-column: 1 / -1;
-      }
-
-      .pricing-package-value::before {
-        content: attr(data-label) ' ';
-        color: #7a899a;
       }
 
     }
