@@ -1,18 +1,11 @@
 'use strict';
 
 const uhaozu = require('./uhaozu_price_adapter');
+const zuhaowang = require('./zuhaowang_price_adapter');
 const uuzuhao = require('./uuzuhao_price_adapter');
 
-const adapters = Object.freeze([uhaozu, uuzuhao]);
-const disabledCapabilities = Object.freeze([
-    {
-        channel: 'zuhaowang',
-        label: '租号王',
-        enabled: false,
-        package_keys: ['hour', 'day'],
-        package_labels: { hour: '时租', day: '日租' }
-    }
-]);
+const adapters = Object.freeze([uhaozu, zuhaowang, uuzuhao]);
+const disabledCapabilities = Object.freeze([]);
 
 function getPriceChannelAdapter(channel) {
     const name = String(channel || '').trim();
@@ -27,7 +20,7 @@ function listEnabledPriceChannelAdapters(accountRow = null) {
 function listPriceChannelCapabilities() {
     return [
         { ...uhaozu.capability },
-        ...disabledCapabilities.map((item) => ({ ...item })),
+        { ...zuhaowang.capability },
         { ...uuzuhao.capability }
     ];
 }

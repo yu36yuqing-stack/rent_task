@@ -440,6 +440,7 @@
       if (k === 'stats') return '统计看板';
       if (k === 'auth') return '授权管理';
       if (k === 'pricing_uhaozu') return '阶梯定价';
+      if (k === 'pricing_ratios') return '阶梯定价 · 套餐比例设置';
       if (k === 'pricing_uuzuhao') return '定价规则 · 悠悠租号';
       if (k === 'pricing_zuhaowang') return '定价规则 · 租号王';
       if (k === 'board') return '板卡管理';
@@ -459,7 +460,7 @@
       try {
         const url = new URL(window.location.href);
         const m = String(url.searchParams.get('menu') || '').trim().toLowerCase();
-        if (m === 'pricing_uhaozu' || m === 'pricing_uuzuhao' || m === 'pricing_zuhaowang') {
+        if (m === 'pricing_uhaozu' || m === 'pricing_uuzuhao' || m === 'pricing_zuhaowang' || m === 'pricing_ratios') {
           return { menu: m, pricingChannel: pricingChannelFromMenu(m) };
         }
         if (m === 'orders' || m === 'risk' || m === 'stats' || m === 'auth' || m === 'board' || m === 'maintenance_cleanup' || m === 'profile' || m === 'products' || m === 'products_sold') {
@@ -1318,7 +1319,7 @@
       Array.from(document.querySelectorAll('[data-drawer-group]')).forEach((node) => {
         const key = String(node.getAttribute('data-drawer-group') || '').trim();
         const active = key === 'pricing'
-          ? (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang')
+          ? (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang' || state.currentMenu === 'pricing_ratios')
           : key === 'products'
           ? (state.currentMenu === 'products' || state.currentMenu === 'products_sold')
           : key === 'maintenance'
@@ -1404,7 +1405,7 @@
       const showRisk = loggedIn && state.currentMenu === 'risk';
       const showStats = loggedIn && state.currentMenu === 'stats';
       const showAuth = loggedIn && state.currentMenu === 'auth';
-      const showPricing = loggedIn && (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang');
+      const showPricing = loggedIn && (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang' || state.currentMenu === 'pricing_ratios');
       const showBoard = loggedIn && state.currentMenu === 'board';
       const showMaintenanceCleanup = loggedIn && currentUserIsAdmin() && state.currentMenu === 'maintenance_cleanup';
       const showProfile = loggedIn && state.currentMenu === 'profile';
@@ -1514,7 +1515,7 @@
       if (nextMenu === 'products' || nextMenu === 'products_sold') {
         state.drawerExpandedGroups.products = true;
       }
-      if (nextMenu === 'pricing_uhaozu' || nextMenu === 'pricing_uuzuhao' || nextMenu === 'pricing_zuhaowang') {
+      if (nextMenu === 'pricing_uhaozu' || nextMenu === 'pricing_uuzuhao' || nextMenu === 'pricing_zuhaowang' || nextMenu === 'pricing_ratios') {
         state.pricing.channel = pricingChannelFromMenu(String(options.pricingChannel || nextMenu).trim());
         state.drawerExpandedGroups.pricing = true;
       }
@@ -1597,13 +1598,13 @@
         })();
         return;
       }
-      if (key === 'pricing_uhaozu' || key === 'pricing_uuzuhao' || key === 'pricing_zuhaowang') {
+      if (key === 'pricing_uhaozu' || key === 'pricing_uuzuhao' || key === 'pricing_zuhaowang' || key === 'pricing_ratios') {
         render();
         (async () => {
           try {
             await loadPricingViewSafe();
             render();
-            if (state.pricing.channel !== 'uhaozu') {
+            if (state.pricing.channel !== 'uhaozu' && key !== 'pricing_ratios') {
               showToast('该渠道定价页开发中');
             }
           } catch (e) {
@@ -2439,7 +2440,7 @@
       const initialRoute = parseInitialRouteFromUrl();
       state.currentMenu = initialRoute.menu;
       state.pricing.channel = initialRoute.pricingChannel;
-      if (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang') {
+      if (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang' || state.currentMenu === 'pricing_ratios') {
         state.drawerExpandedGroups.pricing = true;
       }
       if (state.currentMenu === 'products' || state.currentMenu === 'products_sold') {
@@ -2466,7 +2467,7 @@
           await loadOrders();
           await loadRiskCenter();
           await loadStatsBoard();
-          if (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang') {
+          if (state.currentMenu === 'pricing_uhaozu' || state.currentMenu === 'pricing_uuzuhao' || state.currentMenu === 'pricing_zuhaowang' || state.currentMenu === 'pricing_ratios') {
             await loadPricingViewSafe();
           }
           if (state.currentMenu === 'board') {

@@ -73,6 +73,21 @@ function ensurePricingLadderState() {
     };
   }
   if (typeof pricing.loaded_once !== 'boolean') pricing.loaded_once = false;
+  if (!pricing.ratio_settings || typeof pricing.ratio_settings !== 'object') {
+    pricing.ratio_settings = {
+      loading: false,
+      saving: false,
+      loaded_once: false,
+      selected_channel: 'uhaozu',
+      preview_hour: '2',
+      channels: [],
+      drafts: {},
+      error: ''
+    };
+  }
+  if (typeof pricing.ratio_settings.preview_hour !== 'string') {
+    pricing.ratio_settings.preview_hour = String(pricing.ratio_settings.preview_hour || '2');
+  }
   return pricing;
 }
 
@@ -111,8 +126,192 @@ function pricingApplyStatusText(status) {
 
 function pricingTierLabel(tier) {
   const value = Math.min(4, Math.max(1, Number(tier || 1)));
-  if (value === 1) return '第 1 单价（完成 0 单）';
-  return `第 ${value} 单价（完成 ${value - 1} 单后）`;
+  if (value === 1) return '第 1 单时租价（完成 0 单）';
+  return `第 ${value} 单时租价（完成 ${value - 1} 单后）`;
+}
+
+function formatPricingRatio(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  return n.toFixed(4).replace(/\.?0+$/, '');
+}
+
+function normalizePricingRatioDraft(channel = {}) {
+  const ratios = channel.ratios && typeof channel.ratios === 'object' ? channel.ratios : {};
+  const keys = Array.isArray(channel.package_keys) ? channel.package_keys : [];
+  return Object.fromEntries(keys.map((key) => [key, key === 'hour' ? '1' : formatPricingRatio(ratios[key])]));
+}
+
+function validatePricingRatioDraft(channel = {}, draft = {}) {
+  const keys = (Array.isArray(channel.package_keys) ? channel.package_keys : []).filter((key) => key !== 'hour');
+  const out = { hour: 1 };
+  for (const key of keys) {
+    const value = Number(String(draft[key] == null ? '' : draft[key]).trim());
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error(`${channel.package_labels && channel.package_labels[key] || key}倍率必须大于 0`);
+    }
+    out[key] = Number(value.toFixed(4));
+  }
+  return out;
+}
+
+function calculatePricingRatioPreview(channel = {}, draft = {}, hourPrice = '') {
+  const keys = Array.isArray(channel.package_keys) ? channel.package_keys : [];
+  const labels = channel.package_labels && typeof channel.package_labels === 'object' ? channel.package_labels : {};
+  const hour = Number(String(hourPrice == null ? '' : hourPrice).trim());
+  const validHour = Number.isFinite(hour) && hour > 0;
+  return keys.map((key) => {
+    const ratio = key === 'hour' ? 1 : Number(String(draft[key] == null ? '' : draft[key]).trim());
+    const validRatio = Number.isFinite(ratio) && ratio > 0;
+    return {
+      key,
+      label: labels[key] || key,
+      hour_price: validHour ? Number(hour.toFixed(2)) : 0,
+      ratio: validRatio ? Number(ratio.toFixed(4)) : 0,
+      price: validHour && validRatio ? Number((hour * ratio).toFixed(2)) : 0
+    };
+  });
+}
+
+function renderPricingRatioInlineResults(channel = {}, draft = {}, hourPrice = '') {
+  const results = new Map(calculatePricingRatioPreview(channel, draft, hourPrice).map((item) => [item.key, item]));
+  Array.from(document.querySelectorAll('[data-pricing-ratio-result-key]')).forEach((node) => {
+    const item = results.get(String(node.getAttribute('data-pricing-ratio-result-key') || ''));
+    node.textContent = `= ${formatPricingResultMoney(item && item.price)}`;
+  });
+}
+
+function renderPricingRatioSettings() {
+  const ratioState = ensurePricingLadderState().ratio_settings;
+  const tabs = document.getElementById('pricingRatioChannelTabs');
+  const panel = document.getElementById('pricingRatioPanel');
+  if (!tabs || !panel) return;
+  const channels = Array.isArray(ratioState.channels) ? ratioState.channels : [];
+  if (ratioState.loading && !ratioState.loaded_once) {
+    tabs.innerHTML = '';
+    panel.innerHTML = '<div class="pricing-channel-empty">加载中...</div>';
+    return;
+  }
+  if (ratioState.error) {
+    tabs.innerHTML = '';
+    panel.innerHTML = `<div class="pricing-channel-empty pricing-error">${escapePricingHtml(ratioState.error)}</div>`;
+    return;
+  }
+  if (channels.length === 0) {
+    tabs.innerHTML = '';
+    panel.innerHTML = '<div class="pricing-channel-empty">暂无可配置的调价渠道。</div>';
+    return;
+  }
+  if (!channels.some((item) => item.channel === ratioState.selected_channel)) {
+    ratioState.selected_channel = channels[0].channel;
+  }
+  tabs.innerHTML = channels.map((channel) => `
+    <button class="orders-tab header-tab ${channel.channel === ratioState.selected_channel ? 'active' : ''}"
+      data-pricing-ratio-channel="${escapePricingHtml(channel.channel)}" type="button">${escapePricingHtml(channel.label)}</button>
+  `).join('');
+  Array.from(tabs.querySelectorAll('[data-pricing-ratio-channel]')).forEach((button) => {
+    button.onclick = () => {
+      ratioState.selected_channel = String(button.getAttribute('data-pricing-ratio-channel') || 'uhaozu');
+      renderPricingRatioSettings();
+    };
+  });
+  const selected = channels.find((item) => item.channel === ratioState.selected_channel) || channels[0];
+  const draft = ratioState.drafts[selected.channel] || normalizePricingRatioDraft(selected);
+  ratioState.drafts[selected.channel] = draft;
+  const labels = selected.package_labels || {};
+  const fields = selected.package_keys.map((key) => `
+    <label class="pricing-ratio-field">
+      <span>${escapePricingHtml(labels[key] || key)}</span>
+      <div class="pricing-ratio-field-line">
+        <div class="pricing-price-input">
+          <input data-pricing-ratio-key="${escapePricingHtml(key)}" type="number" min="0.0001" step="0.0001" inputmode="decimal"
+            value="${escapePricingHtml(draft[key] || '')}" ${key === 'hour' || ratioState.saving ? 'disabled' : ''}>
+          <span>倍</span>
+        </div>
+        <span class="pricing-ratio-result" data-pricing-ratio-result-key="${escapePricingHtml(key)}">= -</span>
+      </div>
+    </label>
+  `).join('');
+  panel.innerHTML = `
+    <div class="pricing-ratio-copy">
+      <strong>${escapePricingHtml(selected.label)}套餐倍率</strong>
+      <span>${selected.source === 'saved' ? `已保存${selected.modify_date ? ` · ${escapePricingHtml(selected.modify_date)}` : ''}` : '当前使用系统建议值，保存后转为号主配置'}</span>
+    </div>
+    <div class="pricing-ratio-grid">${fields}</div>
+    <div class="pricing-ratio-actions">
+      <span class="head-summary-text">时租固定为 1 倍；保存后，下次价格同步按最新倍率生效。</span>
+      <button class="btn btn-ghost btn-page-action" id="pricingRatioSaveBtn" type="button" ${ratioState.saving ? 'disabled' : ''}>${ratioState.saving ? '保存中...' : '保存倍率'}</button>
+    </div>
+  `;
+  Array.from(panel.querySelectorAll('[data-pricing-ratio-key]')).forEach((input) => {
+    input.oninput = () => {
+      draft[String(input.getAttribute('data-pricing-ratio-key') || '')] = input.value;
+      renderPricingRatioInlineResults(selected, draft, ratioState.preview_hour);
+    };
+  });
+  const previewHour = document.getElementById('pricingRatioPreviewHour');
+  if (previewHour) {
+    if (document.activeElement !== previewHour) previewHour.value = ratioState.preview_hour;
+    previewHour.oninput = () => {
+      ratioState.preview_hour = previewHour.value;
+      renderPricingRatioInlineResults(selected, draft, ratioState.preview_hour);
+    };
+  }
+  renderPricingRatioInlineResults(selected, draft, ratioState.preview_hour);
+  const save = document.getElementById('pricingRatioSaveBtn');
+  if (save) save.onclick = () => void savePricingRatioSettings(selected);
+}
+
+async function savePricingRatioSettings(channel) {
+  const ratioState = ensurePricingLadderState().ratio_settings;
+  if (ratioState.saving) return;
+  let ratios;
+  try {
+    ratios = validatePricingRatioDraft(channel, ratioState.drafts[channel.channel] || {});
+  } catch (e) {
+    showToast(e.message || '套餐倍率不合法');
+    return;
+  }
+  ratioState.saving = true;
+  renderPricingRatioSettings();
+  try {
+    const out = await request('/api/pricing/ladder/package-ratios', {
+      method: 'POST',
+      body: JSON.stringify({
+        channel: channel.channel,
+        ratios,
+        expected_version: Number(channel.version || 0)
+      })
+    });
+    const saved = out && out.setting ? out.setting : {};
+    Object.assign(channel, saved);
+    ratioState.drafts[channel.channel] = normalizePricingRatioDraft(channel);
+    const queued = Number(saved.queued_count || 0);
+    showToast(queued > 0 ? `倍率已保存，${queued} 个账号将在下次同步生效` : '倍率已保存');
+  } catch (e) {
+    showToast(e.message || '套餐倍率保存失败');
+  } finally {
+    ratioState.saving = false;
+    renderPricingRatioSettings();
+  }
+}
+
+async function loadPricingRatioSettings() {
+  const ratioState = ensurePricingLadderState().ratio_settings;
+  ratioState.loading = true;
+  ratioState.error = '';
+  renderPricingRatioSettings();
+  try {
+    const out = await request('/api/pricing/ladder/package-ratios');
+    ratioState.channels = Array.isArray(out && out.channels) ? out.channels : [];
+    ratioState.drafts = Object.fromEntries(ratioState.channels.map((channel) => [channel.channel, normalizePricingRatioDraft(channel)]));
+    ratioState.loaded_once = true;
+  } catch (e) {
+    ratioState.error = String(e && e.message || '套餐倍率加载失败');
+  } finally {
+    ratioState.loading = false;
+    renderPricingRatioSettings();
+  }
 }
 
 function filterPricingItems(items = [], query = '') {
@@ -132,6 +331,7 @@ function pricingLogStatusText(status) {
 function pricingLogTriggerText(source) {
   const labels = {
     rule_saved: '保存策略',
+    package_ratio_saved: '套餐倍率变更',
     order_finished_changed: '订单换挡',
     daily_reset: '06:00重置',
     feature_enabled_reconcile: '功能启用校准',
@@ -656,6 +856,15 @@ function renderPricingFeatureState() {
 function renderPricingView() {
   if (!els.pricingView) return;
   const pricing = ensurePricingLadderState();
+  const ratioMode = state.currentMenu === 'pricing_ratios';
+  const ladderPane = document.getElementById('pricingLadderPane');
+  const ratioPane = document.getElementById('pricingRatioPane');
+  if (ladderPane) ladderPane.classList.toggle('hidden', ratioMode);
+  if (ratioPane) ratioPane.classList.toggle('hidden', !ratioMode);
+  if (ratioMode) {
+    renderPricingRatioSettings();
+    return;
+  }
   renderPricingGameTabs();
   renderPricingFeatureState();
   const windowText = document.getElementById('pricingWindowText');
@@ -678,6 +887,10 @@ function renderPricingView() {
 
 async function loadPricingView() {
   const pricing = ensurePricingLadderState();
+  if (state.currentMenu === 'pricing_ratios') {
+    await loadPricingRatioSettings();
+    return;
+  }
   pricing.loading = true;
   pricing.error = '';
   renderPricingView();
@@ -708,5 +921,9 @@ window.__pricingLadderTest = {
   formatPricingErrorDetail,
   renderPricingChannelLogs,
   renderPricingChannelResult,
-  renderPricingPackageValues
+  renderPricingPackageValues,
+  formatPricingRatio,
+  normalizePricingRatioDraft,
+  validatePricingRatioDraft,
+  calculatePricingRatioPreview
 };

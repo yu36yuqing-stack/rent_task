@@ -79,7 +79,18 @@ async function main() {
     assert.strictEqual(success.verification_status, 'partial');
     assert.deepStrictEqual(modifyCalls[0], {
         productId: 'product-publish-a',
-        input: { hourPrice: 3, minRentHour: 2 }
+        input: {
+            hourPrice: 3,
+            p2Price: 5.4,
+            p3Price: 7.2,
+            p5Price: 10.5,
+            p7Price: 14.7,
+            p9Price: 18.9,
+            p10Price: 21,
+            p24Price: 43.2,
+            p168Price: 302.4,
+            minRentHour: 2
+        }
     });
     const successLogs = await listPricePublishItemLogsByBatchId(success.batch_id);
     assert.strictEqual(successLogs.length, 1);
@@ -156,6 +167,17 @@ async function main() {
     });
     assert.strictEqual(_internals.pickUuzuhaoProductPriceSet({ productHourRentPrice: 4.8 }).hour, 4.8);
     assert.throws(() => _internals.normalizeUuzuhaoTargetPriceSet({ hour: 0 }), /目标时租价/);
+    assert.strictEqual(_internals.normalizeUuzuhaoTargetPriceSet({
+        hour: 2,
+        p2: 3.8,
+        p3: 5,
+        p5: 8,
+        p7: 11,
+        p9: 14,
+        p10: 15,
+        p24: 30,
+        p168: 210
+    }).p2, 3.8);
     assert.strictEqual(_internals.isAuthRowUsable({
         platform: 'uuzuhao', auth_status: 'valid', channel_enabled: true
     }, 'uuzuhao'), true);

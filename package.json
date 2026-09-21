@@ -21,7 +21,7 @@
     "test:h5-maintenance-table": "node test/h5_maintenance_table_smoke_test.js",
     "test:h5-maintenance-visual": "node test/h5_maintenance_visual_check.js",
     "test:price-ladder": "node test/run_price_ladder_v3_tests.js",
-    "coverage:price-ladder": "c8 --all --include=price/channel_adapters/*.js --include=price/price_ladder_reconcile_service.js --include=price/price_ladder_service.js --include=price/price_publish_service.js --include=uuzuhao/uuzuhao_api.js --reporter=text --reporter=json-summary --reporter=html --report-dir=coverage/price-ladder --check-coverage --lines=90 node test/run_price_ladder_v3_tests.js",
+    "coverage:price-ladder": "c8 --all --include=database/user_channel_package_ratio_db.js --include=price/channel_adapters/*.js --include=price/channel_package_ratio.js --include=price/package_ratio_service.js --include=price/price_ladder_reconcile_service.js --include=price/price_ladder_service.js --include=price/price_publish_service.js --include=uuzuhao/uuzuhao_api.js --include=zuhaowang/zuhaowang_price_api.js --reporter=text --reporter=json-summary --reporter=html --report-dir=coverage/price-ladder --check-coverage --lines=90 node test/run_price_ladder_v3_tests.js",
     "coverage:system-retention": "c8 --all --include=maintenance/database_compaction_service.js --include=maintenance/system_retention_service.js --include=database/order_detail_db.js --include=database/product_onoff_history_db.js --include=database/user_blacklist_db.js --reporter=text --reporter=json-summary --reporter=html --report-dir=coverage/system-retention --check-coverage --lines=90 node test/run_system_retention_tests.js"
   },
   "dependencies": {

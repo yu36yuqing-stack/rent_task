@@ -1,13 +1,14 @@
 'use strict';
 
-const { getAccountChannelPriceBaseline } = require('../../database/account_channel_price_baseline_db');
+const { resolvePackageRatios } = require('../channel_package_ratio');
 
 const capability = Object.freeze({
     channel: 'uhaozu',
     label: 'U号租',
     enabled: true,
     package_keys: ['hour', 'night', 'day', 'week'],
-    package_labels: { hour: '时租', night: '包夜', day: '包天', week: '包周' }
+    package_labels: { hour: '时租', night: '包夜', day: '包天', week: '包周' },
+    default_ratios: { hour: 1, night: 4, day: 6, week: 35 }
 });
 
 function roundMoney(value) {
@@ -75,46 +76,46 @@ function buildTierPrices(hourPrices = [], baselinePrices = {}) {
     });
 }
 
+function buildTierPricesByRatios(hourPrices = [], ratios = {}) {
+    return hourPrices.slice(0, 4).map((value, index) => {
+        const hour = roundMoney(value);
+        const derive = (key) => Number(ratios[key] || 0) > 0 ? roundMoney(hour * Number(ratios[key])) : 0;
+        return {
+            tier: index + 1,
+            prices: {
+                hour,
+                night: derive('night'),
+                day: derive('day'),
+                week: derive('week')
+            }
+        };
+    });
+}
+
 function samePriceSet(left = {}, right = {}) {
     return capability.package_keys.every((key) => roundMoney(left[key]) === roundMoney(right[key]));
 }
 
 async function resolveTierPrices(context = {}) {
-    const { user_id: userId, rule, account_row: accountRow, allow_preview: allowPreview } = context;
-    let baseline = await getAccountChannelPriceBaseline(
-        userId,
-        rule.game_id,
-        rule.game_account,
-        capability.channel
-    );
-    let baselineStatus = baseline ? 'saved' : 'unavailable';
-    if (!baseline && allowPreview) {
-        const remote = pickCurrentPriceSet(accountRow);
-        if (remote.complete) {
-            baseline = {
-                prices: remote.prices,
-                goods_id: remote.goods_id,
-                version: 0,
-                source_sync_time: '',
-                modify_date: ''
-            };
-            baselineStatus = 'preview';
-        }
-    }
-    const tiers = baseline ? buildTierPrices(rule.prices, baseline.prices) : [];
+    const { user_id: userId, rule } = context;
+    const ratioConfig = await resolvePackageRatios(userId, capability);
+    const tiers = buildTierPricesByRatios(rule.prices, ratioConfig.ratios);
     const ready = Boolean(
-        baseline
-        && tiers.length === 4
+        tiers.length === 4
         && tiers.every((item) => Object.values(item.prices).every((value) => Number(value) > 0))
     );
     return {
         ready,
-        error: ready ? '' : 'U号租套餐价格基准不完整',
-        reason: ready ? '' : 'baseline_unavailable',
+        error: ready ? '' : 'U号租套餐倍率配置不完整',
+        reason: ready ? '' : 'ratio_unavailable',
         tiers,
-        baseline,
-        baseline_status: baselineStatus,
-        baseline_version: Number(baseline && baseline.version || 0)
+        baseline: {
+            ratios: ratioConfig.ratios,
+            version: ratioConfig.version,
+            modify_date: ratioConfig.modify_date
+        },
+        baseline_status: ratioConfig.source,
+        baseline_version: ratioConfig.version
     };
 }
 
@@ -124,7 +125,7 @@ async function publish(userId, input = {}, options = {}) {
 }
 
 function shouldForcePublish(triggerSource) {
-    return String(triggerSource || '').trim() === 'rule_saved';
+    return ['rule_saved', 'package_ratio_saved'].includes(String(triggerSource || '').trim());
 }
 
 module.exports = {
@@ -135,6 +136,7 @@ module.exports = {
     pickCurrentPriceSet,
     buildRatios,
     buildTierPrices,
+    buildTierPricesByRatios,
     samePriceSet,
     resolveTierPrices,
     publish,

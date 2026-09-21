@@ -412,7 +412,7 @@ async function runtime() {
     const noBaseline = await reconcilePriceLadderAfterOrderSync(USER_ID, noBaselineOrder.candidates, {
         now: localDate(nextDay, '10:01:00'), allow_apply: true, publisher
     });
-    assert(noBaseline.reconciliation.list.some((item) => item.reason === 'baseline_unavailable'));
+    assert(noBaseline.reconciliation.list.some((item) => item.game_account === 'no-baseline' && item.status === 'applied'));
 
     const noRuleQueued = await enqueuePriceLadderCandidates(USER_ID, [{
         game_id: GAME_ID,

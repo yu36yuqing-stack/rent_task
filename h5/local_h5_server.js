@@ -140,6 +140,10 @@ const {
     setPriceLadderFeatureByUser,
     getPriceLadderChannelResultByUser
 } = require('../price/price_ladder_service');
+const {
+    getPackageRatioSettingsByUser,
+    savePackageRatioSettingsByUser
+} = require('../price/package_ratio_service');
 const { saveUhaozuPricingAccountCostByUser } = require('../price/price_rule_service');
 const {
     publishUhaozuPricingByUser,
@@ -150,6 +154,7 @@ const {
 const { initUserPriceRuleDb } = require('../database/user_price_rule_db');
 const { initAccountPriceLadderRuleDb } = require('../database/account_price_ladder_rule_db');
 const { initAccountChannelPriceBaselineDb } = require('../database/account_channel_price_baseline_db');
+const { initUserChannelPackageRatioDb } = require('../database/user_channel_package_ratio_db');
 const { initPricePublishLogDb } = require('../database/price_publish_log_db');
 const { initMaintenanceTaskLogDb } = require('../database/maintenance_task_log_db');
 const {
@@ -1441,6 +1446,30 @@ async function handlePricingLadderChannelResult(req, res, urlObj) {
         channel: urlObj.searchParams.get('channel') || 'uhaozu'
     });
     return json(res, 200, { ok: true, ...out });
+}
+
+async function handlePricingPackageRatios(req, res) {
+    const user = await requireAuth(req);
+    const out = await getPackageRatioSettingsByUser(user.id);
+    return json(res, 200, { ok: true, ...out });
+}
+
+async function handleSetPricingPackageRatios(req, res) {
+    const user = await requireAuth(req);
+    const body = await readJsonBody(req);
+    try {
+        const setting = await savePackageRatioSettingsByUser(user.id, {
+            channel: body.channel,
+            ratios: body.ratios,
+            expected_version: body.expected_version
+        });
+        return json(res, 200, { ok: true, setting });
+    } catch (err) {
+        if (err && err.code === 'PRICE_LADDER_VERSION_CONFLICT') {
+            return json(res, 409, { ok: false, message: err.message });
+        }
+        throw err;
+    }
 }
 
 async function handleSetPricingUhaozuConfig(req, res) {
@@ -2793,6 +2822,7 @@ async function bootstrap() {
     await initUserPriceRuleDb();
     await initAccountPriceLadderRuleDb();
     await initAccountChannelPriceBaselineDb();
+    await initUserChannelPackageRatioDb();
     await initPricePublishLogDb();
     await initMaintenanceTaskLogDb();
     await initProdRiskEventDb();
@@ -2822,6 +2852,8 @@ async function bootstrap() {
             if (req.method === 'POST' && urlObj.pathname === '/api/pricing/ladder/account') return await handleSetPricingLadderAccount(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/pricing/ladder/feature') return await handleSetPricingLadderFeature(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/pricing/ladder/channel-result') return await handlePricingLadderChannelResult(req, res, urlObj);
+            if (req.method === 'GET' && urlObj.pathname === '/api/pricing/ladder/package-ratios') return await handlePricingPackageRatios(req, res);
+            if (req.method === 'POST' && urlObj.pathname === '/api/pricing/ladder/package-ratios') return await handleSetPricingPackageRatios(req, res);
             if (req.method === 'GET' && urlObj.pathname === '/api/pricing/uhaozu') return await handlePricingUhaozu(req, res, urlObj);
             if (req.method === 'POST' && urlObj.pathname === '/api/pricing/uhaozu/config') return await handleSetPricingUhaozuConfig(req, res);
             if (req.method === 'POST' && urlObj.pathname === '/api/pricing/uhaozu/account-cost') return await handleSetPricingUhaozuAccountCost(req, res);

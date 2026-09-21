@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Rent Task H5</title>
-  <link rel="stylesheet" href="/css/app.css?v=20260921b">
+  <link rel="stylesheet" href="/css/app.css?v=20260921d">
 </head>
 <body>
   <div class="wrap">
@@ -123,28 +123,47 @@
     </section>
 
     <section id="pricingView" class="hidden orders-view">
-      <div id="pricingGameTabs" class="stats-game-tabs"></div>
-      <div class="pricing-ladder-head">
-        <div>
-          <p class="auth-title">账号阶梯价格</p>
-          <p id="pricingWindowText" class="head-summary-text">订单周期：06:00～次日06:00</p>
+      <div id="pricingLadderPane">
+        <div id="pricingGameTabs" class="stats-game-tabs"></div>
+        <div class="pricing-ladder-head">
+          <div>
+            <p class="auth-title">账号阶梯价格</p>
+            <p id="pricingWindowText" class="head-summary-text">订单周期：06:00～次日06:00</p>
+          </div>
+          <label class="feature-switch" for="pricingFeatureToggle">
+            <span class="feature-switch-copy">
+              <strong>自动阶梯调价</strong>
+              <small id="pricingFeatureStatus">已关闭</small>
+            </span>
+            <input id="pricingFeatureToggle" type="checkbox" role="switch" aria-label="自动阶梯调价">
+            <span class="feature-switch-track" aria-hidden="true"></span>
+          </label>
         </div>
-        <label class="feature-switch" for="pricingFeatureToggle">
-          <span class="feature-switch-copy">
-            <strong>自动阶梯调价</strong>
-            <small id="pricingFeatureStatus">已关闭</small>
-          </span>
-          <input id="pricingFeatureToggle" type="checkbox" role="switch" aria-label="自动阶梯调价">
-          <span class="feature-switch-track" aria-hidden="true"></span>
-        </label>
+        <p class="pricing-channel-note">统一时租基准价生效渠道：U号租、租号王、悠悠租号</p>
+        <div class="field list-search-field pricing-search-field">
+          <label for="pricingSearchInput">搜索账号</label>
+          <input id="pricingSearchInput" type="search" placeholder="输入账号名称或账号" autocomplete="off">
+        </div>
+        <p id="pricingSearchSummary" class="head-summary-text">共 0 个账号</p>
+        <div id="pricingListContainer" class="pricing-ladder-list"></div>
       </div>
-      <p class="pricing-channel-note">生效渠道：U号租、悠悠租号</p>
-      <div class="field list-search-field pricing-search-field">
-        <label for="pricingSearchInput">搜索账号</label>
-        <input id="pricingSearchInput" type="search" placeholder="输入账号名称或账号" autocomplete="off">
+      <div id="pricingRatioPane" class="hidden">
+        <div class="pricing-ladder-head">
+          <div>
+            <p class="auth-title">套餐比例设置</p>
+            <p class="head-summary-text">套餐总价 = 当前档时租基准价 × 套餐倍率</p>
+          </div>
+          <label class="pricing-ratio-example">
+            <span>示例时租价</span>
+            <div class="pricing-price-input">
+              <input id="pricingRatioPreviewHour" type="number" min="0.01" step="0.01" inputmode="decimal" value="2" aria-label="示例时租价">
+              <span>元</span>
+            </div>
+          </label>
+        </div>
+        <div id="pricingRatioChannelTabs" class="orders-tabs pricing-channel-tabs"></div>
+        <div id="pricingRatioPanel" class="panel pricing-ratio-panel"></div>
       </div>
-      <p id="pricingSearchSummary" class="head-summary-text">共 0 个账号</p>
-      <div id="pricingListContainer" class="pricing-ladder-list"></div>
     </section>
 
     <section id="boardView" class="hidden orders-view">
@@ -277,7 +296,16 @@
         <button class="drawer-item" data-menu="stats" data-label="统计看板">统计看板</button>
         <button class="drawer-item" data-menu="risk" data-label="风控中心">风控中心</button>
         <button class="drawer-item" data-menu="auth" data-label="授权管理">授权管理</button>
-        <button class="drawer-item" data-menu="pricing_uhaozu" data-label="阶梯定价">阶梯定价</button>
+        <div class="drawer-group" data-drawer-group="pricing">
+          <button class="drawer-group-toggle" data-drawer-group-toggle="pricing" type="button" aria-expanded="false">
+            <span>阶梯定价</span>
+            <span class="drawer-group-chevron" aria-hidden="true">▾</span>
+          </button>
+          <div class="drawer-sub-list hidden" data-drawer-group-list="pricing">
+            <button class="drawer-sub-item" data-menu="pricing_uhaozu" data-label="账号阶梯价格">账号阶梯价格</button>
+            <button class="drawer-sub-item" data-menu="pricing_ratios" data-label="套餐比例设置">套餐比例设置</button>
+          </div>
+        </div>
         <button class="drawer-item" data-menu="board" data-label="板卡管理">板卡管理</button>
         <div class="drawer-group hidden" data-admin-only="1" data-drawer-group="maintenance">
           <button class="drawer-group-toggle" data-drawer-group-toggle="maintenance" type="button" aria-expanded="false">
@@ -804,7 +832,7 @@
   <script defer src="/js/menu_orders.js?v=20260303a"></script>
   <script defer src="/js/menu_risk.js?v=20260303a"></script>
   <script defer src="/js/menu_stats.js?v=20260329b"></script>
-  <script defer src="/js/menu_price.js?v=20260921a"></script>
+  <script defer src="/js/menu_price.js?v=20260921d"></script>
   <script defer src="/js/menu_board.js?v=20260329a"></script>
   <script defer src="/js/menu_maintenance.js?v=20260920b"></script>
 </body>

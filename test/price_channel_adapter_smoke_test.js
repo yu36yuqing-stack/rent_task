@@ -3,6 +3,7 @@
 
 const assert = require('assert');
 const uhaozu = require('../price/channel_adapters/uhaozu_price_adapter');
+const zuhaowang = require('../price/channel_adapters/zuhaowang_price_adapter');
 const uuzuhao = require('../price/channel_adapters/uuzuhao_price_adapter');
 const {
     getPriceChannelAdapter,
@@ -24,18 +25,28 @@ const account = {
             prd_id: 'y-1',
             hourPrice: 2,
             minRentHour: 3
+        },
+        zuhaowang: {
+            prd_id: 'z-1',
+            game_id: '1104466820',
+            rent_mode: 'day_only',
+            p24Price: 9,
+            p72Price: 27,
+            p168Price: 63
         }
     }
 };
 
 assert.strictEqual(getPriceChannelAdapter('uhaozu'), uhaozu);
 assert.strictEqual(getPriceChannelAdapter('uuzuhao'), uuzuhao);
+assert.strictEqual(getPriceChannelAdapter('zuhaowang'), zuhaowang);
 assert.strictEqual(getPriceChannelAdapter('missing'), null);
-assert.deepStrictEqual(listEnabledPriceChannelAdapters(account).map((item) => item.channel), ['uhaozu', 'uuzuhao']);
+assert.deepStrictEqual(listEnabledPriceChannelAdapters(account).map((item) => item.channel), ['uhaozu', 'zuhaowang', 'uuzuhao']);
 assert.deepStrictEqual(listEnabledPriceChannelAdapters({ channel_prd_info: {} }), []);
 const zuhaowangCapability = listPriceChannelCapabilities().find((item) => item.channel === 'zuhaowang');
-assert.strictEqual(zuhaowangCapability.enabled, false);
+assert.strictEqual(zuhaowangCapability.enabled, true);
 assert.strictEqual(zuhaowangCapability.label, '租号王');
+assert.deepStrictEqual(zuhaowangCapability.package_keys, ['hour', 'p24', 'p72', 'p168']);
 
 assert.deepStrictEqual(uhaozu.pickCurrentPriceSet(account).prices, {
     hour: 2,
@@ -62,6 +73,21 @@ assert.strictEqual(uhaozu.samePriceSet({ hour: 2, night: 8, day: 12, week: 70 },
 }), true);
 assert.strictEqual(uhaozu.shouldForcePublish('rule_saved'), true);
 assert.strictEqual(uhaozu.shouldForcePublish('daily_reset'), false);
+assert.strictEqual(uhaozu.shouldForcePublish('package_ratio_saved'), true);
+
+assert.deepStrictEqual(zuhaowang.pickCurrentPriceSet(account), {
+    goods_id: 'z-1',
+    prices: { hour: 0, p24: 9, p72: 27, p168: 63 },
+    complete: true,
+    comparable_keys: ['p24', 'p72', 'p168'],
+    rent_mode: 'day_only'
+});
+assert.deepStrictEqual(zuhaowang.buildPriceSet(2), { hour: 2, p24: 9, p72: 27, p168: 63 });
+assert.strictEqual(zuhaowang.buildTierPrices([2, 3, 4, 5]).length, 4);
+assert.strictEqual(zuhaowang.samePriceSet(
+    { hour: 99, p24: 9, p72: 27, p168: 63 },
+    { hour: 0, p24: 9, p72: 27, p168: 63 }
+), true);
 
 assert.deepStrictEqual(uuzuhao.pickCurrentPriceSet(account), {
     goods_id: 'y-1',

@@ -1653,6 +1653,85 @@
       gap: 10px;
     }
 
+    #pricingLadderPane,
+    #pricingRatioPane {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    #pricingView .pricing-ratio-panel {
+      display: grid;
+      gap: 16px;
+      min-width: 0;
+    }
+
+    #pricingView .pricing-ratio-copy {
+      display: grid;
+      gap: 4px;
+    }
+
+    #pricingView .pricing-ratio-copy strong {
+      color: #26384d;
+      font-size: 14px;
+    }
+
+    #pricingView .pricing-ratio-copy span {
+      color: #6a7b8f;
+      font-size: 11px;
+    }
+
+    #pricingView .pricing-ratio-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    #pricingView .pricing-ratio-field {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    #pricingView .pricing-ratio-field > span {
+      color: #52657a;
+      font-size: 11px;
+    }
+
+    #pricingView .pricing-ratio-field-line {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    #pricingView .pricing-ratio-result {
+      color: #23725e;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    #pricingView .pricing-ratio-example {
+      display: grid;
+      flex: 0 0 180px;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    #pricingView .pricing-ratio-example > span {
+      color: #52657a;
+      font-size: 11px;
+    }
+
+    #pricingView .pricing-ratio-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
     #pricingView .pricing-ladder-head {
       display: flex;
       align-items: flex-end;
@@ -2200,8 +2279,25 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
+      #pricingView .pricing-ratio-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      #pricingView .pricing-ratio-example {
+        flex-basis: 160px;
+      }
+
+      #pricingView .pricing-ratio-actions {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
       #pricingView .pricing-copy-field {
         grid-template-columns: 1fr;
+        gap: 5px;
+      }
+
+      #pricingView .pricing-ratio-field-line {
         gap: 5px;
       }
 
@@ -2223,6 +2319,18 @@
         grid-template-columns: repeat(3, minmax(0, 1fr));
       }
 
+    }
+
+    @media (max-width: 360px) {
+      #pricingRatioPane .pricing-ladder-head {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      #pricingView .pricing-ratio-example {
+        flex-basis: auto;
+        width: 100%;
+      }
     }
 
     #boardView.orders-view {

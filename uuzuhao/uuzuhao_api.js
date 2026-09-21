@@ -131,7 +131,12 @@ function buildModifyPricePayload(productId, input = {}) {
         hourPrice: roundPrice(hourPrice)
     };
     for (const rule of PACKAGE_PRICE_RULES) {
-        payload[rule.field] = roundPrice(hourPrice * rule.hours * rule.discount);
+        const configured = input[rule.field] ?? (input.packagePrices && input.packagePrices[rule.field]);
+        const value = configured === undefined || configured === null || configured === ''
+            ? hourPrice * rule.hours * rule.discount
+            : Number(configured);
+        if (!Number.isFinite(value) || value <= 0) throw new Error(`${rule.field} 必须是大于 0 的数字`);
+        payload[rule.field] = roundPrice(value);
     }
 
     if (input.minRentHour !== undefined && input.minRentHour !== null && input.minRentHour !== '') {

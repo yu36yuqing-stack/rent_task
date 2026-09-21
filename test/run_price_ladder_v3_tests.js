@@ -7,8 +7,12 @@ const { spawnSync } = require('child_process');
 const tests = [
     'price_ladder_feature_gate_smoke_test.js',
     'price_channel_adapter_smoke_test.js',
+    'package_ratio_service_smoke_test.js',
     'uuzuhao_modify_price_api_smoke_test.js',
     'uuzuhao_price_publish_service_smoke_test.js',
+    'zuhaowang_price_api_smoke_test.js',
+    'zuhaowang_price_publish_service_smoke_test.js',
+    'zuhaowang_price_ladder_integration_smoke_test.js',
     'price_ladder_multi_channel_smoke_test.js',
     'price_ladder_reconcile_smoke_test.js',
     'account_price_ladder_smoke_test.js',

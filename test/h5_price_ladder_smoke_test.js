@@ -107,7 +107,7 @@ async function main() {
         const channelRes = await fetch(`${baseUrl}/api/pricing/ladder/channel-result?game_name=${encodeURIComponent('和平精英')}&game_account=ladder-a`, { headers });
         const channelJson = await channelRes.json();
         assert.strictEqual(channelRes.status, 200);
-        assert.strictEqual(channelJson.channel_result.baseline_status, 'saved');
+        assert.strictEqual(channelJson.channel_result.baseline_status, 'default');
         assert.strictEqual(channelJson.channel_result.tiers.length, 4);
         assert.strictEqual(channelJson.channels.length, 3);
         assert.strictEqual(channelJson.channels.find((item) => item.channel === 'uuzuhao').enabled, true);
@@ -122,6 +122,25 @@ async function main() {
         assert.strictEqual(uuzuhaoChannelJson.selected_channel, 'uuzuhao');
         assert.strictEqual(uuzuhaoChannelJson.channel_result.package_keys.length, 9);
         assert.strictEqual(uuzuhaoChannelJson.channel_result.adjustment_logs[0].error_detail.stage, 'authorization');
+
+        const ratioGetRes = await fetch(`${baseUrl}/api/pricing/ladder/package-ratios`, { headers });
+        const ratioGetJson = await ratioGetRes.json();
+        assert.strictEqual(ratioGetRes.status, 200);
+        assert.deepStrictEqual(ratioGetJson.channels.map((item) => item.channel), ['uhaozu', 'zuhaowang', 'uuzuhao']);
+        assert.strictEqual(ratioGetJson.channels.find((item) => item.channel === 'zuhaowang').ratios.p24, 4.5);
+        const ratioSaveRes = await fetch(`${baseUrl}/api/pricing/ladder/package-ratios`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                channel: 'uhaozu',
+                ratios: { hour: 1, night: 4.2, day: 6.2, week: 35.2 },
+                expected_version: 0
+            })
+        });
+        const ratioSaveJson = await ratioSaveRes.json();
+        assert.strictEqual(ratioSaveRes.status, 200);
+        assert.strictEqual(ratioSaveJson.setting.ratios.night, 4.2);
+        assert.strictEqual(ratioSaveJson.setting.queued_count, 1);
 
         const missingAccountRes = await fetch(`${baseUrl}/api/pricing/ladder/channel-result?game_name=${encodeURIComponent('和平精英')}`, { headers });
         assert.strictEqual(missingAccountRes.status, 400);
@@ -176,7 +195,9 @@ async function main() {
         assert(staticHtml.includes('账号阶梯价格'));
         assert(staticHtml.includes('pricingFeatureToggle'));
         assert(staticHtml.includes('pricingSearchInput'));
-        assert(staticHtml.includes('生效渠道：U号租、悠悠租号'));
+        assert(staticHtml.includes('统一时租基准价生效渠道：U号租、租号王、悠悠租号'));
+        assert(staticHtml.includes('套餐比例设置'));
+        assert(staticHtml.includes('pricingRatioPanel'));
         assert(staticHtml.includes('pricingChannelSheet'));
         assert(staticHtml.includes('渠道价格'));
 

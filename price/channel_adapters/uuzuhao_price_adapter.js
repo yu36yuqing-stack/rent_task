@@ -1,6 +1,6 @@
 'use strict';
 
-const { _internals: uuzuhaoInternal } = require('../../uuzuhao/uuzuhao_api');
+const { resolvePackageRatios } = require('../channel_package_ratio');
 
 const capability = Object.freeze({
     channel: 'uuzuhao',
@@ -17,6 +17,17 @@ const capability = Object.freeze({
         p10: '10小时',
         p24: '24小时',
         p168: '168小时'
+    },
+    default_ratios: {
+        hour: 1,
+        p2: 1.8,
+        p3: 2.4,
+        p5: 3.5,
+        p7: 4.9,
+        p9: 6.3,
+        p10: 7,
+        p24: 14.4,
+        p168: 100.8
     }
 });
 
@@ -52,17 +63,19 @@ function isAvailable(accountRow = {}) {
     return Boolean(productId(accountRow));
 }
 
-function buildPriceSet(hourPrice) {
-    const payload = uuzuhaoInternal.buildModifyPricePayload('price-preview', { hourPrice });
-    const prices = { hour: roundMoney(payload.hourPrice) };
-    for (const [field, key] of Object.entries(API_TO_PRICE_KEY)) prices[key] = roundMoney(payload[field]);
+function buildPriceSet(hourPrice, ratios = capability.default_ratios) {
+    const hour = roundMoney(hourPrice);
+    const prices = { hour };
+    for (const key of capability.package_keys.filter((item) => item !== 'hour')) {
+        prices[key] = Number(ratios[key] || 0) > 0 ? roundMoney(hour * Number(ratios[key])) : 0;
+    }
     return prices;
 }
 
-function buildTierPrices(hourPrices = []) {
+function buildTierPrices(hourPrices = [], ratios = capability.default_ratios) {
     return hourPrices.slice(0, 4).map((value, index) => ({
         tier: index + 1,
-        prices: buildPriceSet(value)
+        prices: buildPriceSet(value, ratios)
     }));
 }
 
@@ -83,7 +96,8 @@ function samePriceSet(left = {}, right = {}) {
 }
 
 async function resolveTierPrices(context = {}) {
-    const tiers = buildTierPrices(context.rule && context.rule.prices || []);
+    const ratioConfig = await resolvePackageRatios(context.user_id, capability);
+    const tiers = buildTierPrices(context.rule && context.rule.prices || [], ratioConfig.ratios);
     const ready = tiers.length === 4
         && tiers.every((item) => capability.package_keys.every((key) => Number(item.prices[key] || 0) > 0));
     return {
@@ -91,9 +105,13 @@ async function resolveTierPrices(context = {}) {
         error: ready ? '' : '悠悠租号阶梯套餐价格计算失败',
         reason: ready ? '' : 'package_calculation_failed',
         tiers,
-        baseline: null,
-        baseline_status: 'formula',
-        baseline_version: 0
+        baseline: {
+            ratios: ratioConfig.ratios,
+            version: ratioConfig.version,
+            modify_date: ratioConfig.modify_date
+        },
+        baseline_status: ratioConfig.source,
+        baseline_version: ratioConfig.version
     };
 }
 

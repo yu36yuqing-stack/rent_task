@@ -360,8 +360,10 @@ async function getPriceLadderChannelResultByUser(userId, options = {}) {
             goods_id: remote.goods_id,
             baseline_status: resolved.baseline_status || 'unavailable',
             baseline: baseline ? {
-                prices: baseline.prices,
-                ratios: capability.channel === 'uhaozu' ? buildUhaozuRatios(baseline.prices) : null,
+                prices: baseline.prices || null,
+                ratios: baseline.ratios || (capability.channel === 'uhaozu' && baseline.prices
+                    ? buildUhaozuRatios(baseline.prices)
+                    : null),
                 version: Number(baseline.version || 0),
                 source_sync_time: String(baseline.source_sync_time || baseline.modify_date || '').trim()
             } : null,

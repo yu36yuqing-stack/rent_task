@@ -34,12 +34,13 @@ assert.strictEqual(helpers.pricingApplyStatusText('pending'), '待执行换档')
 assert.strictEqual(helpers.pricingApplyStatusText('blocked'), '受上下架安全规则阻塞');
 assert.strictEqual(helpers.pricingApplyStatusText('failed'), '上次换档失败');
 assert.strictEqual(helpers.pricingApplyStatusText('unknown'), '套餐数据暂不完整');
-assert.strictEqual(helpers.pricingTierLabel(1), '第 1 单价（完成 0 单）');
-assert.strictEqual(helpers.pricingTierLabel(2), '第 2 单价（完成 1 单后）');
-assert.strictEqual(helpers.pricingTierLabel(9), '第 4 单价（完成 3 单后）');
+assert.strictEqual(helpers.pricingTierLabel(1), '第 1 单时租价（完成 0 单）');
+assert.strictEqual(helpers.pricingTierLabel(2), '第 2 单时租价（完成 1 单后）');
+assert.strictEqual(helpers.pricingTierLabel(9), '第 4 单时租价（完成 3 单后）');
 assert.strictEqual(helpers.pricingLogStatusText('success'), '成功');
 assert.strictEqual(helpers.pricingLogStatusText('fail'), '失败');
 assert.strictEqual(helpers.pricingLogTriggerText('rule_saved'), '保存策略');
+assert.strictEqual(helpers.pricingLogTriggerText('package_ratio_saved'), '套餐倍率变更');
 assert.strictEqual(helpers.pricingLogTriggerText('daily_reset'), '06:00重置');
 assert.strictEqual(helpers.pricingLogTriggerText('unknown'), '阶梯调价');
 
@@ -149,5 +150,28 @@ assert.deepStrictEqual(Array.from(helpers.validatePricingDraft({ prices: ['', ' 
 assert.throws(() => helpers.validatePricingDraft({ prices: [1, 2, 3] }), /第 1 至第 4 单/);
 assert.throws(() => helpers.validatePricingDraft({ prices: [1, '', 3, 4] }), /全部填写，或全部清空/);
 assert.throws(() => helpers.validatePricingDraft({ prices: [1, 2, 0, 4] }), /大于 0/);
+assert.strictEqual(helpers.formatPricingRatio(4.50001), '4.5');
+const ratioChannel = {
+    package_keys: ['hour', 'p24', 'p72'],
+    package_labels: { hour: '时租', p24: '24小时', p72: '72小时' },
+    ratios: { hour: 1, p24: 4.5, p72: 13.5 }
+};
+assert.deepStrictEqual(JSON.parse(JSON.stringify(helpers.normalizePricingRatioDraft(ratioChannel))), {
+    hour: '1', p24: '4.5', p72: '13.5'
+});
+assert.deepStrictEqual(JSON.parse(JSON.stringify(helpers.validatePricingRatioDraft(ratioChannel, {
+    hour: '8', p24: '5.25', p72: '14'
+}))), { hour: 1, p24: 5.25, p72: 14 });
+assert.throws(() => helpers.validatePricingRatioDraft(ratioChannel, { p24: '0', p72: '14' }), /24小时倍率/);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(helpers.calculatePricingRatioPreview(
+    ratioChannel,
+    { hour: '1', p24: '4.5', p72: '13.5' },
+    '2.2'
+))), [
+    { key: 'hour', label: '时租', hour_price: 2.2, ratio: 1, price: 2.2 },
+    { key: 'p24', label: '24小时', hour_price: 2.2, ratio: 4.5, price: 9.9 },
+    { key: 'p72', label: '72小时', hour_price: 2.2, ratio: 13.5, price: 29.7 }
+]);
+assert.strictEqual(helpers.calculatePricingRatioPreview(ratioChannel, { p24: 'bad', p72: '13.5' }, '0')[1].price, 0);
 
 console.log('[OK] pricing_ladder_frontend_helpers_smoke_test passed');

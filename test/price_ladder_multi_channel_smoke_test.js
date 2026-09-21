@@ -163,7 +163,7 @@ async function main() {
     assert.strictEqual(view.selected_channel, 'uuzuhao');
     assert.strictEqual(view.channel_result.package_keys.length, 9);
     assert.strictEqual(view.channel_result.tiers[0].prices.p24, 28.8);
-    assert.strictEqual(view.channel_result.baseline_status, 'formula');
+    assert.strictEqual(view.channel_result.baseline_status, 'default');
     assert.strictEqual(view.channel_result.apply_status, 'manual');
 
     calls.length = 0;

@@ -201,7 +201,7 @@ async function main() {
             throw new Error(`渠道价格抽屉内容错误: ${JSON.stringify(desktopChannelState)}`);
         }
         await page.click('[data-pricing-channel-tab="zuhaowang"]');
-        await page.waitForFunction(() => document.getElementById('pricingChannelBody').textContent.includes('已知套餐：时租、日租'));
+        await page.waitForFunction(() => document.getElementById('pricingChannelBody').textContent.includes('当前账号未关联该渠道商品'));
         await page.click('[data-pricing-channel-tab="uuzuhao"]');
         await page.waitForSelector('#pricingChannelSheet .pricing-package-row.package-count-9.is-active');
         const uuzuhaoDesktop = await page.evaluate(() => ({
@@ -246,6 +246,51 @@ async function main() {
             fullPage: true
         });
         await page.click('#pricingChannelCloseBtn');
+
+        await page.goto(`${baseUrl}/?menu=pricing_ratios`, { waitUntil: 'networkidle0' });
+        await page.waitForSelector('#pricingRatioPanel [data-pricing-ratio-key="week"]');
+        await page.$eval('#pricingRatioPreviewHour', (input) => {
+            input.value = '3.25';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await page.waitForFunction(() => {
+            const item = document.querySelector('[data-pricing-ratio-result-key="week"]');
+            return item && item.textContent.includes('¥113.75');
+        });
+        const ratioDesktop = await page.evaluate(() => ({
+            tabs: Array.from(document.querySelectorAll('#pricingRatioChannelTabs [data-pricing-ratio-channel]')).map((node) => node.textContent.trim()),
+            keys: Array.from(document.querySelectorAll('#pricingRatioPanel [data-pricing-ratio-key]')).map((node) => node.dataset.pricingRatioKey),
+            hourDisabled: document.querySelector('[data-pricing-ratio-key="hour"]').disabled,
+            previewHour: document.getElementById('pricingRatioPreviewHour').value,
+            previewWeek: document.querySelector('[data-pricing-ratio-result-key="week"]').textContent.trim(),
+            resultIsText: document.querySelector('[data-pricing-ratio-result-key="week"]').tagName === 'SPAN',
+            documentWidth: document.documentElement.scrollWidth,
+            viewportWidth: window.innerWidth
+        }));
+        if (ratioDesktop.tabs.join(',') !== 'U号租,租号王,悠悠租号'
+            || ratioDesktop.keys.join(',') !== 'hour,night,day,week'
+            || !ratioDesktop.hourDisabled
+            || ratioDesktop.previewHour !== '3.25'
+            || !ratioDesktop.previewWeek.includes('¥113.75')
+            || !ratioDesktop.resultIsText
+            || ratioDesktop.documentWidth > ratioDesktop.viewportWidth) {
+            throw new Error(`桌面套餐倍率展示错误: ${JSON.stringify(ratioDesktop)}`);
+        }
+        await page.click('[data-pricing-ratio-channel="zuhaowang"]');
+        await page.waitForSelector('#pricingRatioPanel [data-pricing-ratio-key="p168"]');
+        await page.waitForFunction(() => {
+            const input = document.getElementById('pricingRatioPreviewHour');
+            const item = document.querySelector('[data-pricing-ratio-result-key="p168"]');
+            return input && input.value === '3.25' && item && item.textContent.includes('¥102.38');
+        });
+        await page.screenshot({
+            path: path.join(outputDir, 'pricing-ratio-desktop.png'),
+            fullPage: true
+        });
+
+        await page.goto(`${baseUrl}/?menu=pricing_uhaozu`, { waitUntil: 'networkidle0' });
+        await page.click('[data-pricing-game="和平精英"]');
+        await page.waitForSelector(targetCard);
 
         await page.setViewport({ width: 390, height: 640, deviceScaleFactor: 1 });
         await page.reload({ waitUntil: 'networkidle0' });
@@ -363,7 +408,38 @@ async function main() {
             path: path.join(outputDir, 'pricing-ladder-mobile.png'),
             fullPage: true
         });
-        console.log(JSON.stringify({ ok: true, savedState, desktopChannelState, uuzuhaoDesktop, layout, channelLayout, uuzuhaoMobile, outputDir }));
+        await page.goto(`${baseUrl}/?menu=pricing_ratios`, { waitUntil: 'networkidle0' });
+        await page.waitForSelector('#pricingRatioPanel [data-pricing-ratio-key="week"]');
+        await page.click('[data-pricing-ratio-channel="uuzuhao"]');
+        await page.waitForSelector('#pricingRatioPanel [data-pricing-ratio-key="p168"]');
+        const ratioMobile = await page.evaluate(() => {
+            const panel = document.getElementById('pricingRatioPanel');
+            const rect = panel.getBoundingClientRect();
+            const fields = Array.from(panel.querySelectorAll('.pricing-ratio-field')).map((node) => node.getBoundingClientRect());
+            const previewItems = Array.from(panel.querySelectorAll('.pricing-ratio-result')).map((node) => node.getBoundingClientRect());
+            return {
+                documentWidth: document.documentElement.scrollWidth,
+                viewportWidth: window.innerWidth,
+                panelLeft: rect.left,
+                panelRight: rect.right,
+                fieldsInside: fields.every((field) => field.left >= rect.left && field.right <= rect.right),
+                previewInside: previewItems.every((item) => item.left >= rect.left && item.right <= rect.right),
+                previewCount: previewItems.length,
+                previewHour: document.getElementById('pricingRatioPreviewHour').value,
+                resultTags: Array.from(panel.querySelectorAll('.pricing-ratio-result')).map((node) => node.tagName)
+            };
+        });
+        if (ratioMobile.documentWidth > ratioMobile.viewportWidth || ratioMobile.panelLeft < 0
+            || ratioMobile.panelRight > ratioMobile.viewportWidth || !ratioMobile.fieldsInside
+            || !ratioMobile.previewInside || ratioMobile.previewCount !== 9 || ratioMobile.previewHour !== '2'
+            || ratioMobile.resultTags.some((tag) => tag !== 'SPAN')) {
+            throw new Error(`移动端套餐倍率布局溢出: ${JSON.stringify(ratioMobile)}`);
+        }
+        await page.screenshot({
+            path: path.join(outputDir, 'pricing-ratio-mobile.png'),
+            fullPage: true
+        });
+        console.log(JSON.stringify({ ok: true, savedState, desktopChannelState, uuzuhaoDesktop, ratioDesktop, layout, channelLayout, uuzuhaoMobile, ratioMobile, outputDir }));
     } finally {
         if (browser) await browser.close();
         await new Promise((resolve) => server.close(resolve));

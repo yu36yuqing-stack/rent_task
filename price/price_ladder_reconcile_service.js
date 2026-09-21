@@ -310,6 +310,31 @@ async function enqueueMissingPriceLadderChannelRuntimes(userId, options = {}) {
     return { scanned: rules.length, initialized };
 }
 
+async function enqueueChannelPackageRatioChange(userId, channel, options = {}) {
+    const uid = Number(userId || 0);
+    const channelName = String(channel || '').trim();
+    if (!uid) throw new Error('user_id 不合法');
+    if (!channelName || !getPriceChannelAdapter(channelName)) throw new Error(`不支持的调价渠道: ${channelName || '-'}`);
+    const rules = await listAccountPriceLadderRulesByUser(uid);
+    if (rules.length === 0) return { scanned: 0, queued: 0 };
+    const accountRows = await listAllAccountsByUser(uid);
+    const accountMap = new Map(accountRows.map((row) => [accountKey(row.game_id, row.game_account), row]));
+    let queued = 0;
+    for (const rule of rules) {
+        const accountRow = accountMap.get(accountKey(rule.game_id, rule.game_account));
+        const adapter = getPriceChannelAdapter(channelName);
+        if (!accountRow || !adapter || !adapter.isAvailable(accountRow)) continue;
+        await initializePriceLadderRuntimeOnRuleSave(uid, rule, {
+            ...options,
+            account_row: accountRow,
+            channels: [channelName],
+            trigger_source: String(options.trigger_source || 'package_ratio_saved').trim() || 'package_ratio_saved'
+        });
+        queued += 1;
+    }
+    return { scanned: rules.length, queued };
+}
+
 async function getPriceLadderApplyBlock(userId, accountRow = {}) {
     void userId;
     void accountRow;
@@ -389,7 +414,7 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
         const tiers = Array.isArray(resolved.tiers) ? resolved.tiers : [];
         const desired = tiers.find((item) => item.tier === desiredTier) || null;
         const signature = desired ? priceSignature(desiredTier, desired.prices, rule.version, baselineVersion) : '';
-        const verifyRemote = ['daily_reset', 'rule_saved', 'feature_enabled_reconcile', 'channel_enabled_reconcile'].includes(runtimeTrigger);
+        const verifyRemote = ['daily_reset', 'rule_saved', 'package_ratio_saved', 'feature_enabled_reconcile', 'channel_enabled_reconcile'].includes(runtimeTrigger);
         if (desiredTier === appliedTier && !verifyRemote) {
             await upsertAccountPriceLadderRuntime(uid, {
                 ...runtime,
@@ -560,6 +585,7 @@ module.exports = {
     enqueuePriceLadderCandidates,
     enqueueFeatureActivationReconcile,
     enqueueMissingPriceLadderChannelRuntimes,
+    enqueueChannelPackageRatioChange,
     getPriceLadderApplyBlock,
     reconcilePendingPriceLaddersByUser,
     reconcilePriceLadderAfterOrderSync,

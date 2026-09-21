@@ -11,6 +11,12 @@ const {
     queryProductByAccount: queryUuzuhaoProductByAccount,
     _internals: { buildModifyPricePayload: buildUuzuhaoModifyPricePayload }
 } = require('../uuzuhao/uuzuhao_api');
+const {
+    getPriceTemplate: getZuhaowangPriceTemplate,
+    changePriceTemplate: changeZuhaowangPriceTemplate
+} = require('../zuhaowang/zuhaowang_price_api');
+const { _internals: { resolveDataIdByAccountAndGame } } = require('../zuhaowang/zuhaowang_api');
+const { normalizeZuhaowangAuthPayload } = require('../user/user');
 const { getUhaozuPricingDashboardByUser } = require('./price_h5_service');
 const {
     createPricePublishBatchLog,
@@ -72,6 +78,15 @@ async function getUuzuhaoAuthPayloadByUser(userId) {
         throw new Error('当前用户没有可用的 悠悠租号授权');
     }
     return row.auth_payload;
+}
+
+async function getZuhaowangAuthPayloadByUser(userId) {
+    const rows = await listUserPlatformAuth(userId, { with_payload: true });
+    const row = rows.find((item) => isAuthRowUsable(item, 'zuhaowang'));
+    if (!row || !row.auth_payload || typeof row.auth_payload !== 'object') {
+        throw new Error('当前用户没有可用的 租号王授权');
+    }
+    return normalizeZuhaowangAuthPayload(row.auth_payload);
 }
 
 function nowText() {
@@ -158,7 +173,15 @@ function pickUuzuhaoProductPriceSet(product = {}) {
 function normalizeUuzuhaoTargetPriceSet(prices = {}) {
     const hour = Number(prices.hour ?? prices.hourPrice ?? 0);
     if (!Number.isFinite(hour) || hour <= 0) throw new Error('悠悠租号目标时租价不合法');
-    const payload = buildUuzuhaoModifyPricePayload('price-preview', { hourPrice: hour });
+    const fieldByKey = {
+        p2: 'p2Price', p3: 'p3Price', p5: 'p5Price', p7: 'p7Price',
+        p9: 'p9Price', p10: 'p10Price', p24: 'p24Price', p168: 'p168Price'
+    };
+    const input = { hourPrice: hour };
+    for (const [key, field] of Object.entries(fieldByKey)) {
+        if (prices[key] !== undefined) input[field] = prices[key];
+    }
+    const payload = buildUuzuhaoModifyPricePayload('price-preview', input);
     return {
         hour: Number(payload.hourPrice),
         p2: Number(payload.p2Price),
@@ -170,6 +193,123 @@ function normalizeUuzuhaoTargetPriceSet(prices = {}) {
         p24: Number(payload.p24Price),
         p168: Number(payload.p168Price)
     };
+}
+
+function normalizeZuhaowangTemplate(template = {}) {
+    const data = template && template.data && typeof template.data === 'object' ? template.data : template;
+    const accountInfo = data && data.accountInfo && typeof data.accountInfo === 'object' ? data.accountInfo : {};
+    const selfTemplate = data && data.selfTemplate && typeof data.selfTemplate === 'object' ? data.selfTemplate : {};
+    const shortRent = selfTemplate.shortRent && typeof selfTemplate.shortRent === 'object' ? selfTemplate.shortRent : null;
+    const longRent = selfTemplate.longRent && typeof selfTemplate.longRent === 'object' ? selfTemplate.longRent : null;
+    const shortOpen = Boolean(shortRent && shortRent.isOpen === true);
+    const longOpen = Boolean(longRent && longRent.isOpen === true);
+    if (Number(accountInfo.priceTemplateType || 0) !== 1) throw new Error('租号王当前仅支持自主定价模板');
+    if (!shortOpen && !longOpen) throw new Error('租号王商品未开启时租或日租');
+    const prices = {
+        hour: shortOpen ? Number(Number(shortRent.obtainPrice || 0).toFixed(2)) : 0,
+        p24: 0,
+        p72: 0,
+        p168: 0
+    };
+    for (const grade of Array.isArray(longRent && longRent.grades) ? longRent.grades : []) {
+        const key = `p${String(grade && grade.key || '').trim()}`;
+        if (Object.prototype.hasOwnProperty.call(prices, key)) {
+            prices[key] = Number(Number(grade.currentObtainPrice ?? grade.obtainPrice ?? 0).toFixed(2)) || 0;
+        }
+    }
+    return {
+        data,
+        account_info: accountInfo,
+        self_template: selfTemplate,
+        short_rent: shortRent,
+        long_rent: longRent,
+        short_open: shortOpen,
+        long_open: longOpen,
+        rent_mode: shortOpen && longOpen ? 'hour_and_day' : (shortOpen ? 'hour_only' : 'day_only'),
+        prices
+    };
+}
+
+function normalizeZuhaowangTargetPriceSet(prices = {}) {
+    const keys = ['hour', 'p24', 'p72', 'p168'];
+    const out = {};
+    for (const key of keys) {
+        const value = Number(prices[key] || 0);
+        if (!Number.isFinite(value) || value <= 0) throw new Error(`租号王目标${key}价格不合法`);
+        out[key] = Number(value.toFixed(2));
+    }
+    return out;
+}
+
+function buildZuhaowangChangePriceParams(dataId, normalizedTemplate = {}, targetPrices = {}) {
+    const assertRange = (value, minValue, maxValue, label) => {
+        const price = Number(value);
+        const min = Number(minValue || 0);
+        const max = Number(maxValue || 0);
+        if (min > 0 && price < min) throw new Error(`租号王${label}不能低于 ${min} 元`);
+        if (max > 0 && price > max) throw new Error(`租号王${label}不能高于 ${max} 元`);
+    };
+    const discountGroups = normalizedTemplate.short_rent && Array.isArray(normalizedTemplate.short_rent.discounts)
+        ? normalizedTemplate.short_rent.discounts
+        : [];
+    const selectedDiscount = discountGroups.find((item) => Number(item && item.selected || 0) === 1)
+        || discountGroups[0]
+        || null;
+    const shortDetails = Array.isArray(selectedDiscount && selectedDiscount.details)
+        ? selectedDiscount.details
+        : [];
+    const checkedMinHour = normalizedTemplate.short_rent && Array.isArray(normalizedTemplate.short_rent.minHours)
+        ? normalizedTemplate.short_rent.minHours.find((item) => item && item.isChecked === true)
+        : null;
+    if (normalizedTemplate.short_open) {
+        assertRange(
+            targetPrices.hour,
+            normalizedTemplate.short_rent.minObtainPrice,
+            normalizedTemplate.short_rent.maxObtainPrice,
+            '时租到手价'
+        );
+    }
+    const shortRent = normalizedTemplate.short_open ? {
+        discount: shortDetails.map((item) => ({
+            discount: Number(item.discount),
+            hour: Number(item.hour)
+        })),
+        minHour: Number(checkedMinHour && checkedMinHour.hour || 1),
+        obtainPrice: Number(targetPrices.hour),
+        isOpen: true,
+        key: String(selectedDiscount && selectedDiscount.key || '1')
+    } : null;
+    const grades = Array.isArray(normalizedTemplate.long_rent && normalizedTemplate.long_rent.grades)
+        ? normalizedTemplate.long_rent.grades
+        : [];
+    const longRent = normalizedTemplate.long_open ? {
+        grades: grades.map((grade) => {
+            const key = String(grade && grade.key || '').trim();
+            const targetKey = `p${key}`;
+            const value = Number(targetPrices[targetKey] || 0);
+            if (!Number.isFinite(value) || value <= 0) throw new Error(`租号王 ${key} 小时套餐目标价格不合法`);
+            assertRange(value, grade.minObtainPrice, grade.maxObtainPrice, `${key}小时套餐价格`);
+            return { obtainPrice: String(Number(value.toFixed(2))), key };
+        }),
+        isOpen: true
+    } : null;
+    const out = {
+        dataId: String(dataId || '').trim(),
+        priceTemplateType: String(normalizedTemplate.account_info.priceTemplateType ?? 1),
+        selfTemplate: { shortRent, longRent }
+    };
+    const planId = normalizedTemplate.data && normalizedTemplate.data.pricePlanInfo
+        ? normalizedTemplate.data.pricePlanInfo.planId
+        : null;
+    if (planId !== null && planId !== undefined && String(planId).trim()) out.planId = planId;
+    return out;
+}
+
+function sameZuhaowangActivePriceSet(target = {}, actual = {}, mode = '') {
+    const keys = mode === 'day_only'
+        ? ['p24', 'p72', 'p168']
+        : (mode === 'hour_only' ? ['hour'] : ['hour', 'p24', 'p72', 'p168']);
+    return keys.every((key) => Number(Number(target[key] || 0).toFixed(2)) === Number(Number(actual[key] || 0).toFixed(2)));
 }
 
 async function publishUhaozuAccountPriceSetByUser(userId, input = {}, options = {}) {
@@ -465,7 +605,17 @@ async function publishUuzuhaoAccountPriceSetByUser(userId, input = {}, options =
 
         await ensureBatch();
         failureStage = 'modify';
-        const modifyInput = { hourPrice: targetPrices.hour };
+        const modifyInput = {
+            hourPrice: targetPrices.hour,
+            p2Price: targetPrices.p2,
+            p3Price: targetPrices.p3,
+            p5Price: targetPrices.p5,
+            p7Price: targetPrices.p7,
+            p9Price: targetPrices.p9,
+            p10Price: targetPrices.p10,
+            p24Price: targetPrices.p24,
+            p168Price: targetPrices.p168
+        };
         if (beforePrices.min_rent_hour > 0) modifyInput.minRentHour = beforePrices.min_rent_hour;
         modifyOutput = await modifyPrice(goodsId, modifyInput, { auth });
         failureStage = 'query_after';
@@ -590,6 +740,244 @@ async function publishUuzuhaoAccountPriceSetByUser(userId, input = {}, options =
             message,
             error_detail: errorDetail
         };
+    }
+}
+
+async function publishZuhaowangAccountPriceSetByUser(userId, input = {}, options = {}) {
+    const uid = Number(userId || 0);
+    if (!uid) throw new Error('user_id 不合法');
+    const gameId = String(input.game_id || '').trim();
+    const gameName = String(input.game_name || '').trim();
+    const gameAccount = String(input.game_account || '').trim();
+    if (!gameId || !gameName || !gameAccount) throw new Error('调价账号信息不完整');
+    const targetPrices = normalizeZuhaowangTargetPriceSet(input.prices || {});
+    const accountRows = await listAllAccountsByUser(uid);
+    const row = accountRows.find((item) => (
+        String(item.game_id || '').trim() === gameId
+        && String(item.game_account || '').trim() === gameAccount
+    ));
+    if (!row) throw new Error('调价账号不存在');
+    const info = row.channel_prd_info && row.channel_prd_info.zuhaowang && typeof row.channel_prd_info.zuhaowang === 'object'
+        ? row.channel_prd_info.zuhaowang
+        : {};
+
+    const getTemplate = options.get_template || getZuhaowangPriceTemplate;
+    const changeTemplate = options.change_template || changeZuhaowangPriceTemplate;
+    const resolveDataId = options.resolve_data_id || resolveDataIdByAccountAndGame;
+    const batchId = String(input.batch_id || buildPublishBatchId(uid, 'zuhaowang-ladder')).trim();
+    const triggerSource = String(input.trigger_source || 'price_ladder').trim();
+    const forcePublish = input.force_publish === true;
+    const startedAt = nowText();
+    let batchCreated = false;
+    let goodsId = String(input.goods_id || info.prd_id || info.data_id || '').trim();
+    let beforeTemplate = null;
+    let beforeNormalized = null;
+    let afterTemplate = null;
+    let afterNormalized = null;
+    let requestParams = null;
+    let modifyOutput = null;
+    let failureStage = 'authorization';
+    const ensureBatch = async () => {
+        if (batchCreated) return;
+        await createPricePublishBatchLog({
+            batch_id: batchId,
+            user_id: uid,
+            channel: 'zuhaowang',
+            game_name: gameName,
+            trigger_source: triggerSource,
+            request_snapshot: {
+                game_id: gameId,
+                game_account: gameAccount,
+                tier: Number(input.tier || 0),
+                prices: targetPrices,
+                force_publish: forcePublish
+            },
+            total_count: 1,
+            success_count: 0,
+            fail_count: 0,
+            status: 'running',
+            start_time: startedAt,
+            desc: 'publish account price ladder to zuhaowang'
+        });
+        batchCreated = true;
+    };
+
+    try {
+        const auth = options.auth || await getZuhaowangAuthPayloadByUser(uid);
+        const channelGameId = Number(info.game_id || input.channel_game_id || 0);
+        if (!goodsId) {
+            failureStage = 'resolve_data_id';
+            goodsId = String(await resolveDataId(gameAccount, channelGameId, auth) || '').trim();
+        }
+        if (!goodsId) throw new Error('缺少 租号王 dataId');
+
+        failureStage = 'query_before';
+        try {
+            beforeTemplate = await getTemplate(goodsId, auth, { user_id: uid });
+        } catch (firstError) {
+            failureStage = 'refresh_data_id';
+            const refreshedId = String(await resolveDataId(gameAccount, channelGameId, auth) || '').trim();
+            if (!refreshedId || refreshedId === goodsId) throw firstError;
+            goodsId = refreshedId;
+            failureStage = 'query_before';
+            beforeTemplate = await getTemplate(goodsId, auth, { user_id: uid });
+        }
+        beforeNormalized = normalizeZuhaowangTemplate(beforeTemplate);
+        if (!forcePublish && sameZuhaowangActivePriceSet(targetPrices, beforeNormalized.prices, beforeNormalized.rent_mode)) {
+            return {
+                ok: true,
+                changed: false,
+                batch_id: '',
+                goods_id: goodsId,
+                prices: beforeNormalized.prices,
+                rent_mode: beforeNormalized.rent_mode,
+                reason: 'already_matches'
+            };
+        }
+
+        await ensureBatch();
+        requestParams = buildZuhaowangChangePriceParams(goodsId, beforeNormalized, targetPrices);
+        failureStage = 'modify';
+        let modifyError = null;
+        try {
+            modifyOutput = await changeTemplate(requestParams, auth, { user_id: uid });
+        } catch (error) {
+            modifyError = error;
+        }
+        failureStage = 'query_after';
+        afterTemplate = await getTemplate(goodsId, auth, { user_id: uid });
+        afterNormalized = normalizeZuhaowangTemplate(afterTemplate);
+        failureStage = 'verify_after';
+        if (!sameZuhaowangActivePriceSet(targetPrices, afterNormalized.prices, beforeNormalized.rent_mode)) {
+            if (modifyError) throw modifyError;
+            throw new Error(`租号王价格回读不一致: target=${JSON.stringify(targetPrices)} actual=${JSON.stringify(afterNormalized.prices)}`);
+        }
+
+        await upsertUserGameAccount({
+            user_id: uid,
+            game_account: gameAccount,
+            game_id: gameId,
+            game_name: gameName,
+            account_remark: String(row.account_remark || '').trim(),
+            channel_prd_info: {
+                zuhaowang: {
+                    ...info,
+                    prd_id: goodsId,
+                    rent_mode: afterNormalized.rent_mode,
+                    price_template_type: String(afterNormalized.account_info.priceTemplateType ?? ''),
+                    hourPrice: afterNormalized.prices.hour,
+                    p24Price: afterNormalized.prices.p24,
+                    p72Price: afterNormalized.prices.p72,
+                    p168Price: afterNormalized.prices.p168
+                }
+            },
+            desc: 'publish account price ladder to zuhaowang'
+        });
+        await createPricePublishItemLog({
+            batch_id: batchId,
+            user_id: uid,
+            channel: 'zuhaowang',
+            game_name: gameName,
+            game_account: gameAccount,
+            goods_id: goodsId,
+            publish_status: 'success',
+            before_data: sanitizePriceLogPayload({
+                template: beforeTemplate,
+                prices: beforeNormalized.prices,
+                rent_mode: beforeNormalized.rent_mode
+            }),
+            request_data: sanitizePriceLogPayload({
+                biz_params: requestParams,
+                target_prices: targetPrices,
+                rent_mode: beforeNormalized.rent_mode
+            }),
+            response_data: sanitizePriceLogPayload({
+                stage: 'verified',
+                verification_status: 'full',
+                channel_response: modifyOutput,
+                recovered_after_modify_error: Boolean(modifyError)
+            }),
+            after_data: sanitizePriceLogPayload({
+                template: afterTemplate,
+                prices: afterNormalized.prices,
+                rent_mode: afterNormalized.rent_mode
+            }),
+            price_before_hour: beforeNormalized.prices.hour,
+            price_before_day: beforeNormalized.prices.p24,
+            price_target_hour: beforeNormalized.short_open ? targetPrices.hour : 0,
+            price_target_day: targetPrices.p24,
+            price_after_hour: afterNormalized.prices.hour,
+            price_after_day: afterNormalized.prices.p24,
+            start_time: startedAt,
+            end_time: nowText(),
+            desc: 'publish account price ladder item to zuhaowang'
+        });
+        await updatePricePublishBatchLog(batchId, {
+            total_count: 1,
+            success_count: 1,
+            fail_count: 0,
+            status: 'success',
+            end_time: nowText(),
+            desc: 'publish account price ladder to zuhaowang completed'
+        });
+        return {
+            ok: true,
+            changed: true,
+            batch_id: batchId,
+            goods_id: goodsId,
+            prices: afterNormalized.prices,
+            rent_mode: afterNormalized.rent_mode,
+            recovered_after_modify_error: Boolean(modifyError)
+        };
+    } catch (error) {
+        const message = String(error && error.message ? error.message : error);
+        await ensureBatch();
+        const errorDetail = sanitizePriceLogPayload({
+            stage: failureStage,
+            code: String(error && error.code || '').trim(),
+            message,
+            channel_response: error && error.zuhaowang_response ? error.zuhaowang_response : null
+        });
+        await createPricePublishItemLog({
+            batch_id: batchId,
+            user_id: uid,
+            channel: 'zuhaowang',
+            game_name: gameName,
+            game_account: gameAccount,
+            goods_id: goodsId,
+            publish_status: 'fail',
+            fail_message: message,
+            before_data: sanitizePriceLogPayload(beforeNormalized ? {
+                template: beforeTemplate,
+                prices: beforeNormalized.prices,
+                rent_mode: beforeNormalized.rent_mode
+            } : beforeTemplate),
+            request_data: sanitizePriceLogPayload({ biz_params: requestParams, target_prices: targetPrices }),
+            response_data: errorDetail,
+            after_data: sanitizePriceLogPayload(afterNormalized ? {
+                template: afterTemplate,
+                prices: afterNormalized.prices,
+                rent_mode: afterNormalized.rent_mode
+            } : afterTemplate),
+            price_before_hour: Number(beforeNormalized && beforeNormalized.prices.hour || 0),
+            price_before_day: Number(beforeNormalized && beforeNormalized.prices.p24 || 0),
+            price_target_hour: Number(beforeNormalized && beforeNormalized.short_open ? targetPrices.hour : 0),
+            price_target_day: targetPrices.p24,
+            price_after_hour: Number(afterNormalized && afterNormalized.prices.hour || 0),
+            price_after_day: Number(afterNormalized && afterNormalized.prices.p24 || 0),
+            start_time: startedAt,
+            end_time: nowText(),
+            desc: 'publish account price ladder item to zuhaowang failed'
+        });
+        await updatePricePublishBatchLog(batchId, {
+            total_count: 1,
+            success_count: 0,
+            fail_count: 1,
+            status: 'fail',
+            end_time: nowText(),
+            desc: 'publish account price ladder to zuhaowang failed'
+        });
+        return { ok: false, changed: false, batch_id: batchId, goods_id: goodsId, message, error_detail: errorDetail };
     }
 }
 
@@ -820,6 +1208,7 @@ module.exports = {
     publishUhaozuPricingByUser,
     publishUhaozuAccountPriceSetByUser,
     publishUuzuhaoAccountPriceSetByUser,
+    publishZuhaowangAccountPriceSetByUser,
     listPricePublishBatchLogsByUser,
     getPricePublishBatchLogByBatchId,
     listPricePublishItemLogsByBatchId,
@@ -836,6 +1225,11 @@ module.exports = {
         normalizeUuzuhaoTargetPriceSet,
         sleep,
         getUhaozuAuthPayloadByUser,
-        getUuzuhaoAuthPayloadByUser
+        getUuzuhaoAuthPayloadByUser,
+        getZuhaowangAuthPayloadByUser,
+        normalizeZuhaowangTemplate,
+        normalizeZuhaowangTargetPriceSet,
+        buildZuhaowangChangePriceParams,
+        sameZuhaowangActivePriceSet
     }
 };

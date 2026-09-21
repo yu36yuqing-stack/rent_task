@@ -288,8 +288,8 @@ async function main() {
     });
     assert.strictEqual(channelResult.current_tier, 2);
     assert.strictEqual(channelResult.channels.length, 3);
-    assert.deepStrictEqual(channelResult.channels.find((item) => item.channel === 'zuhaowang').package_keys, ['hour', 'day']);
-    assert.strictEqual(channelResult.channel_result.baseline_status, 'saved');
+    assert.deepStrictEqual(channelResult.channels.find((item) => item.channel === 'zuhaowang').package_keys, ['hour', 'p24', 'p72', 'p168']);
+    assert.strictEqual(channelResult.channel_result.baseline_status, 'default');
     assert.deepStrictEqual(channelResult.channel_result.tiers[1].prices, {
         hour: 3.5,
         night: 14,
@@ -349,8 +349,8 @@ async function main() {
         game_name: '和平精英',
         game_account: 'hpjy-incomplete'
     });
-    assert.strictEqual(incompleteResult.channel_result.baseline_status, 'unavailable');
-    assert.strictEqual(incompleteResult.channel_result.tiers.length, 0);
+    assert.strictEqual(incompleteResult.channel_result.baseline_status, 'default');
+    assert.strictEqual(incompleteResult.channel_result.tiers.length, 4);
     assert.strictEqual(await getAccountPriceLadderRule(8, '2', 'missing'), null);
     assert.strictEqual((await listAccountPriceLadderRules(0, '2')).length, 0);
     assert.strictEqual((await listAccountPriceLadderRules(8, '')).length, 0);

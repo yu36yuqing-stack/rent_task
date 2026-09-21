@@ -355,6 +355,9 @@ module.exports = {
         buildGoodsEncryptedPayload,
         buildChangeStatusEncryptedPayload,
         mapGoodsStatus,
-        inferGameNameByGameId
+        inferGameNameByGameId,
+        resolveDataIdByAccountAndGame,
+        resolveAuth,
+        curlRequest
     }
 };
