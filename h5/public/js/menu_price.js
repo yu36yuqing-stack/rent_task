@@ -93,14 +93,15 @@ function closePricingChannelSheet() {
   nodes.sheet.setAttribute('aria-hidden', 'true');
 }
 
-function renderPricingPackageValues(prices = {}) {
-  return ['hour', 'night', 'day', 'week'].map((key) => `
+function renderPricingPackageValues(prices = {}, packageKeys = ['hour', 'night', 'day', 'week']) {
+  return packageKeys.map((key) => `
     <span class="pricing-package-value">${escapePricingHtml(formatPricingResultMoney(prices[key]))}</span>
   `).join('');
 }
 
 function pricingApplyStatusText(status) {
   if (status === 'effective') return '渠道价格与当前档一致';
+  if (status === 'effective_partial') return '时租价格与当前档一致';
   if (status === 'manual') return '渠道手工价（不会自动纠正）';
   if (status === 'pending') return '待执行换档';
   if (status === 'blocked') return '受上下架安全规则阻塞';
@@ -141,7 +142,7 @@ function pricingLogTriggerText(source) {
 
 function formatPricingErrorDetail(log = {}) {
   const detail = log.error_detail && typeof log.error_detail === 'object' ? log.error_detail : null;
-  const lines = [String(log.fail_message || 'U号租未返回明确错误信息')];
+  const lines = [String(log.fail_message || '渠道未返回明确错误信息')];
   if (detail) {
     if (detail.stage) lines.push(`失败阶段：${detail.stage}`);
     if (detail.code) lines.push(`错误代码：${detail.code}`);
@@ -149,14 +150,23 @@ function formatPricingErrorDetail(log = {}) {
       const raw = JSON.stringify(detail.uhaozu_response, null, 2);
       lines.push(`U号租返回：\n${raw.length > 4000 ? `${raw.slice(0, 4000)}\n...` : raw}`);
     }
+    if (detail.channel_response) {
+      const raw = JSON.stringify(detail.channel_response, null, 2);
+      lines.push(`渠道返回：\n${raw.length > 4000 ? `${raw.slice(0, 4000)}\n...` : raw}`);
+    }
   }
   return lines.join('\n');
 }
 
 function renderPricingChannelLogs(result = {}) {
   const logs = Array.isArray(result.adjustment_logs) ? result.adjustment_logs : [];
+  const label = String(result.label || 'U号租');
+  const packageKeys = Array.isArray(result.package_keys) && result.package_keys.length
+    ? result.package_keys
+    : ['hour', 'night', 'day', 'week'];
+  const packageLabels = result.package_labels || { hour: '时租', night: '包夜', day: '包天', week: '包周' };
   if (logs.length === 0) {
-    return '<div class="pricing-channel-empty">当前账号暂无 U号租调价记录。</div>';
+    return `<div class="pricing-channel-empty">当前账号暂无 ${escapePricingHtml(label)}调价记录。</div>`;
   }
   return `<div class="pricing-error-log-list">${logs.map((log) => `
     <article class="pricing-error-log-item ${log.publish_status === 'success' ? 'is-success' : 'is-failed'}">
@@ -164,26 +174,28 @@ function renderPricingChannelLogs(result = {}) {
         <span><strong>${escapePricingHtml(pricingLogStatusText(log.publish_status))}</strong> · ${escapePricingHtml(pricingLogTriggerText(log.trigger_source))}</span>
         <span class="pricing-error-log-tools">
           <span>${escapePricingHtml(log.create_date || '-')}</span>
-          ${log.publish_status === 'fail' ? `<button class="pricing-log-detail-btn" data-pricing-error-detail="${Number(log.id || 0)}" type="button" title="查看U号租错误详情" aria-label="查看U号租错误详情">?</button>` : ''}
+          ${log.publish_status === 'fail' ? `<button class="pricing-log-detail-btn" data-pricing-error-detail="${Number(log.id || 0)}" type="button" title="查看渠道错误详情" aria-label="查看渠道错误详情">?</button>` : ''}
         </span>
       </div>
-      ${log.publish_status === 'fail' ? `<p>${escapePricingHtml(log.fail_message || 'U号租未返回明确错误信息')}</p>` : ''}
+      ${log.publish_status === 'fail' ? `<p>${escapePricingHtml(log.fail_message || '渠道未返回明确错误信息')}</p>` : ''}
       <div class="pricing-error-log-prices">
         调整前：时租 ${escapePricingHtml(formatPricingResultMoney(log.before_prices && log.before_prices.hour))} ·
         目标：时租 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.hour))} ·
         调整后：时租 ${escapePricingHtml(formatPricingResultMoney(log.remote_prices && log.remote_prices.hour))}
       </div>
-      <div class="pricing-error-log-prices">目标套餐：包夜 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.night))} · 包天 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.day))} · 包周 ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices.week))}</div>
+      <div class="pricing-error-log-prices">目标套餐：${packageKeys.filter((key) => key !== 'hour').map((key) => `${escapePricingHtml(packageLabels[key] || key)} ${escapePricingHtml(formatPricingResultMoney(log.target_prices && log.target_prices[key]))}`).join(' · ')}</div>
     </article>
   `).join('')}</div>`;
 }
 
-function renderUhaozuChannelResult(payload = {}) {
-  const result = payload.channel_result || {};
+function renderPricingChannelResult(payload = {}, result = {}) {
   const sheetState = ensurePricingLadderState().channel_sheet;
   const remote = result.remote_current || {};
   const tiers = Array.isArray(result.tiers) ? result.tiers : [];
   const logs = Array.isArray(result.adjustment_logs) ? result.adjustment_logs : [];
+  const packageKeys = Array.isArray(result.package_keys) && result.package_keys.length ? result.package_keys : ['hour'];
+  const packageLabels = result.package_labels || {};
+  const packageCountClass = `package-count-${Math.min(9, Math.max(1, packageKeys.length))}`;
   const viewTabs = `
     <div class="orders-tabs pricing-result-tabs">
       <button class="orders-tab header-tab ${sheetState.view === 'result' ? 'active' : ''}" data-pricing-result-view="result" type="button">套餐结果</button>
@@ -191,35 +203,38 @@ function renderUhaozuChannelResult(payload = {}) {
     </div>
   `;
   if (sheetState.view === 'logs') return `${viewTabs}${renderPricingChannelLogs(result)}`;
+  if (result.available === false) {
+    return `${viewTabs}<div class="pricing-channel-empty"><strong>${escapePricingHtml(result.label || '该渠道')}</strong><span>当前账号未关联该渠道商品。</span></div>`;
+  }
   const tierRows = tiers.map((tier) => `
-    <div class="pricing-package-row ${Number(tier.tier) === Number(payload.current_tier) ? 'is-active' : ''}">
-      <strong>${escapePricingHtml(pricingTierLabel(tier.tier))}${Number(tier.tier) === Number(payload.current_tier) ? ' · 当前使用' : ''}</strong>
-      ${renderPricingPackageValues(tier.prices)}
+    <div class="pricing-package-row ${packageCountClass} ${Number(tier.tier) === Number(result.current_tier || payload.current_tier) ? 'is-active' : ''}">
+      <strong>${escapePricingHtml(pricingTierLabel(tier.tier))}${Number(tier.tier) === Number(result.current_tier || payload.current_tier) ? ' · 当前使用' : ''}</strong>
+      ${renderPricingPackageValues(tier.prices, packageKeys)}
     </div>
   `).join('');
   return `
     ${viewTabs}
     <div class="pricing-channel-current">
       <div>
-        <span>U号租当前渠道价格（最近同步）</span>
+        <span>${escapePricingHtml(result.label || '渠道')}当前价格（最近同步）</span>
         <strong>${escapePricingHtml(pricingApplyStatusText(result.apply_status))}</strong>
       </div>
       <div class="pricing-package-line">
-        <span>时租 ${escapePricingHtml(formatPricingResultMoney(remote.hour))}</span>
-        <span>包夜 ${escapePricingHtml(formatPricingResultMoney(remote.night))}</span>
-        <span>包天 ${escapePricingHtml(formatPricingResultMoney(remote.day))}</span>
-        <span>包周 ${escapePricingHtml(formatPricingResultMoney(remote.week))}</span>
+        ${packageKeys.filter((key) => Number(remote[key] || 0) > 0).map((key) => `<span>${escapePricingHtml(packageLabels[key] || key)} ${escapePricingHtml(formatPricingResultMoney(remote[key]))}</span>`).join('') || '<span>暂无可回读价格</span>'}
       </div>
     </div>
     ${tiers.length ? `
-      <div class="pricing-package-table">
-        <div class="pricing-package-row pricing-package-header">
-          <strong>阶梯价格</strong><span>时租</span><span>包夜</span><span>包天</span><span>包周</span>
+      <div class="pricing-package-scroll">
+        <div class="pricing-package-table ${packageCountClass}">
+          <div class="pricing-package-row pricing-package-header ${packageCountClass}">
+            <strong>阶梯价格</strong>${packageKeys.map((key) => `<span>${escapePricingHtml(packageLabels[key] || key)}</span>`).join('')}
+          </div>
+          ${tierRows}
         </div>
-        ${tierRows}
       </div>
-    ` : '<div class="pricing-channel-empty">U号租当前套餐价格不完整，暂时无法计算四档套餐结果。</div>'}
-    <div class="pricing-channel-meta">商品 ${escapePricingHtml(result.goods_id || '未关联')}</div>
+    ` : `<div class="pricing-channel-empty">${escapePricingHtml(result.label || '渠道')}当前套餐价格不完整，暂时无法计算四档套餐结果。</div>`}
+    <div class="pricing-channel-meta">商品 ${escapePricingHtml(result.goods_id || '未关联')}${result.min_rent_hour ? ` · 起租 ${Number(result.min_rent_hour)} 小时` : ''}</div>
+    ${result.verification_note ? `<div class="pricing-channel-meta">${escapePricingHtml(result.verification_note)}</div>` : ''}
   `;
 }
 
@@ -236,7 +251,7 @@ function renderPricingChannelSheet() {
     : [
         { channel: 'uhaozu', label: 'U号租', enabled: true },
         { channel: 'zuhaowang', label: '租号玩', enabled: false },
-        { channel: 'uuzuhao', label: '悠悠租号', enabled: false }
+        { channel: 'uuzuhao', label: '悠悠租号', enabled: true }
       ];
   nodes.tabs.innerHTML = channels.map((channel) => `
     <button class="orders-tab header-tab ${sheetState.channel === channel.channel ? 'active' : ''}"
@@ -259,7 +274,9 @@ function renderPricingChannelSheet() {
         : '套餐能力待接口确认';
       nodes.body.innerHTML = `<div class="pricing-channel-empty"><strong>${escapePricingHtml(selected && selected.label || '该渠道')}</strong><span>一期暂未启用自动改价。${escapePricingHtml(packageText)}</span></div>`;
     } else {
-      nodes.body.innerHTML = renderUhaozuChannelResult(sheetState.payload || {});
+      const results = sheetState.payload && sheetState.payload.channel_results || {};
+      const result = results[sheetState.channel] || sheetState.payload && sheetState.payload.channel_result || selected;
+      nodes.body.innerHTML = renderPricingChannelResult(sheetState.payload || {}, result);
     }
   }
   Array.from(nodes.body.querySelectorAll('[data-pricing-result-view]')).forEach((button) => {
@@ -272,7 +289,7 @@ function renderPricingChannelSheet() {
     button.onclick = () => {
       const id = Number(button.getAttribute('data-pricing-error-detail') || 0);
       const logs = sheetState.payload && sheetState.payload.channel_result
-        ? sheetState.payload.channel_result.adjustment_logs || []
+        ? (((sheetState.payload.channel_results || {})[sheetState.channel] || sheetState.payload.channel_result).adjustment_logs || [])
         : [];
       const log = logs.find((item) => Number(item.id || 0) === id);
       if (log) showToast(formatPricingErrorDetail(log), 0, 'detail');
@@ -689,5 +706,7 @@ window.__pricingLadderTest = {
   pricingLogStatusText,
   pricingLogTriggerText,
   formatPricingErrorDetail,
-  renderPricingChannelLogs
+  renderPricingChannelLogs,
+  renderPricingChannelResult,
+  renderPricingPackageValues
 };

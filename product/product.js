@@ -94,7 +94,9 @@ function buildPlatformPrdInfo(platform, row = {}) {
             off_type: String(raw.offType || '').trim().toUpperCase(),
             sale_status: raw.saleStatus === undefined ? null : Number(raw.saleStatus),
             product_status: raw.productStatus === undefined ? null : Number(raw.productStatus),
-            tab_key: String(raw._tabKey || '').trim().toUpperCase()
+            tab_key: String(raw._tabKey || '').trim().toUpperCase(),
+            hourPrice: Number(raw.productHourRentPrice ?? raw.hourPrice ?? raw.hour_price ?? raw.rentalByHour ?? 0) || 0,
+            minRentHour: Number(raw.minRentHour ?? raw.min_rent_hour ?? 0) || 0
         };
     }
     if (platform === PLATFORM_5E) {

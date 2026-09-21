@@ -7,12 +7,23 @@ const TIMEOUT_MS = 15000;
 const PATH_LIST = '/api/youpin/rent-connector/product/v1/list';
 const PATH_ON = '/api/youpin/rent-connector/product/v1/on';
 const PATH_OFF = '/api/youpin/rent-connector/product/v1/off';
+const PATH_MODIFY_PRICE = '/api/youpin/rent-connector/product/v1/modifyPrice';
 const PATH_GAME_ONLINE = '/api/youpin/rent-connector/product/v1/game/online';
 const PATH_FORBIDDEN_PLAY = '/api/youpin/rent-connector/product/v1/forbidden/play';
 const PATH_STEAM_GUARD_CODE = '/api/youpin/rent-connector/product/v1/steamGuardCode';
 const PATH_AUTH_REVOKE = '/api/youpin/rent-connector/product/v1/interconnect/auth/revoke';
 const PATH_ORDER_LIST = '/api/youpin/rent-connector/order/v1/list';
 const PATH_ORDER_DETAIL = '/api/youpin/rent-connector/order/v1/detail';
+const PACKAGE_PRICE_RULES = Object.freeze([
+    { field: 'p2Price', hours: 2, discount: 0.9 },
+    { field: 'p3Price', hours: 3, discount: 0.8 },
+    { field: 'p5Price', hours: 5, discount: 0.7 },
+    { field: 'p7Price', hours: 7, discount: 0.7 },
+    { field: 'p9Price', hours: 9, discount: 0.7 },
+    { field: 'p10Price', hours: 10, discount: 0.7 },
+    { field: 'p24Price', hours: 24, discount: 0.6 },
+    { field: 'p168Price', hours: 168, discount: 0.6 }
+]);
 
 function toSignValue(value) {
     if (value === null || value === undefined) return '';
@@ -24,9 +35,11 @@ function toSignValue(value) {
     return String(value);
 }
 
-function createSign(params, appSecret) {
+function createSign(params, appSecret, options = {}) {
+    const excludedKeys = new Set(Array.isArray(options.exclude_keys) ? options.exclude_keys : []);
     const keys = Object.keys(params)
         .filter(k => k !== 'sign')
+        .filter(k => !excludedKeys.has(k))
         .filter(k => {
             const v = params[k];
             if (v === null || v === undefined) return false;
@@ -52,7 +65,7 @@ function resolveAuth(auth = {}) {
     return cfg;
 }
 
-async function postSigned(path, businessParams = {}, auth = {}) {
+async function postSigned(path, businessParams = {}, auth = {}, options = {}) {
     const cfg = resolveAuth(auth);
     const timestamp = Math.floor(Date.now() / 1000);
     const payload = {
@@ -60,7 +73,9 @@ async function postSigned(path, businessParams = {}, auth = {}) {
         appKey: cfg.app_key,
         timestamp
     };
-    payload.sign = createSign(payload, cfg.app_secret);
+    payload.sign = createSign(payload, cfg.app_secret, {
+        exclude_keys: options.exclude_sign_fields
+    });
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), cfg.timeout_ms);
@@ -82,15 +97,66 @@ async function postSigned(path, businessParams = {}, auth = {}) {
         }
 
         if (!res.ok) {
-            throw new Error(`HTTP ${res.status}: ${json.msg || text}`);
+            const error = new Error(`HTTP ${res.status}: ${json.msg || text}`);
+            error.code = String(json.code || res.status || '');
+            error.uuzuhao_response = json;
+            throw error;
         }
         if (json.code !== 0) {
-            throw new Error(`code=${json.code}, msg=${json.msg || '未知错误'}`);
+            const error = new Error(`code=${json.code}, msg=${json.msg || '未知错误'}`);
+            error.code = String(json.code || '');
+            error.uuzuhao_response = json;
+            throw error;
         }
         return json;
     } finally {
         clearTimeout(timer);
     }
+}
+
+function roundPrice(value) {
+    return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function buildModifyPricePayload(productId, input = {}) {
+    const id = String(productId || '').trim();
+    if (!id) throw new Error('productId 不能为空');
+
+    const hourPrice = Number(input.hourPrice);
+    if (!Number.isFinite(hourPrice) || hourPrice <= 0) {
+        throw new Error('hourPrice 必须是大于 0 的数字');
+    }
+    const payload = {
+        productId: id,
+        hourPrice: roundPrice(hourPrice)
+    };
+    for (const rule of PACKAGE_PRICE_RULES) {
+        payload[rule.field] = roundPrice(hourPrice * rule.hours * rule.discount);
+    }
+
+    if (input.minRentHour !== undefined && input.minRentHour !== null && input.minRentHour !== '') {
+        const minRentHour = Number(input.minRentHour);
+        if (!Number.isInteger(minRentHour) || minRentHour <= 0) {
+            throw new Error('minRentHour 必须是正整数');
+        }
+        payload.minRentHour = minRentHour;
+    }
+    return payload;
+}
+
+async function modifyProductPrice(productId, input = {}, options = {}) {
+    const payload = buildModifyPricePayload(productId, input);
+    // 悠悠服务端当前未把 p2Price 纳入验签字段，但业务 DTO 会正常接收该字段。
+    const json = await postSigned(PATH_MODIFY_PRICE, payload, options.auth || {}, {
+        exclude_sign_fields: ['p2Price']
+    });
+    return {
+        product_id: payload.productId,
+        hour_price: payload.hourPrice,
+        package_prices: Object.fromEntries(PACKAGE_PRICE_RULES.map((rule) => [rule.field, payload[rule.field]])),
+        min_rent_hour: payload.minRentHour == null ? null : payload.minRentHour,
+        raw: json
+    };
 }
 
 function mapProductToRobotItem(p) {
@@ -243,6 +309,21 @@ async function findProductByAccount(account, auth = {}, options = {}) {
     if (candidates.length === 1) return candidates[0];
     console.warn(`[YouyouAPI] 多个商品共用账号 account=${target}，缺少 product_id/game_id，拒绝模糊操作`);
     return null;
+}
+
+async function queryProductByAccount(account, options = {}) {
+    const productId = String(options.product_id || options.prd_id || '').trim();
+    if (productId) {
+        const json = await postSigned(PATH_LIST, { productIds: [productId], limit: 50 }, options.auth || {});
+        const rows = json && json.data && Array.isArray(json.data.productPublishList)
+            ? json.data.productPublishList
+            : [];
+        const exact = rows.find((item) => String(item.productId || '').trim() === productId);
+        if (!exact) return null;
+        const targetAccount = String(account || '').trim();
+        return targetAccount && String(exact.accountNo || '').trim() !== targetAccount ? null : exact;
+    }
+    return findProductByAccount(account, options.auth || {}, options);
 }
 
 // 与 youpin_logic.js 保持同样接口（先不替换主集成）
@@ -526,8 +607,10 @@ async function getOrderDetail(params = {}, options = {}) {
 
 module.exports = {
     collectYoupinData,
+    queryProductByAccount,
     youpinOffShelf,
     youpinOnShelf,
+    modifyProductPrice,
     queryAccountOnlineStatus,
     setForbiddenPlay,
     queryForbiddenPlay,
@@ -543,6 +626,9 @@ module.exports = {
     _internals: {
         createSign,
         postSigned,
+        buildModifyPricePayload,
+        roundPrice,
+        PACKAGE_PRICE_RULES,
         listProductsByTab,
         listAllProducts,
         findProductByAccount,

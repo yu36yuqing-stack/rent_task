@@ -10,7 +10,8 @@ const source = fs.readFileSync(path.join(__dirname, '../h5/public/js/menu_price.
 const context = {
     window: {},
     URLSearchParams,
-    console
+    console,
+    state: { pricing: { channel_sheet: { view: 'result' } } }
 };
 vm.createContext(context);
 vm.runInContext(source, context, { filename: 'menu_price.js' });
@@ -27,6 +28,7 @@ assert.strictEqual(helpers.formatPricingMoney('bad'), '');
 assert.strictEqual(helpers.formatPricingResultMoney(2.4), '¥2.4');
 assert.strictEqual(helpers.formatPricingResultMoney(0), '-');
 assert.strictEqual(helpers.pricingApplyStatusText('effective'), '渠道价格与当前档一致');
+assert.strictEqual(helpers.pricingApplyStatusText('effective_partial'), '时租价格与当前档一致');
 assert.strictEqual(helpers.pricingApplyStatusText('manual'), '渠道手工价（不会自动纠正）');
 assert.strictEqual(helpers.pricingApplyStatusText('pending'), '待执行换档');
 assert.strictEqual(helpers.pricingApplyStatusText('blocked'), '受上下架安全规则阻塞');
@@ -76,6 +78,35 @@ assert(logHtml.includes('06:00重置'));
 assert(logHtml.includes('data-pricing-error-detail="2"'));
 assert(!logHtml.includes('data-pricing-error-detail="1"'));
 assert(helpers.renderPricingChannelLogs({ adjustment_logs: [] }).includes('暂无 U号租调价记录'));
+assert(helpers.renderPricingChannelLogs({
+    label: '悠悠租号',
+    package_keys: ['hour', 'p2'],
+    package_labels: { hour: '时租', p2: '2小时' },
+    adjustment_logs: [{
+        id: 3,
+        publish_status: 'success',
+        target_prices: { hour: 2, p2: 3.6 },
+        before_prices: { hour: 1.8 },
+        remote_prices: { hour: 2 }
+    }]
+}).includes('2小时 ¥3.6'));
+const uuzuhaoResultHtml = helpers.renderPricingChannelResult({ current_tier: 2 }, {
+    label: '悠悠租号',
+    available: true,
+    package_keys: ['hour', 'p2', 'p3', 'p5', 'p7', 'p9', 'p10', 'p24', 'p168'],
+    package_labels: { hour: '时租', p2: '2小时', p168: '包周' },
+    remote_current: { hour: 3 },
+    current_tier: 2,
+    apply_status: 'effective_partial',
+    goods_id: 'product-1',
+    min_rent_hour: 2,
+    verification_note: '时租价已回读验证，套餐价以平台成功响应为准',
+    tiers: [{ tier: 2, prices: { hour: 3, p2: 5.4, p168: 302.4 } }],
+    adjustment_logs: []
+});
+assert(uuzuhaoResultHtml.includes('package-count-9'));
+assert(uuzuhaoResultHtml.includes('时租价已回读验证'));
+assert(uuzuhaoResultHtml.includes('起租 2 小时'));
 
 const filteredByName = helpers.filterPricingItems([
     { display_name: '呆小姚', game_account: '2630403808' },

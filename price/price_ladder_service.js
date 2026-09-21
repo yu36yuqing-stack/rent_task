@@ -23,30 +23,13 @@ const {
 } = require('../database/price_ladder_feature_config_db');
 const { normalizeGameProfile } = require('../common/game_profile');
 const { resolveDisplayNameByRow } = require('../product/display_name');
+const uhaozuAdapter = require('./channel_adapters/uhaozu_price_adapter');
+const {
+    getPriceChannelAdapter,
+    listPriceChannelCapabilities
+} = require('./channel_adapters/channel_price_registry');
 
-const CHANNEL_CAPABILITIES = [
-    {
-        channel: 'uhaozu',
-        label: 'U号租',
-        enabled: true,
-        package_keys: ['hour', 'night', 'day', 'week'],
-        package_labels: { hour: '时租', night: '包夜', day: '包天', week: '包周' }
-    },
-    {
-        channel: 'zuhaowang',
-        label: '租号玩',
-        enabled: false,
-        package_keys: ['hour', 'day'],
-        package_labels: { hour: '时租', day: '日租' }
-    },
-    {
-        channel: 'uuzuhao',
-        label: '悠悠租号',
-        enabled: false,
-        package_keys: [],
-        package_labels: {}
-    }
-];
+const CHANNEL_CAPABILITIES = listPriceChannelCapabilities();
 
 function roundMoney(value) {
     const n = Number(value);
@@ -58,56 +41,46 @@ function pickCurrentUhaozuPrice(row = {}) {
 }
 
 function pickUhaozuPriceSet(row = {}) {
-    const channelInfo = row && row.channel_prd_info && typeof row.channel_prd_info === 'object'
-        ? row.channel_prd_info.uhaozu
-        : null;
-    const info = channelInfo && typeof channelInfo === 'object' ? channelInfo : {};
-    const prices = {
-        hour: roundMoney(info.rentalByHour ?? info.rental_by_hour),
-        night: roundMoney(info.rentalByNight ?? info.rental_by_night),
-        day: roundMoney(info.rentalByDay ?? info.rental_by_day),
-        week: roundMoney(info.rentalByWeek ?? info.rental_by_week)
-    };
-    return {
-        goods_id: String(info.prd_id || info.goods_id || '').trim(),
-        prices,
-        complete: Object.values(prices).every((value) => value > 0)
-    };
+    return uhaozuAdapter.pickCurrentPriceSet(row);
 }
 
 function buildUhaozuRatios(prices = {}) {
-    const hour = Number(prices.hour || 0);
-    const ratio = (value) => hour > 0 && Number(value) > 0 ? Number((Number(value) / hour).toFixed(4)) : 0;
-    return {
-        hour: hour > 0 ? 1 : 0,
-        night: ratio(prices.night),
-        day: ratio(prices.day),
-        week: ratio(prices.week)
-    };
+    return uhaozuAdapter.buildRatios(prices);
 }
 
 function buildUhaozuTierPrices(hourPrices = [], baselinePrices = {}) {
-    const ratios = buildUhaozuRatios(baselinePrices);
-    return hourPrices.slice(0, 4).map((value, index) => {
-        const hour = roundMoney(value);
-        const derive = (key) => ratios[key] > 0 ? roundMoney(hour * ratios[key]) : 0;
-        return {
-            tier: index + 1,
-            prices: {
-                hour,
-                night: derive('night'),
-                day: derive('day'),
-                week: derive('week')
-            }
-        };
-    });
+    return uhaozuAdapter.buildTierPrices(hourPrices, baselinePrices);
 }
 
 function samePriceSet(left = {}, right = {}) {
-    return ['hour', 'night', 'day', 'week'].every((key) => roundMoney(left[key]) === roundMoney(right[key]));
+    return uhaozuAdapter.samePriceSet(left, right);
+}
+
+function canonicalPricesFromLogData(data = {}, fallback = {}) {
+    if (data && data.prices && typeof data.prices === 'object') return data.prices;
+    if (data && data.target_prices && typeof data.target_prices === 'object') return data.target_prices;
+    return fallback;
 }
 
 function sanitizePublishLog(row = {}) {
+    const fixedBefore = {
+        hour: roundMoney(row.price_before_hour),
+        night: roundMoney(row.price_before_night),
+        day: roundMoney(row.price_before_day),
+        week: roundMoney(row.price_before_week)
+    };
+    const fixedTarget = {
+        hour: roundMoney(row.price_target_hour),
+        night: roundMoney(row.price_target_night),
+        day: roundMoney(row.price_target_day),
+        week: roundMoney(row.price_target_week)
+    };
+    const fixedAfter = {
+        hour: roundMoney(row.price_after_hour),
+        night: roundMoney(row.price_after_night),
+        day: roundMoney(row.price_after_day),
+        week: roundMoney(row.price_after_week)
+    };
     return {
         id: Number(row.id || 0),
         batch_id: String(row.batch_id || '').trim(),
@@ -117,24 +90,10 @@ function sanitizePublishLog(row = {}) {
         error_detail: row.response_data && typeof row.response_data === 'object'
             ? row.response_data
             : null,
-        before_prices: {
-            hour: roundMoney(row.price_before_hour),
-            night: roundMoney(row.price_before_night),
-            day: roundMoney(row.price_before_day),
-            week: roundMoney(row.price_before_week)
-        },
-        target_prices: {
-            hour: roundMoney(row.price_target_hour),
-            night: roundMoney(row.price_target_night),
-            day: roundMoney(row.price_target_day),
-            week: roundMoney(row.price_target_week)
-        },
-        remote_prices: {
-            hour: roundMoney(row.price_after_hour),
-            night: roundMoney(row.price_after_night),
-            day: roundMoney(row.price_after_day),
-            week: roundMoney(row.price_after_week)
-        },
+        before_prices: canonicalPricesFromLogData(row.before_data, fixedBefore),
+        target_prices: canonicalPricesFromLogData(row.request_data, fixedTarget),
+        remote_prices: canonicalPricesFromLogData(row.after_data, fixedAfter),
+        verification_status: String(row.response_data && row.response_data.verification_status || '').trim(),
         create_date: String(row.create_date || '').trim()
     };
 }
@@ -188,9 +147,11 @@ async function getPriceLadderDashboardByUser(userId, options = {}) {
         getPriceLadderFeatureConfig(uid)
     ]);
     const ruleMap = new Map(rules.map((rule) => [rule.game_account, rule]));
-    const runtimeMap = new Map(runtimes
-        .filter((runtime) => runtime.game_id === game.game_id && runtime.channel === 'uhaozu')
-        .map((runtime) => [runtime.game_account, runtime]));
+    const runtimeMap = new Map();
+    for (const runtime of runtimes.filter((item) => item.game_id === game.game_id)) {
+        const current = runtimeMap.get(runtime.game_account);
+        if (!current || runtime.channel === 'uhaozu') runtimeMap.set(runtime.game_account, runtime);
+    }
     const list = accounts.map((row) => {
         const account = String(row.game_account || '').trim();
         const rule = ruleMap.get(account) || null;
@@ -221,6 +182,7 @@ async function getPriceLadderDashboardByUser(userId, options = {}) {
         count_window: '06:00～次日06:00',
         channel_scope: 'global',
         effective_channel: 'uhaozu',
+        effective_channels: CHANNEL_CAPABILITIES.filter((item) => item.enabled).map((item) => item.channel),
         feature: {
             enabled: feature.enabled,
             reconcile_required: feature.reconcile_required,
@@ -306,16 +268,19 @@ async function savePriceLadderRuleByUser(userId, input = {}, options = {}) {
         } = require('./price_ladder_reconcile_service');
         runtime = await initializePriceLadderRuntimeOnRuleSave(uid, saved, {
             now: options.now,
+            account_row: target,
             trigger_source: 'rule_saved'
         });
         publishResult = await reconcilePendingPriceLaddersByUser(uid, {
             now: options.now,
             allow_apply: true,
             publisher: options.publisher,
+            publishers: options.publishers,
             feature_guard: options.feature_guard,
             accounts: [{ game_id: game.game_id, game_account: account }]
         });
-        runtime = await getAccountPriceLadderRuntime(uid, game.game_id, account, 'uhaozu');
+        runtime = await getAccountPriceLadderRuntime(uid, game.game_id, account, 'uhaozu')
+            || await getAccountPriceLadderRuntime(uid, game.game_id, account, 'uuzuhao');
     }
     return {
         ...saved,
@@ -340,64 +305,75 @@ async function getPriceLadderChannelResultByUser(userId, options = {}) {
     ));
     if (!target) throw new Error('账号不存在、已出售或不属于当前游戏');
 
-    const [rule, storedBaseline, finishedCounts, adjustmentLogs, runtime] = await Promise.all([
+    const [rule, finishedCounts] = await Promise.all([
         getAccountPriceLadderRule(uid, game.game_id, account),
-        getAccountChannelPriceBaseline(uid, game.game_id, account, 'uhaozu'),
-        listBusinessDayFinishedOrderCountByAccounts(uid, [{ game_id: game.game_id, game_account: account }]),
-        listPricePublishItemLogsByAccount(uid, {
-            channel: 'uhaozu',
-            game_account: account,
-            game_name: game.game_name,
-            limit: 20
-        }),
-        getAccountPriceLadderRuntime(uid, game.game_id, account, 'uhaozu')
+        listBusinessDayFinishedOrderCountByAccounts(uid, [{ game_id: game.game_id, game_account: account }])
     ]);
-    const remote = pickUhaozuPriceSet(target);
-    const baseline = storedBaseline || (remote.complete ? {
-        prices: remote.prices,
-        goods_id: remote.goods_id,
-        version: 0,
-        source_sync_time: '',
-        modify_date: ''
-    } : null);
-    const hourPrices = rule ? rule.prices : [];
-    const tiers = baseline && rule ? buildUhaozuTierPrices(hourPrices, baseline.prices) : [];
     const orderCount = Number(finishedCounts[`${game.game_id}::${account}`] || 0);
-    const currentTier = runtime && runtime.applied_tier
-        ? Number(runtime.applied_tier)
-        : Math.min(4, Math.max(1, orderCount + 1));
-    const active = tiers.find((item) => item.tier === currentTier) || null;
-    let applyStatus = 'unavailable';
-    const remoteMatchesTarget = Boolean(active && remote.complete && samePriceSet(active.prices, remote.prices));
-    if (runtime && ['pending', 'blocked', 'failed'].includes(runtime.status)) applyStatus = runtime.status;
-    else if (active && remote.complete) applyStatus = remoteMatchesTarget ? 'effective' : 'manual';
-
-    return {
-        game_id: game.game_id,
-        game_name: game.game_name,
-        game_account: account,
-        display_name: resolveDisplayNameByRow(target, account),
-        current_order_count: orderCount,
-        current_tier: currentTier,
-        channels: CHANNEL_CAPABILITIES,
-        selected_channel: 'uhaozu',
-        channel_result: {
-            channel: 'uhaozu',
-            label: 'U号租',
-            enabled: true,
+    const channelResults = {};
+    for (const capability of CHANNEL_CAPABILITIES) {
+        const adapter = getPriceChannelAdapter(capability.channel);
+        if (!adapter) {
+            channelResults[capability.channel] = {
+                ...capability,
+                available: false,
+                tiers: [],
+                adjustment_logs: [],
+                apply_status: 'unavailable'
+            };
+            continue;
+        }
+        const available = adapter.isAvailable(target);
+        const [runtime, adjustmentLogs, resolved] = await Promise.all([
+            getAccountPriceLadderRuntime(uid, game.game_id, account, capability.channel),
+            listPricePublishItemLogsByAccount(uid, {
+                channel: capability.channel,
+                game_account: account,
+                game_name: game.game_name,
+                limit: 20
+            }),
+            rule ? adapter.resolveTierPrices({
+                user_id: uid,
+                rule,
+                account_row: target,
+                allow_preview: true
+            }) : Promise.resolve({ tiers: [], baseline: null, baseline_status: 'unavailable' })
+        ]);
+        const remote = adapter.pickCurrentPriceSet(target);
+        const tiers = Array.isArray(resolved.tiers) ? resolved.tiers : [];
+        const currentTier = runtime && runtime.applied_tier
+            ? Number(runtime.applied_tier)
+            : Math.min(4, Math.max(1, orderCount + 1));
+        const active = tiers.find((item) => item.tier === currentTier) || null;
+        const remoteMatchesTarget = Boolean(active && remote.complete && adapter.samePriceSet(active.prices, remote.prices));
+        let applyStatus = 'unavailable';
+        if (runtime && ['pending', 'blocked', 'failed'].includes(runtime.status)) applyStatus = runtime.status;
+        else if (active && remote.complete) {
+            applyStatus = remoteMatchesTarget && remote.comparable_keys.length < capability.package_keys.length
+                ? 'effective_partial'
+                : (remoteMatchesTarget ? 'effective' : 'manual');
+        }
+        const baseline = resolved.baseline || null;
+        channelResults[capability.channel] = {
+            ...capability,
+            available,
             goods_id: remote.goods_id,
-            baseline_status: storedBaseline ? 'saved' : (baseline ? 'preview' : 'unavailable'),
+            baseline_status: resolved.baseline_status || 'unavailable',
             baseline: baseline ? {
                 prices: baseline.prices,
-                ratios: buildUhaozuRatios(baseline.prices),
+                ratios: capability.channel === 'uhaozu' ? buildUhaozuRatios(baseline.prices) : null,
                 version: Number(baseline.version || 0),
                 source_sync_time: String(baseline.source_sync_time || baseline.modify_date || '').trim()
             } : null,
             remote_current: remote.prices,
             remote_complete: remote.complete,
+            remote_comparable_keys: remote.comparable_keys || [],
+            min_rent_hour: Number(remote.min_rent_hour || 0),
             tiers,
+            current_tier: currentTier,
             apply_status: applyStatus,
             remote_matches_target: remoteMatchesTarget,
+            verification_note: adapter.verification_note,
             runtime: runtime ? {
                 status: runtime.status,
                 desired_tier: runtime.desired_tier,
@@ -406,7 +382,26 @@ async function getPriceLadderChannelResultByUser(userId, options = {}) {
                 modify_date: runtime.modify_date
             } : null,
             adjustment_logs: adjustmentLogs.map(sanitizePublishLog)
-        }
+        };
+    }
+    const requestedChannel = String(options.channel || 'uhaozu').trim();
+    const selectedChannel = channelResults[requestedChannel] ? requestedChannel : 'uhaozu';
+    const selectedResult = channelResults[selectedChannel];
+
+    return {
+        game_id: game.game_id,
+        game_name: game.game_name,
+        game_account: account,
+        display_name: resolveDisplayNameByRow(target, account),
+        current_order_count: orderCount,
+        current_tier: Number(selectedResult && selectedResult.current_tier || Math.min(4, Math.max(1, orderCount + 1))),
+        channels: CHANNEL_CAPABILITIES.map((item) => ({
+            ...item,
+            available: Boolean(channelResults[item.channel] && channelResults[item.channel].available)
+        })),
+        selected_channel: selectedChannel,
+        channel_result: selectedResult,
+        channel_results: channelResults
     };
 }
 

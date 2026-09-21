@@ -1437,7 +1437,8 @@ async function handlePricingLadderChannelResult(req, res, urlObj) {
     const out = await getPriceLadderChannelResultByUser(user.id, {
         game_name: urlObj.searchParams.get('game_name') || 'WZRY',
         game_id: urlObj.searchParams.get('game_id') || '',
-        game_account: gameAccount
+        game_account: gameAccount,
+        channel: urlObj.searchParams.get('channel') || 'uhaozu'
     });
     return json(res, 200, { ok: true, ...out });
 }

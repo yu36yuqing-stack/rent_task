@@ -73,6 +73,11 @@ async function main() {
                 rentalByNight: 12.4,
                 rentalByDay: 18.6,
                 rentalByWeek: 108.5
+            },
+            uuzuhao: {
+                prd_id: 'visual-uuzuhao-target',
+                hourPrice: 3.1,
+                minRentHour: 2
             }
         }
     });
@@ -197,6 +202,23 @@ async function main() {
         }
         await page.click('[data-pricing-channel-tab="zuhaowang"]');
         await page.waitForFunction(() => document.getElementById('pricingChannelBody').textContent.includes('已知套餐：时租、日租'));
+        await page.click('[data-pricing-channel-tab="uuzuhao"]');
+        await page.waitForSelector('#pricingChannelSheet .pricing-package-row.package-count-9.is-active');
+        const uuzuhaoDesktop = await page.evaluate(() => ({
+            text: document.getElementById('pricingChannelBody').textContent,
+            packageColumns: getComputedStyle(document.querySelector('.pricing-package-row.package-count-9')).gridTemplateColumns.split(' ').filter(Boolean).length,
+            scrollWidth: document.querySelector('.pricing-package-scroll').scrollWidth,
+            clientWidth: document.querySelector('.pricing-package-scroll').clientWidth
+        }));
+        if (!uuzuhaoDesktop.text.includes('时租价已回读验证')
+            || !uuzuhaoDesktop.text.includes('起租 2 小时')
+            || uuzuhaoDesktop.packageColumns !== 10) {
+            throw new Error(`悠悠租号套餐展示错误: ${JSON.stringify(uuzuhaoDesktop)}`);
+        }
+        await page.screenshot({
+            path: path.join(outputDir, 'pricing-channel-uuzuhao-desktop.png'),
+            fullPage: true
+        });
         await page.click('[data-pricing-channel-tab="uhaozu"]');
         await page.waitForSelector('#pricingChannelSheet .pricing-package-row.is-active');
         await page.click('[data-pricing-result-view="logs"]');
@@ -284,12 +306,39 @@ async function main() {
             path: path.join(outputDir, 'pricing-channel-mobile.png'),
             fullPage: true
         });
+        await page.click('[data-pricing-channel-tab="uuzuhao"]');
+        await page.waitForSelector('#pricingChannelSheet .pricing-package-row.package-count-9.is-active');
+        const uuzuhaoMobile = await page.evaluate(() => {
+            const scroller = document.querySelector('.pricing-package-scroll');
+            const table = document.querySelector('.pricing-package-table.package-count-9');
+            scroller.scrollLeft = scroller.scrollWidth;
+            const scrollerRect = scroller.getBoundingClientRect();
+            const tableRect = table.getBoundingClientRect();
+            return {
+                documentWidth: document.documentElement.scrollWidth,
+                viewportWidth: window.innerWidth,
+                scrollable: scroller.scrollWidth > scroller.clientWidth,
+                scrolled: scroller.scrollLeft > 0,
+                scrollerLeft: scrollerRect.left,
+                scrollerRight: scrollerRect.right,
+                tableWidth: tableRect.width
+            };
+        });
+        if (uuzuhaoMobile.documentWidth > uuzuhaoMobile.viewportWidth
+            || !uuzuhaoMobile.scrollable || !uuzuhaoMobile.scrolled
+            || uuzuhaoMobile.scrollerLeft < 0 || uuzuhaoMobile.scrollerRight > uuzuhaoMobile.viewportWidth) {
+            throw new Error(`悠悠租号移动端套餐溢出: ${JSON.stringify(uuzuhaoMobile)}`);
+        }
+        await page.screenshot({
+            path: path.join(outputDir, 'pricing-channel-uuzuhao-mobile.png'),
+            fullPage: true
+        });
         await page.click('#pricingChannelCloseBtn');
         await page.screenshot({
             path: path.join(outputDir, 'pricing-ladder-mobile.png'),
             fullPage: true
         });
-        console.log(JSON.stringify({ ok: true, savedState, desktopChannelState, layout, channelLayout, outputDir }));
+        console.log(JSON.stringify({ ok: true, savedState, desktopChannelState, uuzuhaoDesktop, layout, channelLayout, uuzuhaoMobile, outputDir }));
     } finally {
         if (browser) await browser.close();
         await new Promise((resolve) => server.close(resolve));

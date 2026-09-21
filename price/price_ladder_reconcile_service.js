@@ -9,9 +9,6 @@ const {
     listAccountPriceLadderRulesByUser
 } = require('../database/account_price_ladder_rule_db');
 const {
-    getAccountChannelPriceBaseline
-} = require('../database/account_channel_price_baseline_db');
-const {
     getAccountPriceLadderRuntime,
     listAccountPriceLadderRuntimesByUser,
     upsertAccountPriceLadderRuntime
@@ -25,8 +22,10 @@ const {
     markPriceLadderFeatureReconciled
 } = require('../database/price_ladder_feature_config_db');
 const { listUserGameAccounts } = require('../database/user_game_account_db');
-const { publishUhaozuAccountPriceSetByUser } = require('./price_publish_service');
-const { _internal: priceInternal } = require('./price_ladder_service');
+const {
+    getPriceChannelAdapter,
+    listEnabledPriceChannelAdapters
+} = require('./channel_adapters/channel_price_registry');
 
 const CHANNEL = 'uhaozu';
 const DAILY_RESET_JOB_KEY = 'price_ladder_daily_reset';
@@ -94,12 +93,13 @@ function mergePriceLadderCandidates(candidates = []) {
 }
 
 function priceSignature(tier, prices = {}, ruleVersion = 0, baselineVersion = 0) {
+    const normalizedPrices = Object.fromEntries(Object.keys(prices || {}).sort().map((key) => [
+        key,
+        Number(Number(prices[key] || 0).toFixed(2))
+    ]));
     return JSON.stringify({
         tier: Number(tier || 0),
-        hour: Number(Number(prices.hour || 0).toFixed(2)),
-        night: Number(Number(prices.night || 0).toFixed(2)),
-        day: Number(Number(prices.day || 0).toFixed(2)),
-        week: Number(Number(prices.week || 0).toFixed(2)),
+        prices: normalizedPrices,
         rule_version: Number(ruleVersion || 0),
         baseline_version: Number(baselineVersion || 0)
     });
@@ -133,6 +133,14 @@ async function listAllAccountsByUser(userId) {
     return out;
 }
 
+function accountKey(gameId, gameAccount) {
+    return `${String(gameId || '').trim()}::${String(gameAccount || '').trim()}`;
+}
+
+function applicableAdapters(accountRow = {}) {
+    return listEnabledPriceChannelAdapters(accountRow);
+}
+
 async function initializePriceLadderRuntimeOnRuleSave(userId, rule, options = {}) {
     const uid = Number(userId || 0);
     if (!uid || !rule) return null;
@@ -141,24 +149,35 @@ async function initializePriceLadderRuntimeOnRuleSave(userId, rule, options = {}
     const counts = await listBusinessDayFinishedOrderCountByAccounts(uid, [key], day);
     const count = Number(counts[`${rule.game_id}::${rule.game_account}`] || 0);
     const tier = tierByCompletedCount(count);
-    const current = await getAccountPriceLadderRuntime(uid, rule.game_id, rule.game_account, CHANNEL);
-    return upsertAccountPriceLadderRuntime(uid, {
-        game_id: rule.game_id,
-        game_name: rule.game_name,
-        game_account: rule.game_account,
-        channel: CHANNEL,
-        business_date: day,
-        completed_order_count: count,
-        desired_tier: tier,
-        applied_tier: current ? current.applied_tier : 0,
-        pending_count_delta: 0,
-        rule_version: rule.version,
-        status: 'pending',
-        trigger_source: String(options.trigger_source || 'rule_saved').trim() || 'rule_saved',
-        last_error: '',
-        retry_count: 0,
-        next_retry_at: ''
-    }, { desc: 'queue ladder runtime after rule save' });
+    const rows = options.account_row ? [options.account_row] : await listAllAccountsByUser(uid);
+    const accountRow = rows.find((row) => accountKey(row.game_id, row.game_account) === accountKey(rule.game_id, rule.game_account));
+    if (!accountRow) return null;
+    const requestedChannels = new Set((Array.isArray(options.channels) ? options.channels : [])
+        .map((channel) => String(channel || '').trim()).filter(Boolean));
+    const runtimes = [];
+    for (const adapter of applicableAdapters(accountRow).filter((item) => (
+        requestedChannels.size === 0 || requestedChannels.has(item.channel)
+    ))) {
+        const current = await getAccountPriceLadderRuntime(uid, rule.game_id, rule.game_account, adapter.channel);
+        runtimes.push(await upsertAccountPriceLadderRuntime(uid, {
+            game_id: rule.game_id,
+            game_name: rule.game_name,
+            game_account: rule.game_account,
+            channel: adapter.channel,
+            business_date: day,
+            completed_order_count: count,
+            desired_tier: tier,
+            applied_tier: current ? current.applied_tier : 0,
+            pending_count_delta: 0,
+            rule_version: rule.version,
+            status: 'pending',
+            trigger_source: String(options.trigger_source || 'rule_saved').trim() || 'rule_saved',
+            last_error: '',
+            retry_count: 0,
+            next_retry_at: ''
+        }, { desc: `queue ladder runtime after rule save: ${adapter.channel}` }));
+    }
+    return runtimes.find((runtime) => runtime.channel === CHANNEL) || runtimes[0] || null;
 }
 
 async function enqueueDailyResetIfDue(userId, options = {}) {
@@ -167,27 +186,32 @@ async function enqueueDailyResetIfDue(userId, options = {}) {
     const lastDay = await getPriceLadderJobBusinessDate(uid, DAILY_RESET_JOB_KEY);
     if (lastDay === day) return { due: false, business_date: day, queued: 0 };
     const rules = await listAccountPriceLadderRulesByUser(uid);
+    const accountRows = await listAllAccountsByUser(uid);
+    const accountMap = new Map(accountRows.map((row) => [accountKey(row.game_id, row.game_account), row]));
     let queued = 0;
     for (const rule of rules) {
-        const runtime = await getAccountPriceLadderRuntime(uid, rule.game_id, rule.game_account, CHANNEL);
-        const appliedTier = runtime && runtime.applied_tier ? runtime.applied_tier : 1;
-        await upsertAccountPriceLadderRuntime(uid, {
-            game_id: rule.game_id,
-            game_name: rule.game_name,
-            game_account: rule.game_account,
-            channel: CHANNEL,
-            business_date: day,
-            completed_order_count: 0,
-            desired_tier: 1,
-            applied_tier: appliedTier,
-            pending_count_delta: 0,
-            rule_version: rule.version,
-            status: 'pending',
-            trigger_source: 'daily_reset',
-            last_error: '',
-            next_retry_at: ''
-        }, { desc: '06:00 business day price ladder reset' });
-        if (appliedTier !== 1) queued += 1;
+        const accountRow = accountMap.get(accountKey(rule.game_id, rule.game_account));
+        for (const adapter of applicableAdapters(accountRow)) {
+            const runtime = await getAccountPriceLadderRuntime(uid, rule.game_id, rule.game_account, adapter.channel);
+            const appliedTier = runtime && runtime.applied_tier ? runtime.applied_tier : 1;
+            await upsertAccountPriceLadderRuntime(uid, {
+                game_id: rule.game_id,
+                game_name: rule.game_name,
+                game_account: rule.game_account,
+                channel: adapter.channel,
+                business_date: day,
+                completed_order_count: 0,
+                desired_tier: 1,
+                applied_tier: appliedTier,
+                pending_count_delta: 0,
+                rule_version: rule.version,
+                status: 'pending',
+                trigger_source: 'daily_reset',
+                last_error: '',
+                next_retry_at: ''
+            }, { desc: `06:00 business day price ladder reset: ${adapter.channel}` });
+            if (appliedTier !== 1) queued += 1;
+        }
     }
     await setPriceLadderJobBusinessDate(uid, DAILY_RESET_JOB_KEY, day, 'price ladder daily reset enqueued');
     return { due: true, business_date: day, queued };
@@ -197,26 +221,31 @@ async function enqueuePriceLadderCandidates(userId, candidates = [], options = {
     const uid = Number(userId || 0);
     const day = businessDateText(6, options.now || new Date());
     const merged = mergePriceLadderCandidates(candidates).filter((item) => item.business_date === day);
+    const accountRows = merged.length > 0 ? await listAllAccountsByUser(uid) : [];
+    const accountMap = new Map(accountRows.map((row) => [accountKey(row.game_id, row.game_account), row]));
     let queued = 0;
     for (const candidate of merged) {
         const rule = await getAccountPriceLadderRule(uid, candidate.game_id, candidate.game_account);
         if (!rule) continue;
-        const runtime = await getAccountPriceLadderRuntime(uid, candidate.game_id, candidate.game_account, CHANNEL);
-        await upsertAccountPriceLadderRuntime(uid, {
-            game_id: candidate.game_id,
-            game_name: rule.game_name || candidate.game_name,
-            game_account: candidate.game_account,
-            channel: CHANNEL,
-            business_date: day,
-            pending_count_delta: Number(runtime && runtime.pending_count_delta || 0) + Number(candidate.delta || 0),
-            rule_version: rule.version,
-            status: 'pending',
-            trigger_source: 'order_finished_changed',
-            last_order_no: candidate.order_nos.join(','),
-            last_error: '',
-            next_retry_at: ''
-        }, { desc: 'queued by finished order contribution change' });
-        queued += 1;
+        const accountRow = accountMap.get(accountKey(candidate.game_id, candidate.game_account));
+        for (const adapter of applicableAdapters(accountRow)) {
+            const runtime = await getAccountPriceLadderRuntime(uid, candidate.game_id, candidate.game_account, adapter.channel);
+            await upsertAccountPriceLadderRuntime(uid, {
+                game_id: candidate.game_id,
+                game_name: rule.game_name || candidate.game_name,
+                game_account: candidate.game_account,
+                channel: adapter.channel,
+                business_date: day,
+                pending_count_delta: Number(runtime && runtime.pending_count_delta || 0) + Number(candidate.delta || 0),
+                rule_version: rule.version,
+                status: 'pending',
+                trigger_source: 'order_finished_changed',
+                last_order_no: candidate.order_nos.join(','),
+                last_error: '',
+                next_retry_at: ''
+            }, { desc: `queued by finished order contribution change: ${adapter.channel}` });
+            queued += 1;
+        }
     }
     return { business_date: day, queued };
 }
@@ -224,30 +253,61 @@ async function enqueuePriceLadderCandidates(userId, candidates = [], options = {
 async function enqueueFeatureActivationReconcile(userId, options = {}) {
     const uid = Number(userId || 0);
     const rules = await listAccountPriceLadderRulesByUser(uid);
+    const accountRows = await listAllAccountsByUser(uid);
+    const accountMap = new Map(accountRows.map((row) => [accountKey(row.game_id, row.game_account), row]));
     let queued = 0;
     let initialized = 0;
     for (const rule of rules) {
-        const runtime = await getAccountPriceLadderRuntime(uid, rule.game_id, rule.game_account, CHANNEL);
-        if (!runtime) {
-            await initializePriceLadderRuntimeOnRuleSave(uid, rule, {
-                ...options,
-                trigger_source: 'feature_enabled_reconcile'
-            });
-            initialized += 1;
-            continue;
+        const accountRow = accountMap.get(accountKey(rule.game_id, rule.game_account));
+        for (const adapter of applicableAdapters(accountRow)) {
+            const runtime = await getAccountPriceLadderRuntime(uid, rule.game_id, rule.game_account, adapter.channel);
+            if (!runtime) {
+                await initializePriceLadderRuntimeOnRuleSave(uid, rule, {
+                    ...options,
+                    account_row: accountRow,
+                    channels: [adapter.channel],
+                    trigger_source: 'feature_enabled_reconcile'
+                });
+                initialized += 1;
+                continue;
+            }
+            await upsertAccountPriceLadderRuntime(uid, {
+                ...runtime,
+                pending_count_delta: 0,
+                rule_version: rule.version,
+                status: 'pending',
+                trigger_source: 'feature_enabled_reconcile',
+                last_error: '',
+                next_retry_at: ''
+            }, { desc: `queued after price ladder feature enabled: ${adapter.channel}` });
+            queued += 1;
         }
-        await upsertAccountPriceLadderRuntime(uid, {
-            ...runtime,
-            pending_count_delta: 0,
-            rule_version: rule.version,
-            status: 'pending',
-            trigger_source: 'feature_enabled_reconcile',
-            last_error: '',
-            next_retry_at: ''
-        }, { desc: 'queued after price ladder feature enabled' });
-        queued += 1;
     }
     return { scanned: rules.length, queued, initialized };
+}
+
+async function enqueueMissingPriceLadderChannelRuntimes(userId, options = {}) {
+    const uid = Number(userId || 0);
+    const rules = await listAccountPriceLadderRulesByUser(uid);
+    if (rules.length === 0) return { scanned: 0, initialized: 0 };
+    const accountRows = await listAllAccountsByUser(uid);
+    const accountMap = new Map(accountRows.map((row) => [accountKey(row.game_id, row.game_account), row]));
+    let initialized = 0;
+    for (const rule of rules) {
+        const accountRow = accountMap.get(accountKey(rule.game_id, rule.game_account));
+        for (const adapter of applicableAdapters(accountRow)) {
+            const runtime = await getAccountPriceLadderRuntime(uid, rule.game_id, rule.game_account, adapter.channel);
+            if (runtime) continue;
+            await initializePriceLadderRuntimeOnRuleSave(uid, rule, {
+                ...options,
+                account_row: accountRow,
+                channels: [adapter.channel],
+                trigger_source: 'channel_enabled_reconcile'
+            });
+            initialized += 1;
+        }
+    }
+    return { scanned: rules.length, initialized };
 }
 
 async function getPriceLadderApplyBlock(userId, accountRow = {}) {
@@ -280,7 +340,6 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
         game_id: row.game_id,
         game_account: row.game_account
     })), day);
-    const publisher = options.publisher || publishUhaozuAccountPriceSetByUser;
     const featureGuard = options.feature_guard || getPriceLadderFeatureConfig;
     const summary = { scanned: runtimes.length, applied: 0, unchanged: 0, blocked: 0, failed: 0, pending: 0, list: [] };
 
@@ -288,6 +347,7 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
         const key = `${runtime.game_id}::${runtime.game_account}`;
         const rule = await getAccountPriceLadderRule(uid, runtime.game_id, runtime.game_account);
         const accountRow = accountMap.get(key);
+        const adapter = getPriceChannelAdapter(runtime.channel);
         const count = Number(counts[key] || 0);
         const desiredTier = tierByCompletedCount(count);
         const inferredPreviousCount = Math.max(0, count - Number(runtime.pending_count_delta || 0));
@@ -296,7 +356,8 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
         const appliedTier = storedAppliedTier > 0
             ? storedAppliedTier
             : (runtimeTrigger === 'rule_saved' ? 0 : tierByCompletedCount(inferredPreviousCount));
-        if (!rule || !accountRow) {
+        if (!rule || !accountRow || !adapter) {
+            const missingMessage = !rule ? '阶梯规则不存在' : (!accountRow ? '账号不存在' : `不支持的调价渠道: ${runtime.channel}`);
             await upsertAccountPriceLadderRuntime(uid, {
                 ...runtime,
                 completed_order_count: count,
@@ -304,20 +365,31 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
                 applied_tier: appliedTier,
                 pending_count_delta: 0,
                 status: 'failed',
-                last_error: !rule ? '阶梯规则不存在' : '账号不存在',
+                last_error: missingMessage,
                 retry_count: runtime.retry_count + 1,
                 next_retry_at: retryAtText(now)
             }, { desc: 'price ladder reconcile missing data' });
             summary.failed += 1;
-            summary.list.push({ game_account: runtime.game_account, status: 'failed', reason: !rule ? 'rule_missing' : 'account_missing' });
+            summary.list.push({
+                game_account: runtime.game_account,
+                channel: runtime.channel,
+                status: 'failed',
+                reason: !rule ? 'rule_missing' : (!accountRow ? 'account_missing' : 'channel_unsupported')
+            });
             continue;
         }
 
-        const baseline = await getAccountChannelPriceBaseline(uid, runtime.game_id, runtime.game_account, CHANNEL);
-        const tiers = baseline ? priceInternal.buildUhaozuTierPrices(rule.prices, baseline.prices) : [];
+        const resolved = await adapter.resolveTierPrices({
+            user_id: uid,
+            rule,
+            account_row: accountRow,
+            allow_preview: false
+        });
+        const baselineVersion = Number(resolved.baseline_version || 0);
+        const tiers = Array.isArray(resolved.tiers) ? resolved.tiers : [];
         const desired = tiers.find((item) => item.tier === desiredTier) || null;
-        const signature = desired ? priceSignature(desiredTier, desired.prices, rule.version, baseline.version) : '';
-        const verifyRemote = ['daily_reset', 'rule_saved', 'feature_enabled_reconcile'].includes(runtimeTrigger);
+        const signature = desired ? priceSignature(desiredTier, desired.prices, rule.version, baselineVersion) : '';
+        const verifyRemote = ['daily_reset', 'rule_saved', 'feature_enabled_reconcile', 'channel_enabled_reconcile'].includes(runtimeTrigger);
         if (desiredTier === appliedTier && !verifyRemote) {
             await upsertAccountPriceLadderRuntime(uid, {
                 ...runtime,
@@ -327,7 +399,7 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
                 applied_tier: appliedTier,
                 pending_count_delta: 0,
                 rule_version: rule.version,
-                baseline_version: baseline ? baseline.version : runtime.baseline_version,
+                baseline_version: baselineVersion,
                 desired_price_signature: signature,
                 status: 'applied',
                 last_error: '',
@@ -335,7 +407,7 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
                 next_retry_at: ''
             }, { desc: 'price ladder unchanged; preserve channel manual price' });
             summary.unchanged += 1;
-            summary.list.push({ game_account: runtime.game_account, status: 'unchanged', tier: desiredTier });
+            summary.list.push({ game_account: runtime.game_account, channel: runtime.channel, status: 'unchanged', tier: desiredTier });
             continue;
         }
         if (!allowApply) {
@@ -349,10 +421,11 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
                 last_error: '授权渠道订单同步不完整'
             }, { desc: 'price ladder waits for complete order sync' });
             summary.pending += 1;
-            summary.list.push({ game_account: runtime.game_account, status: 'pending', reason: 'order_sync_incomplete' });
+            summary.list.push({ game_account: runtime.game_account, channel: runtime.channel, status: 'pending', reason: 'order_sync_incomplete' });
             continue;
         }
-        if (!baseline || !desired || Object.values(desired.prices).some((value) => Number(value || 0) <= 0)) {
+        if (!resolved.ready || !desired || Object.values(desired.prices).some((value) => Number(value || 0) <= 0)) {
+            const message = String(resolved.error || '渠道套餐价格计算失败');
             await upsertAccountPriceLadderRuntime(uid, {
                 ...runtime,
                 completed_order_count: count,
@@ -360,18 +433,24 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
                 applied_tier: appliedTier,
                 pending_count_delta: 0,
                 status: 'failed',
-                last_error: 'U号租套餐价格基准不完整',
+                baseline_version: baselineVersion,
+                last_error: message,
                 retry_count: runtime.retry_count + 1,
                 next_retry_at: retryAtText(now)
-            }, { desc: 'price ladder baseline unavailable' });
+            }, { desc: `price ladder target unavailable: ${runtime.channel}` });
             summary.failed += 1;
-            summary.list.push({ game_account: runtime.game_account, status: 'failed', reason: 'baseline_unavailable' });
+            summary.list.push({
+                game_account: runtime.game_account,
+                channel: runtime.channel,
+                status: 'failed',
+                reason: resolved.reason || 'target_unavailable'
+            });
             continue;
         }
         const latestFeature = await featureGuard(uid);
         if (!latestFeature || latestFeature.enabled !== true) {
             summary.pending += 1;
-            summary.list.push({ game_account: runtime.game_account, status: 'pending', reason: 'feature_disabled' });
+            summary.list.push({ game_account: runtime.game_account, channel: runtime.channel, status: 'pending', reason: 'feature_disabled' });
             continue;
         }
         const latestRule = await getAccountPriceLadderRule(uid, runtime.game_id, runtime.game_account);
@@ -379,6 +458,7 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
             summary.pending += 1;
             summary.list.push({
                 game_account: runtime.game_account,
+                channel: runtime.channel,
                 status: 'pending',
                 reason: latestRule ? 'rule_changed' : 'rule_cleared'
             });
@@ -387,15 +467,18 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
 
         let published;
         try {
+            const publisher = options.publishers && options.publishers[runtime.channel]
+                ? options.publishers[runtime.channel]
+                : (options.publisher || adapter.publish);
             published = await publisher(uid, {
                 game_id: runtime.game_id,
                 game_name: rule.game_name,
                 game_account: runtime.game_account,
-                goods_id: baseline.goods_id,
+                goods_id: adapter.productId(accountRow),
                 tier: desiredTier,
                 prices: desired.prices,
                 trigger_source: runtime.trigger_source || 'price_ladder',
-                force_publish: runtimeTrigger === 'rule_saved'
+                force_publish: adapter.shouldForcePublish(runtimeTrigger)
             });
         } catch (error) {
             published = { ok: false, message: String(error && error.message ? error.message : error) };
@@ -409,7 +492,7 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
                 applied_tier: desiredTier,
                 pending_count_delta: 0,
                 rule_version: rule.version,
-                baseline_version: baseline.version,
+                baseline_version: baselineVersion,
                 desired_price_signature: signature,
                 applied_price_signature: signature,
                 status: 'applied',
@@ -417,13 +500,19 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
                 retry_count: 0,
                 next_retry_at: '',
                 last_apply_date: new Date(now).toISOString()
-            }, { desc: 'price ladder applied to uhaozu' });
+            }, { desc: `price ladder applied to ${runtime.channel}` });
             if (published.changed === false) {
                 summary.unchanged += 1;
-                summary.list.push({ game_account: runtime.game_account, status: 'unchanged', tier: desiredTier });
+                summary.list.push({ game_account: runtime.game_account, channel: runtime.channel, status: 'unchanged', tier: desiredTier });
             } else {
                 summary.applied += 1;
-                summary.list.push({ game_account: runtime.game_account, status: 'applied', tier: desiredTier, batch_id: published.batch_id || '' });
+                summary.list.push({
+                    game_account: runtime.game_account,
+                    channel: runtime.channel,
+                    status: 'applied',
+                    tier: desiredTier,
+                    batch_id: published.batch_id || ''
+                });
             }
         } else {
             const message = String(published && published.message || '价格发布失败');
@@ -434,7 +523,7 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
                 applied_tier: appliedTier,
                 pending_count_delta: 0,
                 rule_version: rule.version,
-                baseline_version: baseline.version,
+                baseline_version: baselineVersion,
                 desired_price_signature: signature,
                 status: 'failed',
                 last_error: message,
@@ -442,13 +531,14 @@ async function reconcilePendingPriceLaddersByUser(userId, options = {}) {
                 next_retry_at: retryAtText(now)
             }, { desc: 'price ladder publish failed' });
             summary.failed += 1;
-            summary.list.push({ game_account: runtime.game_account, status: 'failed', reason: message });
+            summary.list.push({ game_account: runtime.game_account, channel: runtime.channel, status: 'failed', reason: message });
         }
     }
     return summary;
 }
 
 async function reconcilePriceLadderAfterOrderSync(userId, candidates = [], options = {}) {
+    const channelBootstrap = await enqueueMissingPriceLadderChannelRuntimes(userId, options);
     const reset = await enqueueDailyResetIfDue(userId, options);
     const activation = options.activation_reconcile
         ? await enqueueFeatureActivationReconcile(userId, options)
@@ -459,7 +549,7 @@ async function reconcilePriceLadderAfterOrderSync(userId, candidates = [], optio
     if (options.activation_reconcile && Number(options.feature_version || 0) > 0) {
         activationMarked = await markPriceLadderFeatureReconciled(userId, options.feature_version);
     }
-    return { reset, activation, activation_marked: activationMarked, queued, reconciliation };
+    return { channel_bootstrap: channelBootstrap, reset, activation, activation_marked: activationMarked, queued, reconciliation };
 }
 
 module.exports = {
@@ -469,6 +559,7 @@ module.exports = {
     enqueueDailyResetIfDue,
     enqueuePriceLadderCandidates,
     enqueueFeatureActivationReconcile,
+    enqueueMissingPriceLadderChannelRuntimes,
     getPriceLadderApplyBlock,
     reconcilePendingPriceLaddersByUser,
     reconcilePriceLadderAfterOrderSync,

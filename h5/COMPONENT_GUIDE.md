@@ -101,7 +101,7 @@
 | 页面 | 已有变体 | 基础组件关系 |
 | --- | --- | --- |
 | Profile | `.profile-card` `.profile-field` `.profile-mode-inline` `.profile-threshold-*` | 基于 Panel、Field、ModeOption |
-| Pricing | `.pricing-ladder-head` `.pricing-ladder-list` `.pricing-account-card` `.pricing-ladder-grid` `.pricing-copy-field` `.pricing-search-field` | 基于 GameTabs、Panel、Card、Field、ListSearch、CardAction；四档输入、账号复制和当前游戏内搜索为页面变体 |
+| Pricing | `.pricing-ladder-head` `.pricing-ladder-list` `.pricing-account-card` `.pricing-ladder-grid` `.pricing-copy-field` `.pricing-search-field` `.pricing-channel-tabs` `.pricing-package-table` | 基于 GameTabs、Panel、Card、Field、ListSearch、CardAction、HeaderTabs、Sheet；四档输入、账号复制、当前游戏内搜索和渠道动态套餐列为页面变体 |
 | Board | `.board-top-row` `.board-card` `.board-mobile-card` `.board-account-list` `.board-account-tag` | 基于 PageAction、Panel、Card、GameAvatar |
 | Maintenance | `.maintenance-top-row` `.maintenance-summary-grid` `.maintenance-kpi-card` `.maintenance-log-card` `.maintenance-status-pill`；清理记录使用 `.maintenance-detail-table` 统一展示数据表、日志文件和数据库压缩结果；页面及 Grid 子项必须允许收缩，移动端仅表格容器横向滚动并固定项目列；`640px` 以下顶部操作改为纵向、指标卡改为两列，`360px` 以下改为单列 | 基于 Panel、Card、StatusTag、Table、PageAction |
 | Products | `.product-filters` `.product-filter-tab` `.product-op-btn` `.product-op-btn-danger` | 基于 HeaderTabs、Button、CardAction |

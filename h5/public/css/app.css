@@ -2053,6 +2053,18 @@
       overflow: hidden;
     }
 
+    .pricing-package-scroll {
+      width: 100%;
+      min-width: 0;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .pricing-package-table.package-count-9 {
+      min-width: 700px;
+    }
+
     .pricing-package-row {
       display: grid;
       grid-template-columns: minmax(92px, 1.2fr) repeat(4, minmax(58px, 1fr));
@@ -2060,6 +2072,18 @@
       min-height: 40px;
       border-top: 1px solid #e5eaf0;
       background: #ffffff;
+    }
+
+    .pricing-package-row.package-count-1 {
+      grid-template-columns: minmax(120px, 1.4fr) minmax(72px, 1fr);
+    }
+
+    .pricing-package-row.package-count-2 {
+      grid-template-columns: minmax(120px, 1.4fr) repeat(2, minmax(72px, 1fr));
+    }
+
+    .pricing-package-row.package-count-9 {
+      grid-template-columns: minmax(132px, 1.6fr) repeat(9, minmax(62px, 1fr));
     }
 
     .pricing-package-row:first-child {

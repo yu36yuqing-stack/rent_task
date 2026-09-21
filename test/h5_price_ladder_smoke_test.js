@@ -44,6 +44,11 @@ async function main() {
                 rentalByNight: 9.6,
                 rentalByDay: 14.4,
                 rentalByWeek: 84
+            },
+            uuzuhao: {
+                prd_id: 'uuzuhao-ladder-a',
+                hourPrice: 2.4,
+                minRentHour: 2
             }
         }
     });
@@ -105,9 +110,18 @@ async function main() {
         assert.strictEqual(channelJson.channel_result.baseline_status, 'saved');
         assert.strictEqual(channelJson.channel_result.tiers.length, 4);
         assert.strictEqual(channelJson.channels.length, 3);
+        assert.strictEqual(channelJson.channels.find((item) => item.channel === 'uuzuhao').enabled, true);
+        assert.strictEqual(channelJson.channel_results.uuzuhao.tiers[0].prices.p2, 4.32);
+        assert.strictEqual(channelJson.channel_results.uuzuhao.verification_note, '时租价已回读验证，套餐价以平台成功响应为准');
         assert.strictEqual(channelJson.channel_result.adjustment_logs.length, 1);
         assert.strictEqual(channelJson.channel_result.adjustment_logs[0].publish_status, 'fail');
         assert.strictEqual(channelJson.channel_result.adjustment_logs[0].error_detail.stage, 'authorization');
+
+        const uuzuhaoChannelRes = await fetch(`${baseUrl}/api/pricing/ladder/channel-result?game_name=${encodeURIComponent('和平精英')}&game_account=ladder-a&channel=uuzuhao`, { headers });
+        const uuzuhaoChannelJson = await uuzuhaoChannelRes.json();
+        assert.strictEqual(uuzuhaoChannelJson.selected_channel, 'uuzuhao');
+        assert.strictEqual(uuzuhaoChannelJson.channel_result.package_keys.length, 9);
+        assert.strictEqual(uuzuhaoChannelJson.channel_result.adjustment_logs[0].error_detail.stage, 'authorization');
 
         const missingAccountRes = await fetch(`${baseUrl}/api/pricing/ladder/channel-result?game_name=${encodeURIComponent('和平精英')}`, { headers });
         assert.strictEqual(missingAccountRes.status, 400);
@@ -162,7 +176,7 @@ async function main() {
         assert(staticHtml.includes('账号阶梯价格'));
         assert(staticHtml.includes('pricingFeatureToggle'));
         assert(staticHtml.includes('pricingSearchInput'));
-        assert(staticHtml.includes('一期生效渠道：U号租'));
+        assert(staticHtml.includes('生效渠道：U号租、悠悠租号'));
         assert(staticHtml.includes('pricingChannelSheet'));
         assert(staticHtml.includes('渠道价格'));
 
