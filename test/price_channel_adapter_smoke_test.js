@@ -47,6 +47,7 @@ const zuhaowangCapability = listPriceChannelCapabilities().find((item) => item.c
 assert.strictEqual(zuhaowangCapability.enabled, true);
 assert.strictEqual(zuhaowangCapability.label, '租号王');
 assert.deepStrictEqual(zuhaowangCapability.package_keys, ['hour', 'p24', 'p72', 'p168']);
+assert.deepStrictEqual(zuhaowangCapability.price_rules.p24, { decimals: 1, rounding: 'truncate' });
 
 assert.deepStrictEqual(uhaozu.pickCurrentPriceSet(account).prices, {
     hour: 2,
@@ -83,6 +84,11 @@ assert.deepStrictEqual(zuhaowang.pickCurrentPriceSet(account), {
     rent_mode: 'day_only'
 });
 assert.deepStrictEqual(zuhaowang.buildPriceSet(2), { hour: 2, p24: 9, p72: 27, p168: 63 });
+assert.deepStrictEqual(zuhaowang.buildPriceSet(2.5, { hour: 1, p24: 5.5, p72: 15, p168: 40 }), {
+    hour: 2.5, p24: 13.7, p72: 37.5, p168: 100
+});
+assert.strictEqual(zuhaowang.normalizePackagePrice('p24', 13.75), 13.7);
+assert.strictEqual(zuhaowang.normalizePackagePrice('p24', 13.2), 13.2);
 assert.strictEqual(zuhaowang.buildTierPrices([2, 3, 4, 5]).length, 4);
 assert.strictEqual(zuhaowang.samePriceSet(
     { hour: 99, p24: 9, p72: 27, p168: 63 },

@@ -65,6 +65,9 @@ async function main() {
     assert.deepStrictEqual(defaults.channels.map((item) => item.channel), ['uhaozu', 'zuhaowang', 'uuzuhao']);
     assert.strictEqual(defaults.channels.find((item) => item.channel === 'uhaozu').ratios.week, 35);
     assert.strictEqual(defaults.channels.find((item) => item.channel === 'zuhaowang').ratios.p72, 13.5);
+    assert.deepStrictEqual(defaults.channels.find((item) => item.channel === 'zuhaowang').price_rules.p24, {
+        decimals: 1, rounding: 'truncate'
+    });
     assert.strictEqual(defaults.channels.find((item) => item.channel === 'uuzuhao').ratios.p168, 100.8);
     assert(defaults.channels.every((item) => item.source === 'default' && item.version === 0));
 
@@ -75,6 +78,7 @@ async function main() {
     });
     assert.deepStrictEqual(saved.ratios, { hour: 1, p24: 5, p72: 12, p168: 28 });
     assert.strictEqual(saved.version, 1);
+    assert.deepStrictEqual(saved.price_rules.p168, { decimals: 1, rounding: 'truncate' });
     assert.strictEqual(saved.queued_count, 1);
     const runtime = await getAccountPriceLadderRuntime(userId, '1', 'ratio-account', 'zuhaowang');
     assert.strictEqual(runtime.status, 'pending');

@@ -16,6 +16,7 @@ const {
     changePriceTemplate: changeZuhaowangPriceTemplate
 } = require('../zuhaowang/zuhaowang_price_api');
 const { _internals: { resolveDataIdByAccountAndGame } } = require('../zuhaowang/zuhaowang_api');
+const { normalizePackagePrice: normalizeZuhaowangPackagePrice } = require('./channel_adapters/zuhaowang_price_adapter');
 const { normalizeZuhaowangAuthPayload } = require('../user/user');
 const { getUhaozuPricingDashboardByUser } = require('./price_h5_service');
 const {
@@ -195,6 +196,42 @@ function normalizeUuzuhaoTargetPriceSet(prices = {}) {
     };
 }
 
+function normalizeUuzuhaoReadbackDelays(value) {
+    const source = Array.isArray(value) ? value : [0, 1000, 2000, 4000];
+    const delays = source
+        .slice(0, 6)
+        .map((item) => Number(item))
+        .filter((item) => Number.isFinite(item) && item >= 0)
+        .map((item) => Math.min(10000, Math.round(item)));
+    return delays.length > 0 ? delays : [0];
+}
+
+async function queryUuzuhaoProductUntilMatched(queryProduct, gameAccount, queryOptions, targetHour, options = {}) {
+    const delays = normalizeUuzuhaoReadbackDelays(options.readback_delays_ms);
+    const wait = options.sleep || sleep;
+    let product = null;
+    let prices = pickUuzuhaoProductPriceSet(null);
+    let lastError = null;
+    let attempts = 0;
+    for (const delayMs of delays) {
+        if (delayMs > 0) await wait(delayMs);
+        attempts += 1;
+        try {
+            const current = await queryProduct(gameAccount, queryOptions);
+            if (current) {
+                product = current;
+                prices = pickUuzuhaoProductPriceSet(current);
+                if (prices.hour === targetHour) {
+                    return { matched: true, product, prices, attempts, last_error: null };
+                }
+            }
+        } catch (error) {
+            lastError = error;
+        }
+    }
+    return { matched: false, product, prices, attempts, last_error: lastError };
+}
+
 function normalizeZuhaowangTemplate(template = {}) {
     const data = template && template.data && typeof template.data === 'object' ? template.data : template;
     const accountInfo = data && data.accountInfo && typeof data.accountInfo === 'object' ? data.accountInfo : {};
@@ -206,7 +243,7 @@ function normalizeZuhaowangTemplate(template = {}) {
     if (Number(accountInfo.priceTemplateType || 0) !== 1) throw new Error('租号王当前仅支持自主定价模板');
     if (!shortOpen && !longOpen) throw new Error('租号王商品未开启时租或日租');
     const prices = {
-        hour: shortOpen ? Number(Number(shortRent.obtainPrice || 0).toFixed(2)) : 0,
+        hour: shortOpen ? normalizeZuhaowangPackagePrice('hour', shortRent.obtainPrice || 0) : 0,
         p24: 0,
         p72: 0,
         p168: 0
@@ -214,7 +251,7 @@ function normalizeZuhaowangTemplate(template = {}) {
     for (const grade of Array.isArray(longRent && longRent.grades) ? longRent.grades : []) {
         const key = `p${String(grade && grade.key || '').trim()}`;
         if (Object.prototype.hasOwnProperty.call(prices, key)) {
-            prices[key] = Number(Number(grade.currentObtainPrice ?? grade.obtainPrice ?? 0).toFixed(2)) || 0;
+            prices[key] = normalizeZuhaowangPackagePrice(key, grade.currentObtainPrice ?? grade.obtainPrice ?? 0) || 0;
         }
     }
     return {
@@ -236,12 +273,13 @@ function normalizeZuhaowangTargetPriceSet(prices = {}) {
     for (const key of keys) {
         const value = Number(prices[key] || 0);
         if (!Number.isFinite(value) || value <= 0) throw new Error(`租号王目标${key}价格不合法`);
-        out[key] = Number(value.toFixed(2));
+        out[key] = normalizeZuhaowangPackagePrice(key, value);
     }
     return out;
 }
 
 function buildZuhaowangChangePriceParams(dataId, normalizedTemplate = {}, targetPrices = {}) {
+    const normalizedTargetPrices = normalizeZuhaowangTargetPriceSet(targetPrices);
     const assertRange = (value, minValue, maxValue, label) => {
         const price = Number(value);
         const min = Number(minValue || 0);
@@ -263,7 +301,7 @@ function buildZuhaowangChangePriceParams(dataId, normalizedTemplate = {}, target
         : null;
     if (normalizedTemplate.short_open) {
         assertRange(
-            targetPrices.hour,
+            normalizedTargetPrices.hour,
             normalizedTemplate.short_rent.minObtainPrice,
             normalizedTemplate.short_rent.maxObtainPrice,
             '时租到手价'
@@ -275,7 +313,7 @@ function buildZuhaowangChangePriceParams(dataId, normalizedTemplate = {}, target
             hour: Number(item.hour)
         })),
         minHour: Number(checkedMinHour && checkedMinHour.hour || 1),
-        obtainPrice: Number(targetPrices.hour),
+        obtainPrice: Number(normalizedTargetPrices.hour),
         isOpen: true,
         key: String(selectedDiscount && selectedDiscount.key || '1')
     } : null;
@@ -286,7 +324,7 @@ function buildZuhaowangChangePriceParams(dataId, normalizedTemplate = {}, target
         grades: grades.map((grade) => {
             const key = String(grade && grade.key || '').trim();
             const targetKey = `p${key}`;
-            const value = Number(targetPrices[targetKey] || 0);
+            const value = Number(normalizedTargetPrices[targetKey] || 0);
             if (!Number.isFinite(value) || value <= 0) throw new Error(`租号王 ${key} 小时套餐目标价格不合法`);
             assertRange(value, grade.minObtainPrice, grade.maxObtainPrice, `${key}小时套餐价格`);
             return { obtainPrice: String(Number(value.toFixed(2))), key };
@@ -309,7 +347,9 @@ function sameZuhaowangActivePriceSet(target = {}, actual = {}, mode = '') {
     const keys = mode === 'day_only'
         ? ['p24', 'p72', 'p168']
         : (mode === 'hour_only' ? ['hour'] : ['hour', 'p24', 'p72', 'p168']);
-    return keys.every((key) => Number(Number(target[key] || 0).toFixed(2)) === Number(Number(actual[key] || 0).toFixed(2)));
+    return keys.every((key) => (
+        normalizeZuhaowangPackagePrice(key, target[key]) === normalizeZuhaowangPackagePrice(key, actual[key])
+    ));
 }
 
 async function publishUhaozuAccountPriceSetByUser(userId, input = {}, options = {}) {
@@ -554,6 +594,7 @@ async function publishUuzuhaoAccountPriceSetByUser(userId, input = {}, options =
     let beforeProduct = null;
     let afterProduct = null;
     let modifyOutput = null;
+    let readbackAttempts = 0;
     let failureStage = 'authorization';
     const ensureBatch = async () => {
         if (batchCreated) return;
@@ -619,17 +660,22 @@ async function publishUuzuhaoAccountPriceSetByUser(userId, input = {}, options =
         if (beforePrices.min_rent_hour > 0) modifyInput.minRentHour = beforePrices.min_rent_hour;
         modifyOutput = await modifyPrice(goodsId, modifyInput, { auth });
         failureStage = 'query_after';
-        afterProduct = await queryProduct(gameAccount, {
+        const readback = await queryUuzuhaoProductUntilMatched(queryProduct, gameAccount, {
             auth,
             product_id: goodsId,
             game_id: gameId,
             game_name: gameName
-        });
-        if (!afterProduct) throw new Error('悠悠租号改价后未找到对应商品');
-        const afterPrices = pickUuzuhaoProductPriceSet(afterProduct);
+        }, targetPrices.hour, options);
+        readbackAttempts = readback.attempts;
+        afterProduct = readback.product;
+        if (!afterProduct) {
+            if (readback.last_error) throw readback.last_error;
+            throw new Error('悠悠租号改价后未找到对应商品');
+        }
+        const afterPrices = readback.prices;
         failureStage = 'verify_after';
-        if (afterPrices.hour !== targetPrices.hour) {
-            throw new Error(`悠悠租号时租价回读不一致: target=${targetPrices.hour} actual=${afterPrices.hour}`);
+        if (!readback.matched) {
+            throw new Error(`悠悠租号时租价回读不一致: target=${targetPrices.hour} actual=${afterPrices.hour} attempts=${readbackAttempts}`);
         }
 
         await upsertUserGameAccount({
@@ -663,11 +709,13 @@ async function publishUuzuhaoAccountPriceSetByUser(userId, input = {}, options =
             response_data: sanitizePriceLogPayload({
                 stage: 'verified',
                 verification_status: 'partial',
+                readback_attempts: readbackAttempts,
                 channel_response: modifyOutput && modifyOutput.raw
             }),
             after_data: sanitizePriceLogPayload({
                 product: afterProduct,
                 prices: { hour: afterPrices.hour },
+                readback_attempts: readbackAttempts,
                 verification_status: 'partial'
             }),
             price_before_hour: beforePrices.hour,
@@ -702,7 +750,10 @@ async function publishUuzuhaoAccountPriceSetByUser(userId, input = {}, options =
             stage: failureStage,
             code: String(error && error.code || '').trim(),
             message,
-            channel_response: error && error.uuzuhao_response ? error.uuzuhao_response : null
+            readback_attempts: readbackAttempts,
+            channel_response: error && error.uuzuhao_response
+                ? error.uuzuhao_response
+                : (modifyOutput && modifyOutput.raw || null)
         });
         await createPricePublishItemLog({
             batch_id: batchId,
@@ -1223,6 +1274,8 @@ module.exports = {
         normalizeUhaozuTargetPriceSet,
         pickUuzuhaoProductPriceSet,
         normalizeUuzuhaoTargetPriceSet,
+        normalizeUuzuhaoReadbackDelays,
+        queryUuzuhaoProductUntilMatched,
         sleep,
         getUhaozuAuthPayloadByUser,
         getUuzuhaoAuthPayloadByUser,

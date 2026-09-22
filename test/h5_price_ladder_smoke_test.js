@@ -128,6 +128,10 @@ async function main() {
         assert.strictEqual(ratioGetRes.status, 200);
         assert.deepStrictEqual(ratioGetJson.channels.map((item) => item.channel), ['uhaozu', 'zuhaowang', 'uuzuhao']);
         assert.strictEqual(ratioGetJson.channels.find((item) => item.channel === 'zuhaowang').ratios.p24, 4.5);
+        assert.deepStrictEqual(ratioGetJson.channels.find((item) => item.channel === 'zuhaowang').price_rules.p24, {
+            decimals: 1,
+            rounding: 'truncate'
+        });
         const ratioSaveRes = await fetch(`${baseUrl}/api/pricing/ladder/package-ratios`, {
             method: 'POST',
             headers,

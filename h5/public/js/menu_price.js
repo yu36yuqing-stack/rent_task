@@ -155,11 +155,24 @@ function validatePricingRatioDraft(channel = {}, draft = {}) {
   return out;
 }
 
+function normalizePricingPreviewPrice(value, rule = {}) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  const decimals = Math.max(0, Math.min(4, Number.isInteger(Number(rule.decimals)) ? Number(rule.decimals) : 2));
+  const factor = 10 ** decimals;
+  if (String(rule.rounding || '') === 'truncate') {
+    const scaled = Number((n * factor).toFixed(8));
+    return Number((Math.trunc(scaled) / factor).toFixed(decimals));
+  }
+  return Number(n.toFixed(decimals));
+}
+
 function calculatePricingRatioPreview(channel = {}, draft = {}, hourPrice = '') {
   const keys = Array.isArray(channel.package_keys) ? channel.package_keys : [];
   const labels = channel.package_labels && typeof channel.package_labels === 'object' ? channel.package_labels : {};
   const hour = Number(String(hourPrice == null ? '' : hourPrice).trim());
   const validHour = Number.isFinite(hour) && hour > 0;
+  const priceRules = channel.price_rules && typeof channel.price_rules === 'object' ? channel.price_rules : {};
   return keys.map((key) => {
     const ratio = key === 'hour' ? 1 : Number(String(draft[key] == null ? '' : draft[key]).trim());
     const validRatio = Number.isFinite(ratio) && ratio > 0;
@@ -168,7 +181,7 @@ function calculatePricingRatioPreview(channel = {}, draft = {}, hourPrice = '') 
       label: labels[key] || key,
       hour_price: validHour ? Number(hour.toFixed(2)) : 0,
       ratio: validRatio ? Number(ratio.toFixed(4)) : 0,
-      price: validHour && validRatio ? Number((hour * ratio).toFixed(2)) : 0
+      price: validHour && validRatio ? normalizePricingPreviewPrice(hour * ratio, priceRules[key]) : 0
     };
   });
 }
@@ -925,5 +938,6 @@ window.__pricingLadderTest = {
   formatPricingRatio,
   normalizePricingRatioDraft,
   validatePricingRatioDraft,
+  normalizePricingPreviewPrice,
   calculatePricingRatioPreview
 };

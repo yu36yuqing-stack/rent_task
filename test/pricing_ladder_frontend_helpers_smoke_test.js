@@ -173,5 +173,20 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(helpers.calculatePricingRatioPr
     { key: 'p72', label: '72小时', hour_price: 2.2, ratio: 13.5, price: 29.7 }
 ]);
 assert.strictEqual(helpers.calculatePricingRatioPreview(ratioChannel, { p24: 'bad', p72: '13.5' }, '0')[1].price, 0);
+const zuhaowangRatioChannel = {
+    ...ratioChannel,
+    price_rules: {
+        hour: { decimals: 2, rounding: 'round' },
+        p24: { decimals: 1, rounding: 'truncate' },
+        p72: { decimals: 1, rounding: 'truncate' }
+    }
+};
+assert.strictEqual(helpers.normalizePricingPreviewPrice(13.75, { decimals: 1, rounding: 'truncate' }), 13.7);
+assert.strictEqual(helpers.normalizePricingPreviewPrice(13.26, { decimals: 1, rounding: 'round' }), 13.3);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(helpers.calculatePricingRatioPreview(
+    zuhaowangRatioChannel,
+    { hour: '1', p24: '5.5', p72: '15' },
+    '2.5'
+))).map((item) => item.price), [2.5, 13.7, 37.5]);
 
 console.log('[OK] pricing_ladder_frontend_helpers_smoke_test passed');

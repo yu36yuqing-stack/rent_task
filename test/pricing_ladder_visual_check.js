@@ -127,7 +127,7 @@ async function main() {
         });
         await page.setViewport({ width: 1365, height: 900, deviceScaleFactor: 1 });
         const baseUrl = `http://127.0.0.1:${process.env.H5_PORT}`;
-        await page.goto(baseUrl, { waitUntil: 'networkidle0' });
+        await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
         const authBundle = JSON.stringify({
             token: createAccessToken(user),
             access_token: createAccessToken(user),
@@ -135,7 +135,8 @@ async function main() {
             user
         });
         await page.evaluate((bundle) => localStorage.setItem('h5_auth_bundle', bundle), authBundle);
-        await page.goto(`${baseUrl}/?menu=pricing_uhaozu`, { waitUntil: 'networkidle0' });
+        await page.goto(`${baseUrl}/?menu=pricing_uhaozu`, { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('[data-pricing-game="和平精英"]', { visible: true });
         await page.click('[data-pricing-game="和平精英"]');
         try {
             await page.waitForSelector('[data-pricing-account-card="hpjy-target"]', { timeout: 10000 });
@@ -247,7 +248,7 @@ async function main() {
         });
         await page.click('#pricingChannelCloseBtn');
 
-        await page.goto(`${baseUrl}/?menu=pricing_ratios`, { waitUntil: 'networkidle0' });
+        await page.goto(`${baseUrl}/?menu=pricing_ratios`, { waitUntil: 'domcontentloaded' });
         await page.waitForSelector('#pricingRatioPanel [data-pricing-ratio-key="week"]');
         await page.$eval('#pricingRatioPreviewHour', (input) => {
             input.value = '3.25';
@@ -281,19 +282,21 @@ async function main() {
         await page.waitForFunction(() => {
             const input = document.getElementById('pricingRatioPreviewHour');
             const item = document.querySelector('[data-pricing-ratio-result-key="p168"]');
-            return input && input.value === '3.25' && item && item.textContent.includes('¥102.38');
+            return input && input.value === '3.25' && item && item.textContent.includes('¥102.3');
         });
         await page.screenshot({
             path: path.join(outputDir, 'pricing-ratio-desktop.png'),
             fullPage: true
         });
 
-        await page.goto(`${baseUrl}/?menu=pricing_uhaozu`, { waitUntil: 'networkidle0' });
+        await page.goto(`${baseUrl}/?menu=pricing_uhaozu`, { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('[data-pricing-game="和平精英"]', { visible: true });
         await page.click('[data-pricing-game="和平精英"]');
         await page.waitForSelector(targetCard);
 
         await page.setViewport({ width: 390, height: 640, deviceScaleFactor: 1 });
-        await page.reload({ waitUntil: 'networkidle0' });
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('[data-pricing-game="和平精英"]', { visible: true });
         await page.click('[data-pricing-game="和平精英"]');
         await page.waitForSelector(targetCard);
         const layout = await page.evaluate((selector) => {
@@ -408,7 +411,7 @@ async function main() {
             path: path.join(outputDir, 'pricing-ladder-mobile.png'),
             fullPage: true
         });
-        await page.goto(`${baseUrl}/?menu=pricing_ratios`, { waitUntil: 'networkidle0' });
+        await page.goto(`${baseUrl}/?menu=pricing_ratios`, { waitUntil: 'domcontentloaded' });
         await page.waitForSelector('#pricingRatioPanel [data-pricing-ratio-key="week"]');
         await page.click('[data-pricing-ratio-channel="uuzuhao"]');
         await page.waitForSelector('#pricingRatioPanel [data-pricing-ratio-key="p168"]');

@@ -98,8 +98,60 @@ async function main() {
     assert.strictEqual(successLogs[0].request_data.target_prices.p2, 5.4);
     assert.strictEqual(successLogs[0].request_data.target_prices.p168, 302.4);
     assert.strictEqual(successLogs[0].response_data.verification_status, 'partial');
+    assert.strictEqual(successLogs[0].response_data.readback_attempts, 1);
     const rows = await listUserGameAccounts(user.id, 1, 20);
     assert.strictEqual(rows.list[0].channel_prd_info.uuzuhao.hourPrice, 3);
+
+    const delayedRows = [
+        { productId: 'product-publish-a', accountNo: 'publish-a', hourPrice: 3, minRentHour: 2 },
+        { productId: 'product-publish-a', accountNo: 'publish-a', hourPrice: 3, minRentHour: 2 },
+        { productId: 'product-publish-a', accountNo: 'publish-a', hourPrice: 4, minRentHour: 2 }
+    ];
+    const delayedWaits = [];
+    const delayed = await publishUuzuhaoAccountPriceSetByUser(user.id, {
+        game_id: '2',
+        game_name: '和平精英',
+        game_account: 'publish-a',
+        prices: { hour: 4 }
+    }, {
+        query_product: async () => delayedRows.shift(),
+        modify_price: async (productId, input) => ({
+            product_id: productId,
+            hour_price: input.hourPrice,
+            raw: { code: 0, msg: '成功' }
+        }),
+        readback_delays_ms: [0, 10],
+        sleep: async (ms) => { delayedWaits.push(ms); }
+    });
+    assert.strictEqual(delayed.ok, true);
+    assert.deepStrictEqual(delayedWaits, [10]);
+    const delayedLogs = await listPricePublishItemLogsByBatchId(delayed.batch_id);
+    assert.strictEqual(delayedLogs[0].response_data.readback_attempts, 2);
+
+    let persistentQueryCount = 0;
+    const persistentMismatch = await publishUuzuhaoAccountPriceSetByUser(user.id, {
+        game_id: '2',
+        game_name: '和平精英',
+        game_account: 'publish-a',
+        prices: { hour: 5 }
+    }, {
+        query_product: async () => {
+            persistentQueryCount += 1;
+            return { productId: 'product-publish-a', accountNo: 'publish-a', hourPrice: 4, minRentHour: 2 };
+        },
+        modify_price: async (productId, input) => ({
+            product_id: productId,
+            hour_price: input.hourPrice,
+            raw: { code: 0, msg: '成功' }
+        }),
+        readback_delays_ms: [0, 0, 0]
+    });
+    assert.strictEqual(persistentMismatch.ok, false);
+    assert.strictEqual(persistentMismatch.error_detail.stage, 'verify_after');
+    assert.strictEqual(persistentMismatch.error_detail.readback_attempts, 3);
+    assert.strictEqual(persistentMismatch.error_detail.channel_response.code, 0);
+    assert.match(persistentMismatch.message, /attempts=3/);
+    assert.strictEqual(persistentQueryCount, 4);
 
     let unchangedModifyCount = 0;
     const unchanged = await publishUuzuhaoAccountPriceSetByUser(user.id, {
@@ -178,6 +230,8 @@ async function main() {
         p24: 30,
         p168: 210
     }).p2, 3.8);
+    assert.deepStrictEqual(_internals.normalizeUuzuhaoReadbackDelays([0, -1, 10.4, 30000, 'bad']), [0, 10, 10000]);
+    assert.deepStrictEqual(_internals.normalizeUuzuhaoReadbackDelays([]), [0]);
     assert.strictEqual(_internals.isAuthRowUsable({
         platform: 'uuzuhao', auth_status: 'valid', channel_enabled: true
     }, 'uuzuhao'), true);

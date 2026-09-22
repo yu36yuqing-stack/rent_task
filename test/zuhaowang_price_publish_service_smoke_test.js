@@ -152,6 +152,37 @@ async function main() {
         hour: 2, p24: 0.1, p72: 27, p168: 63
     }), /不能低于/);
 
+    assert.deepStrictEqual(_internals.normalizeZuhaowangTargetPriceSet({
+        hour: 2.5, p24: 13.75, p72: 37.59, p168: 100.09
+    }), { hour: 2.5, p24: 13.7, p72: 37.5, p168: 100 });
+    await seed(93, 'channel-precision', 'precision-id');
+    const precisionTemplates = [
+        template({ hour: 2, p24: 9, p72: 27, p168: 63 }),
+        template({ hour: 2.5, p24: 13.7, p72: 37.5, p168: 100 })
+    ];
+    const precisionRequests = [];
+    const precisionResult = await publishZuhaowangAccountPriceSetByUser(93, {
+        game_id: '1', game_name: 'WZRY', game_account: 'channel-precision',
+        prices: { hour: 2.5, p24: 13.75, p72: 37.59, p168: 100.09 },
+        force_publish: true
+    }, {
+        auth,
+        get_template: async () => precisionTemplates.shift(),
+        change_template: async (params) => {
+            precisionRequests.push(params);
+            return { code: '0', desc: 'ok' };
+        }
+    });
+    assert.strictEqual(precisionResult.ok, true);
+    assert.deepStrictEqual(precisionResult.prices, { hour: 2.5, p24: 13.7, p72: 37.5, p168: 100 });
+    assert.deepStrictEqual(precisionRequests[0].selfTemplate.longRent.grades, [
+        { obtainPrice: '13.7', key: '24' },
+        { obtainPrice: '37.5', key: '72' },
+        { obtainPrice: '100', key: '168' }
+    ]);
+    const precisionLogs = await listPricePublishItemLogsByBatchId(precisionResult.batch_id);
+    assert.strictEqual(precisionLogs[0].request_data.target_prices.p24, 13.7);
+
     console.log('[OK] zuhaowang_price_publish_service_smoke_test passed');
 }
 
