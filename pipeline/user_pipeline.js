@@ -85,8 +85,11 @@ async function reconcilePlatformFaceVerifyBlacklist(userId, rows = [], logger = 
         const gname = String((row && row.game_name) || 'WZRY').trim() || 'WZRY';
         if (!acc) continue;
         const key = accountKeyOf(gid, acc);
-        const hits = detectFaceVerifyPlatforms(row);
         const existing = existingMap.get(key) || null;
+        const existingDetail = existing && existing.detail && typeof existing.detail === 'object' ? existing.detail : {};
+        const suppressedPlatforms = new Set(Array.isArray(existingDetail.manual_suppressed_platforms)
+            ? existingDetail.manual_suppressed_platforms : []);
+        const hits = detectFaceVerifyPlatforms(row).filter((item) => !suppressedPlatforms.has(item.platform));
         if (hits.length > 0) {
             const expireAt = toDateTimeText(Date.now() + FACE_VERIFY_HOLD_MS);
             await upsertSourceAndReconcile(uid, {
@@ -99,6 +102,7 @@ async function reconcilePlatformFaceVerifyBlacklist(userId, rows = [], logger = 
                 priority: 800,
                 expire_at: expireAt,
                 detail: {
+                    ...existingDetail,
                     platforms: hits.map((item) => item.platform),
                     reasons: hits.map((item) => ({ platform: item.platform, reason: item.reason })),
                     hold_hours: 12,

@@ -108,6 +108,14 @@ async function manualRemoveBlacklistMode2(userId, gameAccount, options = {}) {
     const projectedBefore = await buildProjectedBlacklistByUser(uid, { include_legacy_bootstrap: false });
     const winnerBefore = projectedBefore && projectedBefore[identityKey] ? projectedBefore[identityKey] : null;
     const clearSource = String((winnerBefore && winnerBefore.source) || '').trim().toLowerCase();
+    const sourceRows = await listBlacklistSourcesByUserAndAccounts(uid, [key], { active_only: false });
+    const faceSource = sourceRows.find((row) => String((row && row.source) || '').trim() === 'platform_face_verify');
+    const faceDetail = faceSource && faceSource.detail && typeof faceSource.detail === 'object' ? faceSource.detail : {};
+    const hasUhaozuFace = (Array.isArray(faceDetail.platforms) && faceDetail.platforms.includes('uhaozu'))
+        || (Array.isArray(faceDetail.reasons) && faceDetail.reasons.some((item) => item && item.platform === 'uhaozu'));
+    const suppressedPlatforms = hasUhaozuFace
+        ? Array.from(new Set([...(Array.isArray(faceDetail.manual_suppressed_platforms) ? faceDetail.manual_suppressed_platforms : []), 'uhaozu']))
+        : [];
     const clearedSources = [];
     const guard = {
         skipped_by_active_order: false,
@@ -122,7 +130,10 @@ async function manualRemoveBlacklistMode2(userId, gameAccount, options = {}) {
             active: false,
             detail: {
                 manual_remove: true,
-                manual_remove_source: source
+                manual_remove_source: source,
+                ...(clearSource === 'platform_face_verify' && hasUhaozuFace
+                    ? { manual_suppressed_platforms: suppressedPlatforms }
+                    : {})
             },
             game_id: gameId,
             game_name: gameName
@@ -130,6 +141,20 @@ async function manualRemoveBlacklistMode2(userId, gameAccount, options = {}) {
             desc: `${desc};clear winner source=${clearSource}`
         });
         clearedSources.push(clearSource);
+    }
+
+    if (hasUhaozuFace && clearSource !== 'platform_face_verify') {
+        await patchSource(uid, key, 'platform_face_verify', {
+            active: false,
+            detail: {
+                manual_remove: true,
+                manual_remove_source: source,
+                manual_suppressed_platforms: suppressedPlatforms
+            }
+        }, {
+            desc: `${desc};suppress uhaozu face verify after manual remove`
+        });
+        clearedSources.push('platform_face_verify');
     }
 
     const hasActiveOrder = await hasActiveOrderByAccount(uid, key);
