@@ -5,478 +5,356 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const assert = require('assert');
-
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rent-price-ladder-reconcile-'));
-process.env.MAIN_DB_FILE_PATH = path.join(tempDir, 'rent_robot.db');
-process.env.ORDER_DB_FILE_PATH = path.join(tempDir, 'rent_robot_order.db');
-process.env.PRICE_DB_FILE_PATH = path.join(tempDir, 'rent_robot_price.db');
-process.env.RUNTIME_DB_FILE_PATH = path.join(tempDir, 'rent_robot_runtime.db');
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rent-price-rolling-'));
+for (const name of ['MAIN', 'ORDER', 'PRICE', 'RUNTIME']) {
+    process.env[name + '_DB_FILE_PATH'] = path.join(tempDir, name + '.db');
+}
 process.env.ORDER_COUNT_TRACE = 'false';
 
-const { initUserGameAccountDb, upsertUserGameAccount } = require('../database/user_game_account_db');
-const {
-    upsertOrder,
-    listOrders,
-    listTodayOrderCountByAccounts,
-    listTodayPaidOrderCountByAccounts,
-    listBusinessDayFinishedOrderCountByAccounts,
-    _internal: orderInternal
-} = require('../database/order_db');
-const { upsertBlacklistSource } = require('../database/user_blacklist_source_db');
-const {
-    initAccountPriceLadderRuntimeDb,
-    getAccountPriceLadderRuntime,
-    upsertAccountPriceLadderRuntime
-} = require('../database/account_price_ladder_runtime_db');
-const { initPriceLadderJobStateDb, getPriceLadderJobBusinessDate } = require('../database/price_ladder_job_state_db');
-const {
-    getPriceLadderFeatureConfig,
-    setPriceLadderFeatureEnabled
-} = require('../database/price_ladder_feature_config_db');
+const { upsertUserGameAccount } = require('../database/user_game_account_db');
+const { upsertOrder, listRolling24hPaidOrderCountByAccounts } = require('../database/order_db');
+const { listPaidCountByAccounts } = require('../order/service/order_query_service');
+const { setPriceLadderFeatureEnabled, getPriceLadderFeatureConfig } = require('../database/price_ladder_feature_config_db');
+const { getAccountPriceLadderRuntime, upsertAccountPriceLadderRuntime } = require('../database/account_price_ladder_runtime_db');
+const { upsertAccountPriceLadderRule, getAccountPriceLadderRule } = require('../database/account_price_ladder_rule_db');
+const { openDatabase, openOrderDatabase } = require('../database/sqlite_client');
+const { initUserPlatformAuthDb } = require('../database/user_platform_auth_db');
+const { getPriceChannelAdapter } = require('../price/channel_adapters/channel_price_registry');
 const { savePriceLadderRuleByUser, getPriceLadderDashboardByUser, getPriceLadderChannelResultByUser } = require('../price/price_ladder_service');
 const {
-    buildPriceLadderCandidatesFromOrderWrite,
-    mergePriceLadderCandidates,
-    initializePriceLadderRuntimeOnRuleSave,
-    enqueuePriceLadderCandidates,
-    getPriceLadderApplyBlock,
-    reconcilePriceLadderAfterOrderSync,
-    reconcilePendingPriceLaddersByUser,
-    _internal
+    reconcilePriceLadderAfterOrderSync, reconcilePendingPriceLaddersByUser,
+    initializePriceLadderRuntimeOnRuleSave, enqueueFeatureActivationReconcile,
+    enqueueChannelPackageRatioChange, getPriceLadderApplyBlock,
+    buildPriceLadderCandidatesFromOrderWrite, mergePriceLadderCandidates, _internal
 } = require('../price/price_ladder_reconcile_service');
 
-const USER_ID = 8;
-const GAME_ID = '2';
-const GAME_NAME = '和平精英';
-const ACCOUNT = 'ladder-account';
-
-function addDays(day, count) {
-    const date = new Date(`${day}T12:00:00`);
-    date.setDate(date.getDate() + Number(count || 0));
-    return date.toISOString().slice(0, 10);
+const UID = 8;
+const GAME = '2';
+const ACCOUNT = 'rolling-account';
+const clock = (day, time) => new Date('2026-09-' + day + 'T' + time);
+const key = (account = ACCOUNT) => ({ game_id: GAME, game_account: account });
+const calls = [];
+const logs = [];
+function captureLog(level, line) {
+    const match = String(line).match(/^\[PriceLadder\]\[([^\]]+)\] (.*)$/);
+    assert(match, 'structured PriceLadder log expected');
+    logs.push({ level, event: match[1], ...JSON.parse(match[2]) });
 }
-
-function localDate(day, time = '08:00:00') {
-    return new Date(`${day}T${time}`);
-}
-
-async function writeOrder(orderNo, status, day, input = {}) {
-    const order = {
-        user_id: USER_ID,
-        channel: input.channel || 'uhaozu',
-        order_no: orderNo,
-        game_id: input.game_id || GAME_ID,
-        game_name: input.game_name || GAME_NAME,
-        game_account: input.game_account || ACCOUNT,
-        order_status: status,
-        order_amount: 10,
-        rec_amount: input.rec_amount == null ? 8 : input.rec_amount,
-        start_time: `${day} ${input.start_time || '08:00:00'}`,
-        end_time: `${day} ${input.end_time || '09:00:00'}`,
-        create_date: `${day} ${input.start_time || '08:00:00'}`,
-        desc: 'price ladder reconcile smoke'
+const logger = { log: line => captureLog('log', line), warn: line => captureLog('warn', line) };
+const lastSummary = () => logs.filter(row => row.event === 'summary').at(-1);
+let mode = 'success';
+const publisher = async (_uid, input) => {
+    calls.push(input);
+    if (mode === 'throw') throw new Error('network timeout');
+    if (mode === 'fail') return { ok: false, message: 'range error' };
+    return { ok: true, changed: mode !== 'unchanged', batch_id: 'batch-' + calls.length };
+};
+const runtime = (account = ACCOUNT, channel = 'uhaozu') => getAccountPriceLadderRuntime(UID, GAME, account, channel);
+const reconcile = (now, extra = {}) => reconcilePriceLadderAfterOrderSync(UID, [], { now, publisher, logger, ...extra });
+async function account(name = ACCOUNT, channels = ['uhaozu']) {
+    const info = {
+        uhaozu: { prd_id: 'u-' + name, rentalByHour: 2, rentalByNight: 8, rentalByDay: 12, rentalByWeek: 70 },
+        uuzuhao: { prd_id: 'y-' + name, hourPrice: 2, minRentHour: 2 },
+        zuhaowang: { prd_id: 'z-' + name, rent_mode: 'hour_only', hourPrice: 2 }
     };
-    const result = await upsertOrder(order);
-    return {
-        order,
-        result,
-        candidates: buildPriceLadderCandidatesFromOrderWrite(order, result)
-    };
-}
-
-async function runtime() {
-    return getAccountPriceLadderRuntime(USER_ID, GAME_ID, ACCOUNT, 'uhaozu');
-}
-
-(async () => {
-    await initUserGameAccountDb();
-    await initAccountPriceLadderRuntimeDb();
-    await initPriceLadderJobStateDb();
-    await setPriceLadderFeatureEnabled(USER_ID, true, { expected_version: 0 });
-    await upsertUserGameAccount({
-        user_id: USER_ID,
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        game_account: ACCOUNT,
-        account_remark: '测试账号',
-        channel_status: { uhaozu: '上架' },
-        channel_prd_info: {
-            uhaozu: {
-                prd_id: 'goods-ladder',
-                rentalByHour: 2,
-                rentalByNight: 8,
-                rentalByDay: 12,
-                rentalByWeek: 70
-            }
-        }
+    return upsertUserGameAccount({
+        user_id: UID, ...key(name), game_name: '和平精英',
+        channel_prd_info: Object.fromEntries(channels.map(c => [c, info[c]]))
     });
-
-    const day = orderInternal.businessDateText(6);
-    const nextDay = addDays(day, 1);
-    const publishCalls = [];
-    let publishMode = 'success';
-    const publisher = async (_uid, input) => {
-        publishCalls.push(input);
-        if (publishMode === 'throw') throw new Error('network timeout');
-        if (publishMode === 'fail') return { ok: false, message: '平台价格范围错误' };
-        if (publishMode === 'unchanged') return { ok: true, changed: false, prices: input.prices };
-        return { ok: true, changed: true, batch_id: `batch-${publishCalls.length}`, prices: input.prices };
-    };
-    await savePriceLadderRuleByUser(USER_ID, {
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        game_account: ACCOUNT,
-        prices: [2, 3, 4, 5],
-        expected_version: 0
-    }, {
-        now: localDate(day),
-        publisher
+}
+async function order(no, start, status = '租赁中', amount = 0, extra = {}) {
+    return upsertOrder({
+        user_id: UID, ...key(), game_name: '和平精英', channel: 'uhaozu',
+        order_no: no, start_time: start, end_time: start, order_status: status,
+        rec_amount: amount, order_amount: 10, ...extra
     });
+}
+async function sql(db, text, params = []) {
+    try { await new Promise((resolve, reject) => db.run(text, params, err => err ? reject(err) : resolve())); }
+    finally { await new Promise(resolve => db.close(resolve)); }
+}
+async function save(name = ACCOUNT, now = clock('29', '06:00:00'), extra = {}) {
+    return savePriceLadderRuleByUser(UID, {
+        ...key(name), game_name: '和平精英', prices: [2, 3, 4, 5], expected_version: 0
+    }, { now, publisher, logger, ...extra });
+}
+async function main() {
+    await setPriceLadderFeatureEnabled(UID, true, { expected_version: 0 });
+    await account();
+    const saved = await save();
+    assert.strictEqual(saved.publish_result.applied, 1);
     assert.strictEqual((await runtime()).applied_tier, 1);
-    assert.strictEqual(publishCalls.length, 1);
-    assert.strictEqual(publishCalls[0].force_publish, true);
-    publishCalls.length = 0;
-    publishMode = 'unchanged';
-    const sameTierReset = await reconcilePriceLadderAfterOrderSync(USER_ID, [], {
-        now: localDate(day), allow_apply: true, publisher
-    });
-    assert.strictEqual(sameTierReset.reset.due, true);
-    assert.strictEqual(sameTierReset.reconciliation.unchanged, 1);
-    assert.strictEqual(publishCalls.length, 1);
-    assert.strictEqual(publishCalls[0].trigger_source, 'daily_reset');
-    publishCalls.length = 0;
-    publishMode = 'success';
+    calls.length = 0;
+    const initialLogStart = logs.length;
+    const initial = await reconcile(clock('29', '06:05:00'));
+    assert.strictEqual(initial.reconciliation.unchanged, 1);
+    assert.strictEqual(calls.length, 0, 'saving trigger must not republish every round');
+    assert.deepStrictEqual(logs.slice(initialLogStart).map(row => row.event), ['start', 'summary'], 'same-tier normal decisions do not spam per-account logs');
+    assert.strictEqual(lastSummary().unchanged, 1);
+    assert.strictEqual(lastSummary().attempted, 0);
+    const brokenLogger = { log() { throw new Error('log sink unavailable'); }, warn() { throw new Error('log sink unavailable'); } };
+    assert.strictEqual((await reconcile(clock('29', '06:05:00'), { logger: brokenLogger })).reconciliation.unchanged, 1);
 
-    const renting = await writeOrder('order-1', '租赁中', day);
-    assert.strictEqual(renting.result.price_ladder_relevant_changed, false);
-    assert.deepStrictEqual(renting.candidates, []);
-    const finished = await writeOrder('order-1', '已完成', day);
-    assert.strictEqual(finished.result.status_changed, true);
-    assert.strictEqual(finished.result.price_ladder_relevant_changed, true);
-    assert.strictEqual(finished.candidates[0].delta, 1);
+    // Eligibility and window boundaries share the notification query, including account/game/user isolation.
+    await order('active', '2026-09-29 06:30:00');
+    await order('settling', '2026-09-29 07:30:00', '结算中');
+    await order('paid', '2026-09-29 08:30:00', '部分完成', 8, { channel: 'uuzuhao' });
+    await order('cancelled', '2026-09-29 08:00:00', '已取消');
+    await order('unpaid-finished', '2026-09-29 08:00:00', '已完成');
+    await order('expired', '2026-09-28 08:59:59');
+    await order('upper-exclusive', '2026-09-29 09:00:00', '出租中');
+    await order('future', '2026-09-30 10:00:00');
+    await order('other-user', '2026-09-29 08:00:00', '已完成', 8, { user_id: 9 });
+    await order('other-game', '2026-09-29 08:00:00', '已完成', 8, { game_id: '1' });
+    await order('other-account', '2026-09-29 08:00:00', '已完成', 8, { game_account: 'other' });
+    await order('deleted', '2026-09-29 08:00:00', '已完成', 8);
+    await sql(openOrderDatabase(), 'UPDATE "order" SET is_deleted=1 WHERE order_no=?', ['deleted']);
+    const now = clock('29', '09:00:00');
+    const counts = await listPaidCountByAccounts(UID, [key()], { mode: 'rolling_24h', now });
+    assert.strictEqual(counts[GAME + '::' + ACCOUNT], 3);
+    assert.deepStrictEqual(counts, await listRolling24hPaidOrderCountByAccounts(UID, [key()], { now }));
+    await assert.rejects(() => listPaidCountByAccounts(UID, [key()], { mode: 'rolling_24h', now: 'bad' }), /now/);
+    assert.deepStrictEqual(await listRolling24hPaidOrderCountByAccounts(UID, [], { now }), {});
+    await assert.rejects(() => reconcilePendingPriceLaddersByUser(0), /user_id/);
 
-    const first = await reconcilePriceLadderAfterOrderSync(USER_ID, finished.candidates, {
-        now: localDate(day),
-        allow_apply: true,
-        publisher,
-        activation_reconcile: true,
-        feature_version: 1
-    });
-    assert.strictEqual(first.reset.due, false);
-    assert.strictEqual(first.activation.scanned, 1);
-    assert.strictEqual(first.activation_marked, true);
-    assert.strictEqual((await getPriceLadderFeatureConfig(USER_ID)).reconcile_required, false);
-    assert.strictEqual(first.queued.queued, 1);
-    assert.strictEqual(first.reconciliation.applied, 1);
-    assert.strictEqual(publishCalls.length, 1);
-    assert.strictEqual(publishCalls[0].tier, 2);
+    const rise = await reconcile(now);
+    assert.strictEqual(rise.reconciliation.applied, 1);
+    assert.strictEqual(calls.at(-1).tier, 4);
+    assert.strictEqual(calls.at(-1).trigger_source, 'rolling_24h_reconcile');
+    const riseSummary = lastSummary();
+    const riseLogs = logs.filter(row => row.trace_id === riseSummary.trace_id);
+    assert.deepStrictEqual(riseLogs.map(row => row.event), ['start', 'apply_start', 'result', 'summary']);
+    assert.strictEqual(riseLogs[1].count_24h, 3);
+    assert.strictEqual(riseLogs[1].from_tier, 1);
+    assert.strictEqual(riseLogs[1].to_tier, 4);
+    assert.strictEqual(riseLogs[2].confirmed_tier, 4);
+    assert.strictEqual(riseLogs[2].batch_id, calls.at(-1) ? 'batch-' + calls.length : '');
+    assert.strictEqual(riseSummary.scanned_accounts, 1);
+    assert.strictEqual(riseSummary.scanned_channels, 1);
+    assert.strictEqual(riseSummary.applied, 1);
+    assert.strictEqual(riseSummary.failed, 0);
+    assert(riseSummary.duration_ms >= 0);
+    assert.strictEqual(new Date(riseSummary.window_end).getTime() - new Date(riseSummary.window_start).getTime(), 24 * 3600 * 1000);
+    const cappedCalls = calls.length;
+    await reconcile(clock('29', '09:05:00'));
+    assert.strictEqual((await runtime()).completed_order_count, 4);
+    assert.strictEqual(calls.length, cappedCalls);
+
+    const beforeQueryFailure = await runtime();
+    const beforeQueryFailureCalls = calls.length;
+    await upsertUserGameAccount({ user_id: 21, ...key('bootstrap-failure'), game_name: '和平精英', channel_prd_info: { uhaozu: { prd_id: 'bootstrap-goods' } } });
+    await upsertAccountPriceLadderRule(21, { ...key('bootstrap-failure'), game_name: '和平精英', prices: [2,3,4,5] }, { expected_version: 0 });
+    await sql(openOrderDatabase(), 'ALTER TABLE "order" RENAME TO unavailable_order');
+    try {
+        await assert.rejects(() => reconcilePendingPriceLaddersByUser(UID, { now, publisher, logger, trace_id: 'query-failure' }), /no such table/);
+        assert.strictEqual(calls.length, beforeQueryFailureCalls);
+        assert.deepStrictEqual(await runtime(), beforeQueryFailure, 'failed count query preserves the confirmed snapshot');
+        assert.strictEqual(lastSummary().trace_id, 'query-failure');
+        assert.strictEqual(lastSummary().status, 'error');
+        assert.strictEqual(lastSummary().error_code, 'RECONCILE_ERROR');
+        assert.strictEqual(lastSummary().scanned_channels, null, 'failed scan must not be reported as an empty successful scan');
+        await assert.rejects(() => reconcilePriceLadderAfterOrderSync(21, [], { now, publisher, logger, trace_id: 'bootstrap-failure' }), /no such table/);
+        assert.strictEqual(lastSummary().trace_id, 'bootstrap-failure');
+        assert.strictEqual(lastSummary().status, 'error');
+        assert.strictEqual(lastSummary().attempted, 0);
+        assert.strictEqual(calls.length, beforeQueryFailureCalls);
+    } finally {
+        await sql(openOrderDatabase(), 'ALTER TABLE unavailable_order RENAME TO "order"');
+    }
+
+    // An applied record from an old day and no order delta still converges every round.
+    await upsertAccountPriceLadderRuntime(UID, { ...(await runtime()), business_date: '2026-01-01', applied_tier: 1 });
+    assert.strictEqual((await reconcile(now)).reconciliation.applied, 1);
+    assert.strictEqual((await runtime()).applied_tier, 4);
+    await upsertAccountPriceLadderRuntime(UID, { ...(await runtime()), rule_version: 0 });
+    assert.strictEqual((await reconcile(now)).reconciliation.applied, 1, 'same tier but changed rule version is reapplied');
+    assert.strictEqual((await reconcile(clock('30', '06:01:00'))).reconciliation.unchanged, 1);
+    assert.strictEqual((await runtime()).applied_tier, 4, '06:00 is not a reset');
+
+    const boundary = await listPaidCountByAccounts(UID, [key()], { mode: 'rolling_24h', now: clock('30', '06:30:00') });
+    assert.strictEqual(boundary[GAME + '::' + ACCOUNT], 4, 'lower bound is inclusive');
+    await reconcile(clock('30', '07:30:01'));
+    assert.strictEqual((await runtime()).applied_tier, 3);
+    await reconcile(clock('30', '08:30:01'));
     assert.strictEqual((await runtime()).applied_tier, 2);
+    await reconcile(clock('30', '09:00:01'));
+    assert.strictEqual((await runtime()).applied_tier, 1, 'expiration downshifts without a new order');
 
-    const sameFinished = await writeOrder('order-1', '已完成', day);
-    assert.strictEqual(sameFinished.result.status_changed, false);
-    assert.strictEqual(sameFinished.result.price_ladder_relevant_changed, false);
-    const partial = await writeOrder('order-1', '部分完成', day);
-    assert.strictEqual(partial.result.status_changed, true);
-    assert.strictEqual(partial.result.price_ladder_relevant_changed, false);
-    assert.strictEqual((await reconcilePriceLadderAfterOrderSync(USER_ID, [], {
-        now: localDate(day), allow_apply: true, publisher
-    })).reconciliation.scanned, 0);
-    assert.strictEqual(publishCalls.length, 1);
-
-    const order2 = await writeOrder('order-2', '已完成', day, { channel: 'uuzuhao' });
-    const incomplete = await reconcilePriceLadderAfterOrderSync(USER_ID, order2.candidates, {
-        now: localDate(day), allow_apply: false, publisher
-    });
-    assert.strictEqual(incomplete.reconciliation.pending, 1);
-    assert.strictEqual(publishCalls.length, 1);
-    const recovered = await reconcilePriceLadderAfterOrderSync(USER_ID, [], {
-        now: localDate(day), allow_apply: true, publisher
-    });
-    assert.strictEqual(recovered.reconciliation.applied, 1);
-    assert.strictEqual(publishCalls.length, 2);
-    assert.strictEqual(publishCalls[1].tier, 3);
-
-    const order3 = await writeOrder('order-3', '已完成', day, { channel: 'zuhaowang' });
-    await upsertBlacklistSource(USER_ID, ACCOUNT, 'order_cooldown', {
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        active: true,
-        reason: '冷却期下架',
-        priority: 500
-    });
-    await upsertBlacklistSource(USER_ID, ACCOUNT, 'platform_face_verify', {
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        active: true,
-        reason: '人脸识别',
-        priority: 800
-    });
-    const allowedDuringCooldown = await reconcilePriceLadderAfterOrderSync(USER_ID, order3.candidates, {
-        now: localDate(day), allow_apply: true, publisher
-    });
-    assert.strictEqual(allowedDuringCooldown.reconciliation.applied, 1);
-    assert.strictEqual(publishCalls.length, 3);
-    assert.strictEqual(publishCalls[2].tier, 4);
-    assert.strictEqual((await runtime()).status, 'applied');
-
-    await upsertBlacklistSource(USER_ID, ACCOUNT, 'manual_maintenance', {
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        active: true,
-        reason: '维护中',
-        priority: 900
-    });
-    const maintenanceBlock = await getPriceLadderApplyBlock(USER_ID, {
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        game_account: ACCOUNT
-    });
-    assert.strictEqual(maintenanceBlock.blocked, false);
-    assert.strictEqual(maintenanceBlock.reason, '');
-    await upsertBlacklistSource(USER_ID, ACCOUNT, 'order_cooldown', {
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        active: false,
-        reason: '冷却期下架',
-        priority: 500
-    });
-    await upsertBlacklistSource(USER_ID, ACCOUNT, 'platform_face_verify', {
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        active: false,
-        reason: '人脸识别',
-        priority: 800
-    });
-    await upsertBlacklistSource(USER_ID, ACCOUNT, 'manual_maintenance', {
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        active: false,
-        reason: '维护中',
-        priority: 900
-    });
-
-    const order4 = await writeOrder('order-4', '已完成', day);
-    const sameTier = await reconcilePriceLadderAfterOrderSync(USER_ID, order4.candidates, {
-        now: localDate(day), allow_apply: true, publisher
-    });
-    assert.strictEqual(sameTier.reconciliation.unchanged, 1);
-    assert.strictEqual(publishCalls.length, 3);
-
-    await upsertUserGameAccount({
-        user_id: USER_ID,
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        game_account: ACCOUNT,
-        channel_prd_info: {
-            uhaozu: {
-                prd_id: 'goods-ladder',
-                rentalByHour: 4.66,
-                rentalByNight: 17,
-                rentalByDay: 26,
-                rentalByWeek: 145
-            }
-        }
-    });
-    const noPending = await reconcilePendingPriceLaddersByUser(USER_ID, {
-        now: localDate(day), allow_apply: true, publisher
-    });
-    assert.strictEqual(noPending.scanned, 0);
-    assert.strictEqual(publishCalls.length, 3);
-    const channelView = await getPriceLadderChannelResultByUser(USER_ID, {
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        game_account: ACCOUNT
-    });
-    assert.strictEqual(channelView.channel_result.apply_status, 'manual');
-    assert.strictEqual(channelView.channel_result.remote_current.hour, 4.66);
-
-    const refund4 = await writeOrder('order-4', '已退款', day);
-    const stillTier4 = await reconcilePriceLadderAfterOrderSync(USER_ID, refund4.candidates, {
-        now: localDate(day), allow_apply: true, publisher
-    });
-    assert.strictEqual(stillTier4.reconciliation.unchanged, 1);
-    const refund3 = await writeOrder('order-3', '已退款', day, { channel: 'zuhaowang' });
-    const downshift = await reconcilePriceLadderAfterOrderSync(USER_ID, refund3.candidates, {
-        now: localDate(day), allow_apply: true, publisher
-    });
-    assert.strictEqual(downshift.reconciliation.applied, 1);
-    assert.strictEqual(publishCalls.at(-1).tier, 3);
-
-    const reset = await reconcilePriceLadderAfterOrderSync(USER_ID, [], {
-        now: localDate(nextDay, '06:01:00'), allow_apply: true, publisher
-    });
-    assert.strictEqual(reset.reset.due, true);
-    assert.strictEqual(reset.reconciliation.applied, 1);
-    assert.strictEqual(publishCalls.at(-1).tier, 1);
-    const resetAgain = await reconcilePriceLadderAfterOrderSync(USER_ID, [], {
-        now: localDate(nextDay, '06:06:00'), allow_apply: true, publisher
-    });
-    assert.strictEqual(resetAgain.reset.due, false);
-    assert.strictEqual(resetAgain.reconciliation.scanned, 0);
-
-    const active = await writeOrder('active-next', '租赁中', nextDay);
-    assert.strictEqual(active.candidates.length, 0);
-    const nextFinished = await writeOrder('finished-next', '已完成', nextDay);
-    const activeBlocked = await reconcilePriceLadderAfterOrderSync(USER_ID, nextFinished.candidates, {
-        now: localDate(nextDay), allow_apply: true, publisher
-    });
-    assert.strictEqual(activeBlocked.reconciliation.applied, 1);
-    assert.strictEqual(activeBlocked.reconciliation.list[0].tier, 2);
-    await writeOrder('active-next', '已撤单', nextDay);
-    const failedNext = await writeOrder('failed-next', '已完成', nextDay);
-    publishMode = 'fail';
-    const failed = await reconcilePriceLadderAfterOrderSync(USER_ID, failedNext.candidates, {
-        now: localDate(nextDay), allow_apply: true, publisher
-    });
-    assert.strictEqual(failed.reconciliation.failed, 1);
+    await order('new', '2026-09-30 09:10:00');
+    const beforeIncomplete = await runtime();
+    const incompleteCalls = calls.length;
+    await reconcile(clock('30', '09:11:00'), { allow_apply: false });
+    assert.strictEqual(lastSummary().pending, 1);
+    assert.strictEqual(logs.at(-2).reason, 'order_sync_incomplete');
+    assert.strictEqual(logs.at(-2).count_24h, null);
+    assert.strictEqual(logs.at(-2).count_snapshot_valid, false);
+    assert.strictEqual(calls.length, incompleteCalls);
+    assert.strictEqual((await runtime()).applied_tier, beforeIncomplete.applied_tier);
+    assert.strictEqual((await runtime()).desired_tier, beforeIncomplete.desired_tier);
+    mode = 'fail';
+    assert.strictEqual((await reconcile(clock('30', '09:12:00'))).reconciliation.failed, 1);
+    assert.strictEqual(lastSummary().status, 'partial_failed');
+    assert.strictEqual(logs.at(-2).level, 'warn');
+    assert.strictEqual(logs.at(-2).error_message, 'range error');
+    assert.strictEqual(logs.at(-2).next_retry_at, '2026-09-30 09:42:00');
+    assert.strictEqual((await runtime()).applied_tier, 1);
+    await reconcile(clock('30', '09:12:30'), { allow_apply: false });
     assert.strictEqual((await runtime()).status, 'failed');
-    const tooSoon = await reconcilePendingPriceLaddersByUser(USER_ID, {
-        now: localDate(nextDay, '08:10:00'), allow_apply: true, publisher
-    });
-    assert.strictEqual(tooSoon.scanned, 0);
-    publishMode = 'throw';
-    const thrown = await reconcilePendingPriceLaddersByUser(USER_ID, {
-        now: localDate(nextDay, '08:31:00'), allow_apply: true, publisher
-    });
-    assert.strictEqual(thrown.failed, 1);
-    publishMode = 'success';
-    const retried = await reconcilePendingPriceLaddersByUser(USER_ID, {
-        now: localDate(nextDay, '09:02:00'), allow_apply: true, publisher
-    });
-    assert.strictEqual(retried.applied, 1);
+    assert.strictEqual((await runtime()).last_error, 'range error', 'incomplete sync retains the channel failure evidence');
+    await order('new2', '2026-09-30 09:13:00', '已完成', 8);
+    const retryCalls = calls.length;
+    const waiting = await reconcile(clock('30', '09:14:00'));
+    assert.strictEqual(waiting.reconciliation.list[0].reason, 'retry_not_due');
+    assert.strictEqual(lastSummary().retry_waiting, 1);
+    assert.strictEqual(lastSummary().attempted, 0);
+    assert.strictEqual(logs.at(-2).to_tier, 3);
+    assert.strictEqual(logs.at(-2).error_message, 'range error');
+    assert.strictEqual((await runtime()).desired_tier, 3);
+    assert.strictEqual((await runtime()).last_error, 'range error');
+    assert.strictEqual((await runtime()).next_retry_at, '2026-09-30 09:42:00');
+    assert.strictEqual(calls.length, retryCalls);
+    mode = 'throw';
+    assert.strictEqual((await reconcile(clock('30', '09:42:00'))).reconciliation.failed, 1);
+    assert.strictEqual((await runtime()).last_error, 'network timeout');
+    mode = 'unchanged';
+    assert.strictEqual((await reconcile(clock('30', '10:12:00'))).reconciliation.unchanged, 1);
+    assert.strictEqual(logs.at(-2).publish_attempted, true, 'publisher-confirmed no-op is observable even when no write is needed');
+    assert.strictEqual(lastSummary().attempted, 1);
+    assert.strictEqual((await runtime()).applied_tier, 4); // future row now entered the window
+    assert.strictEqual((await runtime()).retry_count, 0);
+    mode = 'success';
 
-    const counts = await listBusinessDayFinishedOrderCountByAccounts(USER_ID, [{
-        game_id: GAME_ID, game_account: ACCOUNT
-    }], nextDay);
-    assert.strictEqual(counts[`${GAME_ID}::${ACCOUNT}`], 2);
-    const orderPage = await listOrders(USER_ID, 1, 500);
-    assert(orderPage.total >= 6);
-    assert(orderPage.list.some((item) => item.order_no === 'finished-next'));
-    const naturalCounts = await listTodayOrderCountByAccounts(USER_ID, [ACCOUNT], day);
-    assert(Number(naturalCounts[ACCOUNT] || 0) >= 4);
-    const paidCounts = await listTodayPaidOrderCountByAccounts(USER_ID, [{
-        game_id: GAME_ID, game_account: ACCOUNT
-    }], day);
-    assert(Number(paidCounts[`${GAME_ID}::${ACCOUNT}`] || 0) >= 2);
-    const dashboard = await getPriceLadderDashboardByUser(USER_ID, { game_id: GAME_ID, game_name: GAME_NAME });
+    const dashboard = await getPriceLadderDashboardByUser(UID, { game_id: GAME, now: clock('30', '09:14:00') });
+    assert.strictEqual(dashboard.count_window, '近24小时');
     assert.strictEqual(dashboard.list[0].today_order_count, 2);
-    assert.strictEqual(dashboard.list[0].current_tier, 3);
-    assert.strictEqual(await getPriceLadderJobBusinessDate(USER_ID, _internal.DAILY_RESET_JOB_KEY), nextDay);
+    assert.strictEqual(dashboard.list[0].desired_tier, 3);
+    assert.strictEqual(dashboard.list[0].current_tier, 4);
+    const view = await getPriceLadderChannelResultByUser(UID, { ...key(), now: clock('30', '09:14:00') });
+    assert.strictEqual(view.desired_tier, 3);
+    assert.strictEqual(view.channel_result.current_tier, 4);
+    assert.strictEqual(view.channel_result.apply_status, 'manual');
 
-    const restricted = await getPriceLadderApplyBlock(USER_ID, {
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        game_account: 'restricted-account',
-        channel_status: { uhaozu: '授权异常' },
-        channel_prd_info: { uhaozu: { audit_reason: '授权失效' } }
+    // Three independent channels; resolver failure and publish failure cannot stop another channel.
+    const multi = 'three-channels';
+    await account(multi, ['uhaozu', 'zuhaowang', 'uuzuhao']);
+    const savedMulti = await save(multi, clock('30', '10:15:00'));
+    assert.strictEqual(savedMulti.publish_result.applied, 3);
+    await order('multi-paid', '2026-09-30 10:16:00', '已完成', 8, { game_account: multi });
+    const zhw = getPriceChannelAdapter('zuhaowang');
+    const originalResolver = zhw.resolveTierPrices;
+    zhw.resolveTierPrices = async () => { throw new Error('resolver failed'); };
+    const split = await reconcile(clock('30', '10:17:00'), {
+        trace_id: 'multi-split',
+        accounts: [key(multi)],
+        publishers: { uuzuhao: async () => ({ ok: false, message: 'y failed' }) }
     });
-    assert.strictEqual(restricted.blocked, false);
-    assert.strictEqual(restricted.reason, '');
-    assert.strictEqual(await initializePriceLadderRuntimeOnRuleSave(0, null), null);
+    zhw.resolveTierPrices = originalResolver;
+    assert.strictEqual(split.reconciliation.applied, 1);
+    assert.strictEqual(split.reconciliation.failed, 2);
+    assert.strictEqual(lastSummary().trace_id, 'multi-split');
+    assert.strictEqual(lastSummary().attempted, 2);
+    assert.strictEqual(lastSummary().failed, 2);
+    assert.strictEqual(lastSummary().scanned_accounts, 1);
+    assert.strictEqual(lastSummary().scanned_channels, 3);
+    assert.strictEqual((await runtime(multi)).applied_tier, 2);
+    assert.strictEqual((await runtime(multi, 'zuhaowang')).applied_tier, 1);
+    assert.strictEqual((await runtime(multi, 'uuzuhao')).applied_tier, 1);
+    await order('multi-paid2', '2026-09-30 10:18:00', '已完成', 8, { game_account: multi });
+    await reconcile(clock('30', '10:19:00'), { accounts: [key(multi)] });
+    assert.strictEqual((await runtime(multi, 'zuhaowang')).desired_tier, 3);
+    const beforeRetry = calls.length;
+    const recovered = await reconcile(clock('30', '10:47:00'), { accounts: [key(multi)] });
+    assert.strictEqual(recovered.reconciliation.applied, 2);
+    assert.strictEqual(calls.length - beforeRetry, 2, 'successful channel is not retried');
+    assert(calls.slice(-2).every(c => c.tier === 3));
 
-    await upsertAccountPriceLadderRuntime(USER_ID, {
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        game_account: 'missing-account',
-        channel: 'uhaozu',
-        business_date: nextDay,
-        completed_order_count: 1,
-        desired_tier: 2,
-        applied_tier: 1,
-        status: 'pending'
-    });
-    const missing = await reconcilePendingPriceLaddersByUser(USER_ID, {
-        now: localDate(nextDay, '10:00:00'), allow_apply: true, publisher
-    });
-    assert(missing.list.some((item) => item.reason === 'rule_missing'));
+    // Explicitly disabled channel never invokes its publisher or emits a failure.
+    await initUserPlatformAuthDb();
+    await sql(openDatabase(), "INSERT INTO user_platform_auth (user_id,platform,auth_type,auth_payload,channel_enabled) VALUES (?,?,'test','{}',0)", [UID, 'zuhaowang']);
+    await upsertAccountPriceLadderRuntime(UID, { ...(await runtime(multi, 'zuhaowang')), applied_tier: 1 });
+    const skipped = await reconcile(clock('30', '10:48:00'), { accounts: [key(multi)] });
+    assert(skipped.reconciliation.list.some(c => c.reason === 'channel_unavailable'));
+    assert.strictEqual(skipped.reconciliation.failed, 0);
+    assert.strictEqual(lastSummary().skipped, 1);
+    assert.strictEqual(logs.at(-2).reason, 'channel_unavailable');
+    await sql(openDatabase(), 'DELETE FROM user_platform_auth WHERE user_id=?', [UID]);
 
-    await upsertUserGameAccount({
-        user_id: USER_ID,
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        game_account: 'no-baseline',
-        account_remark: '无基准',
-        channel_status: { uhaozu: '上架' },
-        channel_prd_info: { uhaozu: { prd_id: 'goods-no-baseline', rentalByHour: 2 } }
-    });
-    await savePriceLadderRuleByUser(USER_ID, {
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        game_account: 'no-baseline',
-        prices: [2, 3, 4, 5],
-        expected_version: 0
-    });
-    const noBaselineOrder = await writeOrder('no-baseline-order', '已完成', nextDay, {
-        game_account: 'no-baseline'
-    });
-    const noBaseline = await reconcilePriceLadderAfterOrderSync(USER_ID, noBaselineOrder.candidates, {
-        now: localDate(nextDay, '10:01:00'), allow_apply: true, publisher
-    });
-    assert(noBaseline.reconciliation.list.some((item) => item.game_account === 'no-baseline' && item.status === 'applied'));
-
-    const noRuleQueued = await enqueuePriceLadderCandidates(USER_ID, [{
-        game_id: GAME_ID,
-        game_name: GAME_NAME,
-        game_account: 'unconfigured-account',
-        business_date: nextDay,
-        delta: 1,
-        order_nos: ['unconfigured-order']
-    }], { now: localDate(nextDay, '10:02:00') });
-    assert.strictEqual(noRuleQueued.queued, 0);
-    assert.strictEqual(await getAccountPriceLadderRuntime(USER_ID, GAME_ID, 'unconfigured-account', 'uhaozu'), null);
-
-    await upsertAccountPriceLadderRuntime(USER_ID, {
-        ...(await runtime()),
-        applied_tier: 1,
-        status: 'pending',
-        next_retry_at: ''
-    });
-    const callsBeforeDisabledGuard = publishCalls.length;
-    const disabledMidRun = await reconcilePendingPriceLaddersByUser(USER_ID, {
-        now: localDate(nextDay, '10:03:00'),
-        allow_apply: true,
-        publisher,
-        feature_guard: async () => ({ enabled: false })
-    });
-    assert.strictEqual(disabledMidRun.pending, 1);
-    assert(disabledMidRun.list.some((item) => item.reason === 'feature_disabled'));
-    assert.strictEqual(publishCalls.length, callsBeforeDisabledGuard);
-
-    let clearedDuringGuard = false;
-    const callsBeforeClearGuard = publishCalls.length;
-    const clearedMidRun = await reconcilePendingPriceLaddersByUser(USER_ID, {
-        now: localDate(nextDay, '10:04:00'),
-        allow_apply: true,
-        publisher,
+    // Preserve feature/clear guards and explicit ratio-change reapplication.
+    const rule = await getAccountPriceLadderRule(UID, GAME, ACCOUNT);
+    await upsertAccountPriceLadderRuntime(UID, { ...(await runtime()), applied_tier: 1, next_retry_at: '' });
+    const guard = await reconcilePendingPriceLaddersByUser(UID, { now: clock('30', '11:00:00'), publisher, accounts: [key()], feature_guard: async () => ({ enabled: false }) });
+    assert.strictEqual(guard.list[0].reason, 'feature_disabled');
+    const cleared = await reconcilePendingPriceLaddersByUser(UID, {
+        now: clock('30', '11:00:00'), publisher, accounts: [key()],
         feature_guard: async () => {
-            if (!clearedDuringGuard) {
-                await savePriceLadderRuleByUser(USER_ID, {
-                    game_id: GAME_ID,
-                    game_name: GAME_NAME,
-                    game_account: ACCOUNT,
-                    action: 'clear',
-                    expected_version: 1
-                });
-                clearedDuringGuard = true;
-            }
+            await savePriceLadderRuleByUser(UID, { ...key(), action: 'clear', expected_version: rule.version });
             return { enabled: true };
         }
     });
-    assert(clearedMidRun.list.some((item) => item.reason === 'rule_cleared'));
-    assert.strictEqual(publishCalls.length, callsBeforeClearGuard);
+    assert.strictEqual(cleared.list[0].reason, 'rule_cleared');
+    const queued = await enqueueChannelPackageRatioChange(UID, 'uhaozu', { now: clock('30', '11:00:00') });
+    assert.strictEqual(queued.queued, 1);
+    assert.strictEqual((await reconcile(clock('30', '11:00:00'), { accounts: [key(multi)] })).reconciliation.applied, 2);
+    assert.strictEqual((await runtime(multi, 'zuhaowang')).applied_tier, 3, 're-enabled channel converges normally');
+    const activation = await enqueueFeatureActivationReconcile(UID, { now: clock('30', '11:01:00') });
+    assert.strictEqual(activation.queued, 3);
+    const feature = await getPriceLadderFeatureConfig(UID);
+    assert.strictEqual((await reconcile(clock('30', '11:01:00'), { activation_reconcile: true, feature_version: feature.version })).activation_marked, true);
+    await assert.rejects(() => enqueueChannelPackageRatioChange(0, 'uhaozu'), /user_id/);
+    await assert.rejects(() => enqueueChannelPackageRatioChange(UID, 'bad'), /不支持/);
+    assert.strictEqual(await initializePriceLadderRuntimeOnRuleSave(0, null), null);
+    assert.strictEqual(await initializePriceLadderRuntimeOnRuleSave(UID, { ...key('missing'), version: 1 }, { now }), null);
+    assert.strictEqual((await getPriceLadderApplyBlock(UID, {})).blocked, false);
+    assert.strictEqual((await reconcilePendingPriceLaddersByUser(99)).scanned, 0);
 
-    assert.deepStrictEqual(mergePriceLadderCandidates([
-        { game_id: GAME_ID, game_account: ACCOUNT, business_date: day, delta: 1, order_no: 'a' },
-        { game_id: GAME_ID, game_account: ACCOUNT, business_date: day, delta: -1, order_no: 'b' }
-    ]), []);
+    await upsertAccountPriceLadderRuntime(UID, { ...key('missing'), game_name: '和平精英', channel: 'uhaozu', status: 'pending' });
+    const missing = await reconcilePendingPriceLaddersByUser(UID, { now: clock('30', '12:00:00'), publisher, accounts: [key('missing')] });
+    assert.strictEqual(missing.list[0].reason, 'rule_missing');
+    await upsertAccountPriceLadderRule(UID, { ...key('missing'), game_name: '和平精英', prices: [2,3,4,5] }, { expected_version: 0 });
+    assert.strictEqual((await reconcilePendingPriceLaddersByUser(UID, { now: clock('30', '12:31:00'), publisher, accounts: [key('missing')] })).list[0].reason, 'account_missing');
+    const adapter = getPriceChannelAdapter('uhaozu');
+    const resolve = adapter.resolveTierPrices;
+    adapter.resolveTierPrices = async () => ({ ready: true, baseline_version: 0, tiers: [{ tier: 3, prices: { hour: 0 } }] });
+    await upsertAccountPriceLadderRuntime(UID, { ...(await runtime(multi)), applied_tier: 1, next_retry_at: '' });
+    assert.strictEqual((await reconcilePendingPriceLaddersByUser(UID, { now: clock('30', '12:32:00'), publisher, accounts: [key(multi)] })).failed, 1);
+    adapter.resolveTierPrices = resolve;
+
+    // Log failure and credential redaction cannot change error storage or the business retry schedule.
+    await upsertAccountPriceLadderRuntime(UID, { ...(await runtime(multi)), applied_tier: 1, next_retry_at: '' });
+    const secretError = 'token=secret app_secret=hidden authorization=Bearer private';
+    const redacted = await reconcile(clock('30', '13:03:00'), {
+        accounts: [key(multi)], logger: { log: line => captureLog('log', line) },
+        publisher: async () => ({ ok: false, message: secretError })
+    });
+    assert.strictEqual(redacted.reconciliation.failed, 1);
+    assert.strictEqual((await runtime(multi)).last_error, secretError);
+    assert(!logs.at(-2).error_message.includes('secret '));
+    assert(!logs.at(-2).error_message.includes('hidden'));
+    assert(!logs.at(-2).error_message.includes('private'));
+    assert(logs.at(-2).error_message.includes('[REDACTED]'));
+    assert.strictEqual((await reconcilePendingPriceLaddersByUser(99, { logger, trigger_task_id: 'task-empty' })).scanned, 0);
+    assert.strictEqual(lastSummary().trace_id, 'task-empty');
+    assert.strictEqual(lastSummary().scanned_channels, 0);
+    assert.strictEqual(lastSummary().status, 'ok');
+    await assert.rejects(() => reconcilePendingPriceLaddersByUser(UID, { now: 'bad', logger }), /now/);
+    assert.strictEqual(lastSummary().status, 'error');
+    assert.strictEqual(lastSummary().window_start, '');
+
+    // Candidate metadata remains compatible, but no longer controls convergence.
+    assert.deepStrictEqual(buildPriceLadderCandidatesFromOrderWrite({}, {}), []);
+    const candidateOrder = { ...key(), start_time: '2026-09-29 08:00:00', order_status: '已完成', order_no: 'c' };
+    assert.strictEqual(buildPriceLadderCandidatesFromOrderWrite(candidateOrder, { price_ladder_relevant_changed: true }).length, 1);
+    assert.deepStrictEqual(buildPriceLadderCandidatesFromOrderWrite(candidateOrder, { price_ladder_relevant_changed: true, previous_order: candidateOrder }), []);
+    assert.deepStrictEqual(mergePriceLadderCandidates(null), []);
+    assert.deepStrictEqual(mergePriceLadderCandidates([{}]), []);
+    assert.strictEqual(_internal.businessDateForOrder({}), '');
+    assert.strictEqual(_internal.businessDateForOrder({ start_time: 'invalid' }), '');
+    assert.strictEqual(_internal.accountCandidate({ order_status: '已完成' }, 1, 'x'), null);
     assert.strictEqual(_internal.tierByCompletedCount(-1), 1);
     assert.strictEqual(_internal.tierByCompletedCount(99), 4);
-    assert.strictEqual(_internal.businessDateForOrder({ start_time: `${day} 05:00:00` }), addDays(day, -1));
-    assert.strictEqual(_internal.isRetryDue({ next_retry_at: '' }), true);
-    assert(/"tier":1/.test(_internal.priceSignature(1, { hour: 2, night: 8, day: 12, week: 70 })));
-
-    console.log('[OK] price_ladder_reconcile_smoke_test passed');
-})().catch((error) => {
-    console.error('[FAIL] price_ladder_reconcile_smoke_test failed:', error);
-    process.exit(1);
-});
+    assert.strictEqual(_internal.isRetryDue({ next_retry_at: 'invalid' }, now), true);
+    assert.strictEqual(_internal.isRetryDue({}, now), true);
+    assert(_internal.priceSignature(1, { hour: 2 }).includes('"tier":1'));
+    console.log('[OK] price_ladder_reconcile_smoke_test rolling-window scenarios passed');
+}
+main().catch(error => { console.error('[FAIL] rolling reconcile:', error); process.exit(1); });

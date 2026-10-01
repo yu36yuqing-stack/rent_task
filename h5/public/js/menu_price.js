@@ -126,8 +126,15 @@ function pricingApplyStatusText(status) {
 
 function pricingTierLabel(tier) {
   const value = Math.min(4, Math.max(1, Number(tier || 1)));
-  if (value === 1) return '第 1 单时租价（完成 0 单）';
-  return `第 ${value} 单时租价（完成 ${value - 1} 单后）`;
+  return `第 ${value} 档时租价（近24h ${value - 1}${value === 4 ? '+' : ''}单）`;
+}
+
+function pricingTierSummary(item = {}) {
+  if (!item.configured) return '阶梯调价：未启用';
+  const current = Number(item.current_tier || 0);
+  const desired = Number(item.desired_tier || 1);
+  const status = item.ladder_status === 'failed' ? ' · 换档失败' : (current !== desired || ['pending', 'blocked'].includes(item.ladder_status) ? ' · 待换档' : '');
+  return `当前${current ? `第${current}档` : '未应用'} · 目标第${desired}档${status}`;
 }
 
 function formatPricingRatio(value) {
@@ -347,6 +354,7 @@ function pricingLogTriggerText(source) {
     package_ratio_saved: '套餐倍率变更',
     order_finished_changed: '订单换挡',
     daily_reset: '06:00重置',
+    rolling_24h_reconcile: '近24h换档',
     feature_enabled_reconcile: '功能启用校准',
     pricing_h5: '手工发布'
   };
@@ -403,6 +411,7 @@ function renderPricingChannelLogs(result = {}) {
 
 function renderPricingChannelResult(payload = {}, result = {}) {
   const sheetState = ensurePricingLadderState().channel_sheet;
+  const currentTier = Number(result.current_tier ?? payload.current_tier ?? 0);
   const remote = result.remote_current || {};
   const tiers = Array.isArray(result.tiers) ? result.tiers : [];
   const logs = Array.isArray(result.adjustment_logs) ? result.adjustment_logs : [];
@@ -420,8 +429,8 @@ function renderPricingChannelResult(payload = {}, result = {}) {
     return `${viewTabs}<div class="pricing-channel-empty"><strong>${escapePricingHtml(result.label || '该渠道')}</strong><span>当前账号未关联该渠道商品。</span></div>`;
   }
   const tierRows = tiers.map((tier) => `
-    <div class="pricing-package-row ${packageCountClass} ${Number(tier.tier) === Number(result.current_tier || payload.current_tier) ? 'is-active' : ''}">
-      <strong>${escapePricingHtml(pricingTierLabel(tier.tier))}${Number(tier.tier) === Number(result.current_tier || payload.current_tier) ? ' · 当前使用' : ''}</strong>
+    <div class="pricing-package-row ${packageCountClass} ${Number(tier.tier) === currentTier ? 'is-active' : ''}">
+      <strong>${escapePricingHtml(pricingTierLabel(tier.tier))}${Number(tier.tier) === currentTier ? ' · 当前使用' : ''}</strong>
       ${renderPricingPackageValues(tier.prices, packageKeys, packageLabels)}
     </div>
   `).join('');
@@ -446,6 +455,8 @@ function renderPricingChannelResult(payload = {}, result = {}) {
         </div>
       </div>
     ` : `<div class="pricing-channel-empty">${escapePricingHtml(result.label || '渠道')}当前套餐价格不完整，暂时无法计算四档套餐结果。</div>`}
+    <div class="pricing-channel-meta">${escapePricingHtml(pricingTierSummary({ configured: true, current_tier: result.current_tier, desired_tier: result.desired_tier || payload.desired_tier, ladder_status: result.apply_status }))}</div>
+    ${result.runtime && result.runtime.last_error ? `<div class="pricing-channel-meta">${escapePricingHtml(result.runtime.last_error)}</div>` : ''}
     <div class="pricing-channel-meta">商品 ${escapePricingHtml(result.goods_id || '未关联')}${result.min_rent_hour ? ` · 起租 ${Number(result.min_rent_hour)} 小时` : ''}</div>
     ${result.verification_note ? `<div class="pricing-channel-meta">${escapePricingHtml(result.verification_note)}</div>` : ''}
   `;
@@ -576,7 +587,7 @@ function applyPricingPayload(out) {
   const pricing = ensurePricingLadderState();
   pricing.game_name = normalizePricingGameName(out && out.game_name || pricing.game_name || 'WZRY');
   pricing.list = Array.isArray(out && out.list) ? out.list : [];
-  pricing.count_window = String(out && out.count_window || '06:00～次日06:00');
+  pricing.count_window = String(out && out.count_window || '近24小时');
   pricing.feature = out && out.feature && typeof out.feature === 'object'
     ? {
         enabled: out.feature.enabled === true,
@@ -695,6 +706,13 @@ async function savePricingAccount(account, card) {
       : ['', '', '', ''];
     item.version = item.configured ? Number(saved.version || item.version || 0) : 0;
     item.copied_from_game_account = item.configured ? String(saved.copied_from_game_account || '') : '';
+    if (saved.runtime) {
+      item.current_tier = Number(saved.runtime.applied_tier || 0);
+      item.desired_tier = Number(saved.runtime.desired_tier || 1);
+      item.today_order_count = Number(saved.runtime.completed_order_count || 0);
+      item.ladder_status = String(saved.runtime.status || '');
+      item.last_error = String(saved.runtime.last_error || '');
+    }
     pricing.editing[account] = false;
     delete pricing.drafts[account];
     const publishResult = saved.publish_result || {};
@@ -776,7 +794,7 @@ function renderPricingList() {
         <span>${escapePricingHtml(pricingTierLabel(tier))}</span>
         <div class="pricing-price-input">
           <input data-pricing-tier="${tier}" type="number" min="0.01" step="0.01" inputmode="decimal"
-            aria-label="第 ${tier} 单价格" value="${escapePricingHtml(draft.prices[index] || '')}" ${editing && !saving ? '' : 'disabled'}>
+            aria-label="第 ${tier} 档时租价" value="${escapePricingHtml(draft.prices[index] || '')}" ${editing && !saving ? '' : 'disabled'}>
           <span>元</span>
         </div>
       </label>
@@ -789,7 +807,7 @@ function renderPricingList() {
             <p class="pricing-account-meta">${escapePricingHtml(account || '-')}</p>
           </div>
           <div class="pricing-account-status">
-            <span>完成 ${Number(item.today_order_count || 0)} 单</span>
+            <span>近24h ${Number(item.today_order_count || 0)}单</span>
             <span>${item.configured ? '已配置' : '待配置'}</span>
           </div>
         </div>
@@ -804,9 +822,7 @@ function renderPricingList() {
         ` : ''}
         <div class="pricing-ladder-grid">${inputs}</div>
         <div class="pricing-account-footer">
-          <span class="pricing-current-price">${item.configured
-            ? `已完成 ${Number(item.today_order_count || 0)} 单，当前使用第 ${Math.min(4, Math.max(1, Number(item.current_tier || Number(item.today_order_count || 0) + 1)))} 单价格`
-            : '阶梯调价：未启用'}</span>
+          <span class="pricing-current-price">${escapePricingHtml(pricingTierSummary(item))}</span>
           <div class="pricing-account-actions">
             <button class="btn btn-ghost btn-card-action" data-pricing-channel-result type="button">查看渠道价格</button>
             <button class="btn btn-ghost btn-card-action" data-pricing-action type="button" ${saving ? 'disabled' : ''}>
@@ -881,7 +897,7 @@ function renderPricingView() {
   renderPricingGameTabs();
   renderPricingFeatureState();
   const windowText = document.getElementById('pricingWindowText');
-  if (windowText) windowText.textContent = `订单周期：${pricing.count_window || '06:00～次日06:00'}`;
+  if (windowText) windowText.textContent = `订单周期：${pricing.count_window || '近24小时'}`;
   if (els.pricingSearchInput) {
     if (document.activeElement !== els.pricingSearchInput) els.pricingSearchInput.value = pricing.query;
     els.pricingSearchInput.oninput = () => {
@@ -928,6 +944,7 @@ window.__pricingLadderTest = {
   validatePricingDraft,
   pricingApplyStatusText,
   pricingTierLabel,
+  pricingTierSummary,
   filterPricingItems,
   pricingLogStatusText,
   pricingLogTriggerText,

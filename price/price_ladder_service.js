@@ -1,7 +1,7 @@
 'use strict';
 
 const { listUserGameAccounts } = require('../database/user_game_account_db');
-const { listBusinessDayFinishedOrderCountByAccounts } = require('../database/order_db');
+const { listPaidCountByAccounts } = require('../order/service/order_query_service');
 const {
     listAccountPriceLadderRules,
     getAccountPriceLadderRule,
@@ -137,12 +137,12 @@ async function getPriceLadderDashboardByUser(userId, options = {}) {
         isAvailableAccount(row)
         && String(row.game_id || '').trim() === game.game_id
     ));
-    const [rules, finishedCounts, runtimes, feature] = await Promise.all([
+    const [rules, rollingCounts, runtimes, feature] = await Promise.all([
         listAccountPriceLadderRules(uid, game.game_id),
-        listBusinessDayFinishedOrderCountByAccounts(uid, accounts.map((row) => ({
+        listPaidCountByAccounts(uid, accounts.map((row) => ({
             game_id: game.game_id,
             game_account: row.game_account
-        }))),
+        })), { mode: 'rolling_24h', now: options.now }),
         listAccountPriceLadderRuntimesByUser(uid),
         getPriceLadderFeatureConfig(uid)
     ]);
@@ -157,17 +157,17 @@ async function getPriceLadderDashboardByUser(userId, options = {}) {
         const rule = ruleMap.get(account) || null;
         const runtime = runtimeMap.get(account) || null;
         const currentPrice = pickCurrentUhaozuPrice(row);
-        const completedCount = Number(finishedCounts[`${game.game_id}::${account}`] || 0);
+        const orderCount = Number(rollingCounts[`${game.game_id}::${account}`] || 0);
         return {
             game_id: game.game_id,
             game_name: game.game_name,
             game_account: account,
             display_name: resolveDisplayNameByRow(row, account),
             current_uhaozu_price: currentPrice,
-            today_order_count: completedCount,
-            current_tier: runtime && runtime.applied_tier
-                ? Number(runtime.applied_tier)
-                : Math.min(4, Math.max(1, completedCount + 1)),
+            today_order_count: orderCount,
+            current_tier: Number(runtime && runtime.applied_tier || 0),
+            desired_tier: Math.min(4, Math.max(1, orderCount + 1)),
+            last_error: String(runtime && runtime.last_error || ''),
             ladder_status: runtime ? runtime.status : '',
             prices: rule ? rule.prices : ['', '', '', ''],
             configured: Boolean(rule),
@@ -179,7 +179,7 @@ async function getPriceLadderDashboardByUser(userId, options = {}) {
     return {
         game_id: game.game_id,
         game_name: game.game_name,
-        count_window: '06:00～次日06:00',
+        count_window: '近24小时',
         channel_scope: 'global',
         effective_channel: 'uhaozu',
         effective_channels: CHANNEL_CAPABILITIES.filter((item) => item.enabled).map((item) => item.channel),
@@ -280,7 +280,8 @@ async function savePriceLadderRuleByUser(userId, input = {}, options = {}) {
             accounts: [{ game_id: game.game_id, game_account: account }]
         });
         runtime = await getAccountPriceLadderRuntime(uid, game.game_id, account, 'uhaozu')
-            || await getAccountPriceLadderRuntime(uid, game.game_id, account, 'uuzuhao');
+            || await getAccountPriceLadderRuntime(uid, game.game_id, account, 'uuzuhao')
+            || await getAccountPriceLadderRuntime(uid, game.game_id, account, 'zuhaowang');
     }
     return {
         ...saved,
@@ -305,11 +306,11 @@ async function getPriceLadderChannelResultByUser(userId, options = {}) {
     ));
     if (!target) throw new Error('账号不存在、已出售或不属于当前游戏');
 
-    const [rule, finishedCounts] = await Promise.all([
+    const [rule, rollingCounts] = await Promise.all([
         getAccountPriceLadderRule(uid, game.game_id, account),
-        listBusinessDayFinishedOrderCountByAccounts(uid, [{ game_id: game.game_id, game_account: account }])
+        listPaidCountByAccounts(uid, [{ game_id: game.game_id, game_account: account }], { mode: 'rolling_24h', now: options.now })
     ]);
-    const orderCount = Number(finishedCounts[`${game.game_id}::${account}`] || 0);
+    const orderCount = Number(rollingCounts[`${game.game_id}::${account}`] || 0);
     const channelResults = {};
     for (const capability of CHANNEL_CAPABILITIES) {
         const adapter = getPriceChannelAdapter(capability.channel);
@@ -341,9 +342,8 @@ async function getPriceLadderChannelResultByUser(userId, options = {}) {
         ]);
         const remote = adapter.pickCurrentPriceSet(target);
         const tiers = Array.isArray(resolved.tiers) ? resolved.tiers : [];
-        const currentTier = runtime && runtime.applied_tier
-            ? Number(runtime.applied_tier)
-            : Math.min(4, Math.max(1, orderCount + 1));
+        const currentTier = Number(runtime && runtime.applied_tier || 0);
+        const desiredTier = Math.min(4, Math.max(1, orderCount + 1));
         const active = tiers.find((item) => item.tier === currentTier) || null;
         const remoteMatchesTarget = Boolean(active && remote.complete && adapter.samePriceSet(active.prices, remote.prices));
         let applyStatus = 'unavailable';
@@ -373,6 +373,7 @@ async function getPriceLadderChannelResultByUser(userId, options = {}) {
             min_rent_hour: Number(remote.min_rent_hour || 0),
             tiers,
             current_tier: currentTier,
+            desired_tier: desiredTier,
             apply_status: applyStatus,
             remote_matches_target: remoteMatchesTarget,
             verification_note: adapter.verification_note,
@@ -396,7 +397,9 @@ async function getPriceLadderChannelResultByUser(userId, options = {}) {
         game_account: account,
         display_name: resolveDisplayNameByRow(target, account),
         current_order_count: orderCount,
-        current_tier: Number(selectedResult && selectedResult.current_tier || Math.min(4, Math.max(1, orderCount + 1))),
+        current_tier: Number(selectedResult && selectedResult.current_tier || 0),
+        desired_tier: Math.min(4, Math.max(1, orderCount + 1)),
+        count_window: '近24小时',
         channels: CHANNEL_CAPABILITIES.map((item) => ({
             ...item,
             available: Boolean(channelResults[item.channel] && channelResults[item.channel].available)

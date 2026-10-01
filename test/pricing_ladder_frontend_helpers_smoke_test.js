@@ -14,7 +14,7 @@ const context = {
     state: { pricing: { channel_sheet: { view: 'result' } } }
 };
 vm.createContext(context);
-vm.runInContext(source, context, { filename: 'menu_price.js' });
+vm.runInContext(source, context, { filename: path.join(__dirname, '../h5/public/js/menu_price.js') });
 const helpers = context.window.__pricingLadderTest;
 
 assert(helpers);
@@ -34,15 +34,38 @@ assert.strictEqual(helpers.pricingApplyStatusText('pending'), '待执行换档')
 assert.strictEqual(helpers.pricingApplyStatusText('blocked'), '受上下架安全规则阻塞');
 assert.strictEqual(helpers.pricingApplyStatusText('failed'), '上次换档失败');
 assert.strictEqual(helpers.pricingApplyStatusText('unknown'), '套餐数据暂不完整');
-assert.strictEqual(helpers.pricingTierLabel(1), '第 1 单时租价（完成 0 单）');
-assert.strictEqual(helpers.pricingTierLabel(2), '第 2 单时租价（完成 1 单后）');
-assert.strictEqual(helpers.pricingTierLabel(9), '第 4 单时租价（完成 3 单后）');
+assert.strictEqual(helpers.pricingTierLabel(1), '第 1 档时租价（近24h 0单）');
+assert.strictEqual(helpers.pricingTierLabel(2), '第 2 档时租价（近24h 1单）');
+assert.strictEqual(helpers.pricingTierLabel(9), '第 4 档时租价（近24h 3+单）');
 assert.strictEqual(helpers.pricingLogStatusText('success'), '成功');
 assert.strictEqual(helpers.pricingLogStatusText('fail'), '失败');
 assert.strictEqual(helpers.pricingLogTriggerText('rule_saved'), '保存策略');
 assert.strictEqual(helpers.pricingLogTriggerText('package_ratio_saved'), '套餐倍率变更');
 assert.strictEqual(helpers.pricingLogTriggerText('daily_reset'), '06:00重置');
 assert.strictEqual(helpers.pricingLogTriggerText('unknown'), '阶梯调价');
+assert.strictEqual(helpers.pricingLogTriggerText('rolling_24h_reconcile'), '近24h换档');
+assert.strictEqual(helpers.pricingTierSummary({}), '阶梯调价：未启用');
+assert.strictEqual(helpers.pricingTierSummary({ configured: true, current_tier: 0, desired_tier: 3 }), '当前未应用 · 目标第3档 · 待换档');
+assert.strictEqual(helpers.pricingTierSummary({ configured: true, current_tier: 2, desired_tier: 3, ladder_status: 'failed' }), '当前第2档 · 目标第3档 · 换档失败');
+assert.strictEqual(helpers.pricingTierSummary({ configured: true, current_tier: 3, desired_tier: 3 }), '当前第3档 · 目标第3档');
+assert.strictEqual(helpers.pricingTierSummary({ configured: true, current_tier: 3, desired_tier: 3, ladder_status: 'pending' }), '当前第3档 · 目标第3档 · 待换档');
+const pendingHtml = helpers.renderPricingChannelResult({ current_tier: 3, desired_tier: 3 }, {
+    available: true, current_tier: 0, desired_tier: 3, apply_status: 'failed',
+    runtime: { last_error: '<network timeout>' }, tiers: [{ tier: 3, prices: { hour: 4 } }]
+});
+assert(pendingHtml.includes('当前未应用 · 目标第3档 · 换档失败'));
+assert(pendingHtml.includes('&lt;network timeout&gt;'));
+assert(!pendingHtml.includes(' · 当前使用'));
+
+const listContainer = { innerHTML: '', querySelectorAll: () => [] };
+const windowText = { textContent: '' };
+context.els = { pricingView: {}, pricingListContainer: listContainer };
+context.document = { getElementById: id => id === 'pricingWindowText' ? windowText : null };
+context.applyPricingPayload({ list: [{ game_account: 'demo', configured: true, current_tier: 2, desired_tier: 3, today_order_count: 2, prices: [2,3,4,5] }] });
+context.renderPricingView();
+assert.strictEqual(windowText.textContent, '订单周期：近24小时');
+assert(listContainer.innerHTML.includes('近24h 2单'));
+assert(listContainer.innerHTML.includes('当前第2档 · 目标第3档 · 待换档'));
 
 const errorDetail = helpers.formatPricingErrorDetail({
     fail_message: '商品更新失败',
@@ -189,4 +212,24 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(helpers.calculatePricingRatioPr
     '2.5'
 ))).map((item) => item.price), [2.5, 13.7, 37.5]);
 
-console.log('[OK] pricing_ladder_frontend_helpers_smoke_test passed');
+async function testSavedRuntimeDisplay() {
+    const item = context.state.pricing.list[0];
+    context.showToast = () => {};
+    const card = { querySelectorAll: () => [2, 3, 4, 5].map(value => ({ value: String(value) })) };
+    for (const status of ['applied', 'failed']) {
+        context.request = async () => ({ rule: {
+            prices: [2,3,4,5], version: 2,
+            runtime: { applied_tier: status === 'applied' ? 3 : 2, desired_tier: 3, completed_order_count: 2, status, last_error: status === 'failed' ? 'timeout' : '' },
+            publish_result: { applied: status === 'applied' ? 1 : 0, failed: status === 'failed' ? 1 : 0 }
+        } });
+        await context.savePricingAccount('demo', card);
+        assert.strictEqual(item.current_tier, status === 'applied' ? 3 : 2);
+        assert.strictEqual(item.desired_tier, 3);
+        assert.strictEqual(item.ladder_status, status);
+        assert(listContainer.innerHTML.includes(status === 'applied' ? '当前第3档 · 目标第3档' : '当前第2档 · 目标第3档 · 换档失败'));
+    }
+}
+testSavedRuntimeDisplay().then(() => console.log('[OK] pricing_ladder_frontend_helpers_smoke_test passed')).catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+});

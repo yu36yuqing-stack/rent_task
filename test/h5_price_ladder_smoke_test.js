@@ -67,7 +67,7 @@ async function main() {
         const getJson = await getRes.json();
         assert.strictEqual(getRes.status, 200);
         assert.strictEqual(getJson.ok, true);
-        assert.strictEqual(getJson.count_window, '06:00～次日06:00');
+        assert.strictEqual(getJson.count_window, '近24小时');
         assert.strictEqual(getJson.list.length, 1);
         assert.strictEqual(getJson.feature.enabled, false);
         assert.deepStrictEqual(getJson.list[0].prices, ['', '', '', '']);

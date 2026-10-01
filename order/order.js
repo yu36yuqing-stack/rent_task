@@ -1867,11 +1867,18 @@ async function syncOrdersByUser(userId, options = {}) {
             skipped: true,
             reason: priceLadderFeatureError ? 'feature_config_unavailable' : 'feature_disabled'
         };
+        console.log(`[PriceLadder][skip] ${JSON.stringify({
+            user_id: uid,
+            trace_id: String(options.trace_id || options.trigger_task_id || ''),
+            reason: result.price_ladder.reason
+        })}`);
     } else {
         try {
             const { reconcilePriceLadderAfterOrderSync } = require('../price/price_ladder_reconcile_service');
             result.price_ladder = await reconcilePriceLadderAfterOrderSync(uid, priceLadderCandidates, {
                 now,
+                trace_id: options.trace_id || options.trigger_task_id,
+                logger: options.logger,
                 allow_apply: canReconcileOrder3Off && !(result.order_off && result.order_off.error),
                 activation_reconcile: priceLadderFeature.reconcile_required === true,
                 feature_version: Number(priceLadderFeature.version || 0)

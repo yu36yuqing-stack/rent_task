@@ -20,20 +20,34 @@ const { syncOrdersByUser } = require('../order/order');
 assert.strictEqual(Boolean(require.cache[reconcilePath]), false);
 
 (async () => {
+    const originalLog = console.log;
+    const skippedLogs = [];
+    console.log = line => { skippedLogs.push(String(line)); };
     const result = await syncOrdersByUser(8, {
+        trigger_task_id: 'disabled-task',
         price_ladder_feature_state: {
             enabled: false,
             reconcile_required: false,
             version: 0
         }
     });
+    console.log = originalLog;
     assert.strictEqual(result.price_ladder.skipped, true);
     assert.strictEqual(result.price_ladder.reason, 'feature_disabled');
     assert.strictEqual(result.price_ladder_feature.enabled, false);
     assert.strictEqual(Boolean(require.cache[reconcilePath]), false);
+    assert(skippedLogs.some(line => line.startsWith('[PriceLadder][skip]') && line.includes('feature_disabled') && line.includes('disabled-task')));
     for (const platform of Object.values(result.platforms)) {
         assert.strictEqual(Object.prototype.hasOwnProperty.call(platform, '_price_ladder_candidates'), false);
     }
+    const pricingLogs = [];
+    const logger = { log: line => pricingLogs.push(String(line)), warn: line => pricingLogs.push(String(line)) };
+    const enabled = await syncOrdersByUser(8, {
+        trigger_task_id: 'enabled-task', logger,
+        price_ladder_feature_state: { enabled: true, reconcile_required: false, version: 0 }
+    });
+    assert.strictEqual(enabled.price_ladder.count_mode, 'rolling_24h');
+    assert(pricingLogs.some(line => line.startsWith('[PriceLadder][summary]') && line.includes('enabled-task')));
     console.log('[OK] price_ladder_feature_gate_smoke_test passed');
 })().catch((error) => {
     console.error('[FAIL] price_ladder_feature_gate_smoke_test failed:', error);

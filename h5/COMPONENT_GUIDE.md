@@ -50,7 +50,7 @@
 | FeatureSwitch | `.feature-switch` `.feature-switch-copy` `.feature-switch-track` | 页面级功能启停 | 使用原生 checkbox + `role="switch"`，页面只绑定状态和保存行为 |
 | HeaderTabs | `.orders-tabs-row` `.orders-tabs` `.orders-tab.header-tab` | 订单、板卡、风控、渠道价格 Sheet；商品页只复用容器 | 数据项和激活状态可变 |
 | QuickFilters | `.orders-quick` `.orders-quick-item.header-quick-tab` | 订单二级筛选 | 仅内容和选中值可变 |
-| HeadSummary | `.head-summary-text` | 商品、订单、统计、板卡、维护 | 文案可变，视觉层级固定 |
+| HeadSummary | `.head-summary-text` | 商品、订单、统计、板卡、维护、阶梯定价 | 文案可变，视觉层级固定；阶梯定价的计数周期固定显示“近24小时” |
 | OrderCard | `.order-card` `.order-card-top` `.order-card-role` `.order-card-line` | 订单、商品及相关列表 | 通过附加类增加领域差异 |
 | StatusTag | `.chip` `.order-chip` `.plat` 及已有语义变体 | 商品、订单、统计状态 | 新状态必须保留统一语义 |
 | Pager | `.pager` `.page-info` + `.btn` | 商品、订单、风控 | 页码和禁用状态可变 |
@@ -74,7 +74,7 @@
 | ProductFilters | 商品页使用 `.stats-period-btn.product-filter-tab` | 与 HeaderTabs/周期筛选存在视觉复用，但契约仍是页面级组合 | 新页面不得照搬，应先确认归入 HeaderTabs 还是独立组件 |
 | SheetController | 各页面分别维护 Sheet 的打开、关闭、Loading 和结果状态 | 外壳统一但行为分散 | 可复用现有外壳；新增重复行为时应抽公共控制器 |
 | EmptyState | 多页面各自生成空数据内容 | 尚无统一结构和状态契约 | 新页面需先声明统一空状态方案 |
-| ChannelPriceResult | `.pricing-package-table` `.pricing-package-row` `.pricing-error-log-list` `.pricing-log-detail-btn` | 阶梯定价渠道价格 Sheet | 所有渠道和视口统一使用表头表格，套餐列读取渠道能力的 `package_labels`，窄屏由 `.pricing-package-scroll` 横向滚动；调价记录统一展示成功/失败、触发来源和前后价格；失败详情复用持久 Toast；内容区必须可滚动；不得把渠道特有字段写入通用账号卡片 |
+| ChannelPriceResult | `.pricing-package-table` `.pricing-package-row` `.pricing-error-log-list` `.pricing-log-detail-btn` | 阶梯定价渠道价格 Sheet | 所有渠道和视口统一使用表头表格，套餐列读取渠道能力的 `package_labels`，窄屏由 `.pricing-package-scroll` 横向滚动；当前档仅高亮已确认应用的档位，目标档独立展示，未知档显示“未应用”；计数采用近24h有效订单，换档失败展示错误；调价记录统一展示成功/失败、触发来源和前后价格；失败详情复用持久 Toast；内容区必须可滚动；不得把渠道特有字段写入通用账号卡片 |
 
 “试用”不表示禁止使用，而是表示复用时必须优先补齐公共契约，不能继续复制。
 

@@ -781,7 +781,7 @@ async function listBusinessDayFinishedOrderCountByAccounts(userId, gameAccounts 
     }
 }
 
-async function listRolling24hPaidOrderCountByAccounts(userId, gameAccounts = []) {
+async function listRolling24hPaidOrderCountByAccounts(userId, gameAccounts = [], options = {}) {
     await initOrderDb();
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
@@ -789,10 +789,12 @@ async function listRolling24hPaidOrderCountByAccounts(userId, gameAccounts = [])
     const keys = normalizeAccountKeys(gameAccounts);
     if (keys.length === 0) return {};
 
-    const endTime = toDateTimeText(Date.now());
-    const startTime = toDateTimeText(Date.now() - 24 * 3600 * 1000);
+    const now = new Date(options.now === undefined ? Date.now() : options.now);
+    if (!Number.isFinite(now.getTime())) throw new Error('now 不合法');
+    const endTime = toDateTimeText(now.getTime());
+    const startTime = toDateTimeText(now.getTime() - 24 * 3600 * 1000);
     traceOrderCount(
-        `[OrderCount24h] uid=${uid} now="${new Date().toString()}" tz="${Intl.DateTimeFormat().resolvedOptions().timeZone || ''}" window=[${startTime}, ${endTime}) accounts=${keys.length}`
+        `[OrderCount24h] uid=${uid} now="${now.toString()}" tz="${Intl.DateTimeFormat().resolvedOptions().timeZone || ''}" window=[${startTime}, ${endTime}) accounts=${keys.length}`
     );
     const tupleSql = keys.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
     const db = openOrderDatabase();

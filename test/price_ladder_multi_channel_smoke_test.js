@@ -114,12 +114,12 @@ async function main() {
 
     calls.length = 0;
     const tier2 = await reconcilePriceLadderAfterOrderSync(USER_ID, await finishOrder('multi-1', day), {
-        now: localDate(day),
+        now: localDate(day, '08:01:00'),
         allow_apply: true,
         publishers
     });
     assert.strictEqual(tier2.reconciliation.applied, 2);
-    assert.strictEqual(tier2.queued.queued, 2);
+    assert.strictEqual(tier2.count_mode, 'rolling_24h');
     assert.strictEqual(calls.find((item) => item.channel === 'uhaozu').force_publish, false);
     assert.strictEqual(calls.find((item) => item.channel === 'uuzuhao').force_publish, true);
 
@@ -158,7 +158,7 @@ async function main() {
         game_id: GAME_ID,
         game_name: GAME_NAME,
         game_account: ACCOUNT,
-        channel: 'uuzuhao'
+        channel: 'uuzuhao', now: localDate(day, '11:00:00')
     });
     assert.strictEqual(view.selected_channel, 'uuzuhao');
     assert.strictEqual(view.channel_result.package_keys.length, 9);
@@ -168,11 +168,11 @@ async function main() {
 
     calls.length = 0;
     const reset = await reconcilePriceLadderAfterOrderSync(USER_ID, [], {
-        now: localDate(nextDay, '06:01:00'),
+        now: localDate(nextDay, '08:01:00'),
         allow_apply: true,
         publishers
     });
-    assert.strictEqual(reset.reset.due, true);
+    assert.strictEqual(reset.count_mode, 'rolling_24h');
     assert.strictEqual(reset.reconciliation.applied, 2);
     const uhaozuReset = calls.find((item) => item.channel === 'uhaozu');
     const uuzuhaoReset = calls.find((item) => item.channel === 'uuzuhao');
@@ -203,7 +203,7 @@ async function main() {
         game_account: bootstrapAccount,
         prices: [2, 3, 4, 5],
         expected_version: 0
-    }, { now: localDate(nextDay, '07:00:00'), publishers });
+    }, { now: localDate(nextDay, '09:00:00'), publishers });
     assert.strictEqual(await getAccountPriceLadderRuntime(USER_ID, GAME_ID, bootstrapAccount, 'uuzuhao'), null);
     await upsertUserGameAccount({
         user_id: USER_ID,
@@ -224,7 +224,7 @@ async function main() {
     });
     calls.length = 0;
     const bootstrapped = await reconcilePriceLadderAfterOrderSync(USER_ID, [], {
-        now: localDate(nextDay, '07:05:00'),
+        now: localDate(nextDay, '09:05:00'),
         allow_apply: true,
         publishers
     });

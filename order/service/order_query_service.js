@@ -62,7 +62,7 @@ async function initOrderQueryService() {
 async function listPaidCountByAccounts(userId, accounts = [], options = {}) {
     const mode = String(options.mode || ORDER_COUNT_MODE_NATURAL_DAY).trim().toLowerCase();
     if (mode === 'rolling_24h') {
-        return listRolling24hPaidOrderCountByAccounts(userId, accounts);
+        return listRolling24hPaidOrderCountByAccounts(userId, accounts, options);
     }
     return listTodayPaidOrderCountByAccounts(userId, accounts, options.dateText || options.date_text || '');
 }

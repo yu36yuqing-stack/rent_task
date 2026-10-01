@@ -20,6 +20,7 @@ const puppeteer = require('puppeteer-core');
 const { createUserByAdmin } = require('../database/user_db');
 const { upsertUserGameAccount } = require('../database/user_game_account_db');
 const { savePriceLadderRuleByUser } = require('../price/price_ladder_service');
+const { upsertAccountPriceLadderRuntime } = require('../database/account_price_ladder_runtime_db');
 const { createPricePublishItemLog } = require('../database/price_publish_log_db');
 const { createAccessToken } = require('../user/auth_token');
 const { bootstrap } = require('../h5/local_h5_server');
@@ -111,6 +112,13 @@ async function main() {
     });
 
     const server = await bootstrap();
+    // Seed confirmed tiers without making any real platform write requests.
+    for (const channel of ['uhaozu', 'uuzuhao']) {
+        await upsertAccountPriceLadderRuntime(user.id, {
+            game_id: '2', game_name: '和平精英', game_account: 'hpjy-target',
+            channel, desired_tier: 1, applied_tier: 1, rule_version: 1, status: 'applied'
+        });
+    }
     let browser = null;
     try {
         browser = await puppeteer.launch({
@@ -151,6 +159,10 @@ async function main() {
         }
 
         const targetCard = '[data-pricing-account-card="hpjy-target"]';
+        await waitForText(page, '#pricingWindowText', '订单周期：近24小时');
+        if (!(await page.$eval(targetCard, node => node.textContent)).includes('近24h 0单')) {
+            throw new Error('滚动窗口计数文案未显示');
+        }
         await page.type('#pricingSearchInput', '待复制');
         await page.waitForFunction(() => (
             document.querySelectorAll('[data-pricing-account-card]').length === 1

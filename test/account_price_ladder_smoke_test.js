@@ -47,14 +47,19 @@ const {
     listPricePublishItemLogsByAccount
 } = require('../database/price_publish_log_db');
 const {
-    getPriceLadderDashboardByUser,
-    savePriceLadderRuleByUser,
-    getPriceLadderChannelResultByUser,
+    getPriceLadderDashboardByUser: dashboard,
+    savePriceLadderRuleByUser: saveRule,
+    getPriceLadderChannelResultByUser: channelResult,
     _internal: serviceInternal
 } = require('../price/price_ladder_service');
 
+const clock = new Date('2026-09-30T08:00:00');
+const getPriceLadderDashboardByUser = (uid, options) => dashboard(uid, { ...options, now: clock });
+const savePriceLadderRuleByUser = (uid, input, options) => saveRule(uid, input, { ...options, now: clock });
+const getPriceLadderChannelResultByUser = (uid, options) => channelResult(uid, { ...options, now: clock });
+
 function businessDateText() {
-    const d = new Date();
+    const d = new Date(clock);
     if (d.getHours() < 6) d.setDate(d.getDate() - 1);
     const p = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
@@ -155,7 +160,7 @@ async function main() {
         recAmount: 0,
         startTime: `${day} 12:00:00`
     });
-    await seedOrder('before-window', { startTime: `${day} 05:59:59` });
+    await seedOrder('before-window', { startTime: `${addDays(day, -1)} 07:59:59` });
     await seedOrder('invalid-order', {
         status: '已取消',
         recAmount: 0,
@@ -164,7 +169,7 @@ async function main() {
     await seedOrder('next-window', { startTime: `${addDays(day, 1)} 06:00:00` });
 
     const initial = await getPriceLadderDashboardByUser(8, { game_name: '和平精英' });
-    assert.strictEqual(initial.count_window, '06:00～次日06:00');
+    assert.strictEqual(initial.count_window, '近24小时');
     assert.strictEqual(initial.channel_scope, 'global');
     assert.strictEqual(initial.effective_channel, 'uhaozu');
     assert.strictEqual(initial.list.length, 2);
