@@ -13,6 +13,7 @@ const { releaseOrderCooldownBlacklistByUser } = require('../order/service/order_
 const { listLinkedOrderAccountsByUser } = require('../order/service/order_query_service');
 const { normalizeZuhaowangAuthPayload } = require('../user/user');
 const { normalizeGameProfile } = require('../common/game_profile');
+const { pickZuhaowangSyncPriceFields, mergeZuhaowangSyncPriceSnapshot } = require('./zuhaowang_price_snapshot');
 const {
     upsertOpenProductSyncAnomaly,
     resolveOpenProductSyncAnomaly
@@ -56,7 +57,8 @@ function buildPlatformPrdInfo(platform, row = {}) {
             remark: String(row.roleName || ''),
             role_name: String(row.roleName || ''),
             raw_status: Number(row.rawStatus),
-            exception_msg: String(row.exceptionMsg || '').trim()
+            exception_msg: String(row.exceptionMsg || '').trim(),
+            ...pickZuhaowangSyncPriceFields(row)
         };
     }
     if (platform === PLATFORM_UHZ) {
@@ -559,9 +561,21 @@ async function syncUserAccountsByAuth(userId) {
 
     let upserted = 0;
     const upsertStartedAt = nowMs();
+    const previousZhwByAccount = new Map();
+    if (Array.from(merged.values()).some((item) => item.channel_prd_info[PLATFORM_ZHW])) {
+        for (const row of await listAllUserGameAccountsByUser(uid)) {
+            previousZhwByAccount.set(keyOf(row.game_id, row.game_account), (row.channel_prd_info || {})[PLATFORM_ZHW] || {});
+        }
+    }
     for (const item of merged.values()) {
         if (await isUserGameAccountManuallyDeleted(uid, item.game_id, item.game_account)) {
             continue;
+        }
+        if (item.channel_prd_info[PLATFORM_ZHW]) {
+            item.channel_prd_info[PLATFORM_ZHW] = mergeZuhaowangSyncPriceSnapshot(
+                previousZhwByAccount.get(keyOf(item.game_id, item.game_account)),
+                item.channel_prd_info[PLATFORM_ZHW]
+            );
         }
         await upsertUserGameAccount({
             user_id: uid,

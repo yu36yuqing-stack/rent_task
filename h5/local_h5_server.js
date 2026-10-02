@@ -140,6 +140,7 @@ const {
     setPriceLadderFeatureByUser,
     getPriceLadderChannelResultByUser
 } = require('../price/price_ladder_service');
+const { getProductChannelPriceSummaries } = require('../price/product_channel_price_service');
 const {
     getPackageRatioSettingsByUser,
     savePackageRatioSettingsByUser
@@ -933,6 +934,12 @@ async function handleProducts(req, res, urlObj) {
     const total = sourceList.length;
     const offset = (page - 1) * pageSize;
     const pageList = sourceList.slice(offset, offset + pageSize);
+    const priceSummaries = await getProductChannelPriceSummaries(user.id, pageList.map((item) =>
+        accountRowMap.get(keyOfGameAccount(item.game_id, item.game_account))
+    ));
+    for (const item of pageList) {
+        item.price_ladder = priceSummaries[keyOfGameAccount(item.game_id, item.game_account)] || {};
+    }
     const list = pageList;
 
     const totalBlacklisted = scopedRows.reduce((sum, x) => {

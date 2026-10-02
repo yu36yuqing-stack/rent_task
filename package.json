@@ -1,5 +1,10 @@
 {
   "scripts": {
+    "test:zuhaowang-product-price": "node test/run_zuhaowang_product_price_tests.js",
+    "coverage:zuhaowang-product-price": "c8 --all --include=product/zuhaowang_price_snapshot.js --include=product/product.js --reporter=text --reporter=json --reporter=json-summary --reporter=html --report-dir=coverage/zuhaowang-product-price node test/run_zuhaowang_product_price_tests.js && node test/check_zuhaowang_product_price_coverage.js",
+    "test:product-channel-price": "node test/run_product_channel_price_tests.js",
+    "test:product-channel-price-visual": "node test/product_channel_price_visual_test.js",
+    "coverage:product-channel-price": "c8 --all --include=price/product_channel_price_service.js --include=h5/public/js/ui/channel_price_summary.js --include=h5/local_h5_server.js --include=h5/public/js/menu_products.js --reporter=text --reporter=json --reporter=json-summary --reporter=html --report-dir=coverage/product-channel-price node test/run_product_channel_price_tests.js && node test/check_product_channel_price_coverage.js",
     "test:dingding-report-dedup": "node test/run_dingding_report_dedup_tests.js",
     "coverage:dingding-report-dedup": "c8 --all --include=report/dingding/ding_report_dedup.js --include=report/dingding/ding_style.js --include=report/report_rent_status.js --include=pipeline/user_pipeline.js --include=rent_robot_main.js --include=h5/local_h5_server.js --reporter=text --reporter=json --reporter=json-summary --reporter=html --report-dir=coverage/dingding-report-dedup node test/run_dingding_report_dedup_tests.js && node test/check_dingding_report_dedup_coverage.js",
     "test:uuzuhao-background-pause": "node test/run_uuzuhao_background_pause_tests.js",

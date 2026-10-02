@@ -2627,6 +2627,12 @@
       border-radius: 7px;
     }
 
+    #listView .channel-square .platforms .plat {
+      max-width: 100%;
+      box-sizing: border-box;
+      overflow-wrap: anywhere;
+    }
+
     #listView .product-filter-tab {
       white-space: nowrap;
       flex: 0 0 auto;

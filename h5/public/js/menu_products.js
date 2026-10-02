@@ -19,9 +19,10 @@
         const display = (code === 'auth_abnormal' && shortReason)
           ? shortReason
           : `${label}${suffix}`;
+        const pricing = window.ChannelPriceSummary.formatSuffix(item && item.price_ladder && item.price_ladder[d.key]);
         return {
           key: d.key,
-          text: `${d.name}: ${display}`,
+          text: `${d.name}: ${display}${pricing}`,
           code,
           reason
         };
