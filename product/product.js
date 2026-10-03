@@ -14,6 +14,7 @@ const { listLinkedOrderAccountsByUser } = require('../order/service/order_query_
 const { normalizeZuhaowangAuthPayload } = require('../user/user');
 const { normalizeGameProfile } = require('../common/game_profile');
 const { pickZuhaowangSyncPriceFields, mergeZuhaowangSyncPriceSnapshot } = require('./zuhaowang_price_snapshot');
+const { recoverZuhaowangPriceSnapshotsByUser } = require('../price/zuhaowang_price_snapshot_service');
 const {
     upsertOpenProductSyncAnomaly,
     resolveOpenProductSyncAnomaly
@@ -563,8 +564,17 @@ async function syncUserAccountsByAuth(userId) {
     const upsertStartedAt = nowMs();
     const previousZhwByAccount = new Map();
     if (Array.from(merged.values()).some((item) => item.channel_prd_info[PLATFORM_ZHW])) {
-        for (const row of await listAllUserGameAccountsByUser(uid)) {
-            previousZhwByAccount.set(keyOf(row.game_id, row.game_account), (row.channel_prd_info || {})[PLATFORM_ZHW] || {});
+        const previousRows = await listAllUserGameAccountsByUser(uid);
+        const recoveryRows = previousRows.filter((row) => {
+            const current = merged.get(keyOf(row.game_id, row.game_account));
+            const incoming = current && current.channel_prd_info[PLATFORM_ZHW];
+            const previous = (row.channel_prd_info || {})[PLATFORM_ZHW] || {};
+            return incoming && String(incoming.prd_id) === String(previous.prd_id || previous.data_id);
+        });
+        const recovered = await recoverZuhaowangPriceSnapshotsByUser(uid, recoveryRows);
+        for (const row of previousRows) {
+            const key = keyOf(row.game_id, row.game_account);
+            previousZhwByAccount.set(key, recovered[key] || (row.channel_prd_info || {})[PLATFORM_ZHW] || {});
         }
     }
     for (const item of merged.values()) {

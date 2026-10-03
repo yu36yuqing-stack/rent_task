@@ -69,6 +69,12 @@ async function main() {
     assert.deepStrictEqual(calls, { auth: 1, runtime: 1 });
     assert(!JSON.stringify(out).includes('private-error'));
     assert(!JSON.stringify(out).includes('desired_tier'));
+    const dayOnly = { ...account, channel_prd_info: { ...channels,
+        zuhaowang: { data_id: 'z-1', rent_mode: 'day_only', hourPrice: 3.4, hour_basis: 3.2 } } };
+    assert.strictEqual((await summarize(12, [dayOnly]))['1::same-account'].zuhaowang.hour_price, 3.2);
+    dayOnly.channel_prd_info.zuhaowang.hour_basis = 2.5;
+    assert.strictEqual((await summarize(12, [dayOnly]))['1::same-account'].zuhaowang.hour_price, 2.5);
+    assert.strictEqual(account.channel_prd_info.zuhaowang.hour_price, 3.1);
 
     for (const tier of [0, -1, 5, 1.5, 'bad', undefined]) {
         runtimes = [runtime('uhaozu', tier)];

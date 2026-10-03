@@ -75,7 +75,7 @@
 | SheetController | 各页面分别维护 Sheet 的打开、关闭、Loading 和结果状态 | 外壳统一但行为分散 | 可复用现有外壳；新增重复行为时应抽公共控制器 |
 | EmptyState | 多页面各自生成空数据内容 | 尚无统一结构和状态契约 | 新页面需先声明统一空状态方案 |
 | ChannelPriceResult | `.pricing-package-table` `.pricing-package-row` `.pricing-error-log-list` `.pricing-log-detail-btn` | 阶梯定价渠道价格 Sheet | 所有渠道和视口统一使用表头表格，套餐列读取渠道能力的 `package_labels`，窄屏由 `.pricing-package-scroll` 横向滚动；当前档仅高亮已确认应用的档位，目标档独立展示，未知档显示“未应用”；计数采用近24h有效订单，换档失败展示错误；调价记录统一展示成功/失败、触发来源和前后价格；失败详情复用持久 Toast；内容区必须可滚动；不得把渠道特有字段写入通用账号卡片 |
-| ChannelPriceSummary | `window.ChannelPriceSummary.formatSuffix(summary)`，`h5/public/js/ui/channel_price_summary.js`；复用 `.plat` | 商品列表全部游戏使用同一后缀格式 | 接在原渠道状态后，格式为“ · 2档 · ¥2.30/时”；档位取渠道最后成功应用记录，时租取同步快照，不推导目标档、不展示调价异常；未知档为“未应用”，缺价为 `--`；停用/未关联渠道及已售商品不追加；商品页变体仅限制宽度和换行；验证 API 身份隔离、缺失数据、失败保留旧档、多游戏及手机/桌面布局 |
+| ChannelPriceSummary | `window.ChannelPriceSummary.formatSuffix(summary)`，`h5/public/js/ui/channel_price_summary.js`；复用 `.plat` | 商品列表全部游戏使用同一后缀格式 | 接在原渠道状态后，格式为“ · 2档 · ¥2.30/时”；档位取渠道最后成功应用记录，时租取同步快照；ZHW仅日租优先展示已确认日租套餐对应的 `hour_basis` 计算基价，缺少基价时兼容旧有效时租快照，不使用未启用时租接口的旧值或未确认目标价；不推导目标档、不展示调价异常；未知档为“未应用”，缺价为 `--`；停用/未关联渠道及已售商品不追加；商品页变体仅限制宽度和换行；验证 API 身份隔离、缺失数据、失败保留旧档、多游戏及手机/桌面布局 |
 
 “试用”不表示禁止使用，而是表示复用时必须优先补齐公共契约，不能继续复制。
 

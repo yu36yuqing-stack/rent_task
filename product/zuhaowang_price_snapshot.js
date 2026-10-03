@@ -4,7 +4,8 @@ const PRICE_FIELDS = Object.freeze({
     hourPrice: ['hourPrice', 'hour_price', 'obtainPrice'],
     p24Price: ['p24Price', 'p24_price'],
     p72Price: ['p72Price', 'p72_price'],
-    p168Price: ['p168Price', 'p168_price']
+    p168Price: ['p168Price', 'p168_price'],
+    hour_basis: ['hour_basis']
 });
 const META_FIELDS = ['rent_mode', 'price_template_type'];
 

@@ -477,7 +477,28 @@ async function listPricePublishItemLogsByAccount(userId, query = {}) {
     }
 }
 
+async function listLatestSuccessfulPriceSnapshotsByUser(userId, channel) {
+    const uid = Number(userId);
+    if (!Number.isInteger(uid) || uid <= 0 || !String(channel || '').trim()) return [];
+    await initPricePublishLogDb();
+    const db = openPriceDatabase();
+    try {
+        const rows = await all(db, `
+            SELECT i.* FROM price_publish_item_log i
+            WHERE i.id IN (
+                SELECT MAX(id) FROM price_publish_item_log
+                WHERE user_id = ? AND channel = ? AND publish_status = 'success' AND is_deleted = 0
+                GROUP BY game_name, game_account, goods_id
+            )
+        `, [uid, String(channel).trim()]);
+        return rows.map(rowToItem);
+    } finally {
+        db.close();
+    }
+}
+
 module.exports = {
+    listLatestSuccessfulPriceSnapshotsByUser,
     initPricePublishLogDb,
     createPricePublishBatchLog,
     updatePricePublishBatchLog,

@@ -3,6 +3,7 @@
 const { listAccountPriceLadderRuntimesByUser } = require('../database/account_price_ladder_runtime_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { listEnabledPriceChannelAdapters } = require('./channel_adapters/channel_price_registry');
+const { getZuhaowangDisplayHourPrice } = require('./zuhaowang_price_snapshot_service');
 
 function accountKey(row) {
     return `${String(row.game_id || '1').trim()}::${String(row.game_account || '').trim()}`;
@@ -44,7 +45,9 @@ async function getProductChannelPriceSummaries(userId, accountRows = []) {
             if (disabled.has(adapter.channel)) continue;
             const runtime = runtimeMap.get(`${key}::${adapter.channel}`);
             const tier = Number(runtime && runtime.applied_tier);
-            const price = Number(adapter.pickCurrentPriceSet(account).prices.hour);
+            const price = adapter.channel === 'zuhaowang'
+                ? getZuhaowangDisplayHourPrice(account.channel_prd_info.zuhaowang)
+                : Number(adapter.pickCurrentPriceSet(account).prices.hour);
             channels[adapter.channel] = {
                 current_tier: Number.isInteger(tier) && tier >= 1 && tier <= 4 ? tier : 0,
                 hour_price: Number.isFinite(price) && price > 0 ? price : null

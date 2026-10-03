@@ -1,5 +1,7 @@
 {
   "scripts": {
+    "test:zuhaowang-snapshot-repair": "node test/run_zuhaowang_snapshot_repair_tests.js",
+    "coverage:zuhaowang-snapshot-repair": "c8 --all --include=price/zuhaowang_price_snapshot_service.js --include=scripts/recover_zuhaowang_price_snapshots.js --include=price/channel_adapters/zuhaowang_price_adapter.js --include=price/price_publish_service.js --include=database/price_publish_log_db.js --include=price/product_channel_price_service.js --include=product/zuhaowang_price_snapshot.js --include=product/product.js --reporter=text --reporter=json --reporter=json-summary --reporter=html --report-dir=coverage/zuhaowang-snapshot-repair node test/run_zuhaowang_snapshot_repair_tests.js && node test/check_zuhaowang_snapshot_repair_coverage.js",
     "test:zuhaowang-product-price": "node test/run_zuhaowang_product_price_tests.js",
     "coverage:zuhaowang-product-price": "c8 --all --include=product/zuhaowang_price_snapshot.js --include=product/product.js --reporter=text --reporter=json --reporter=json-summary --reporter=html --report-dir=coverage/zuhaowang-product-price node test/run_zuhaowang_product_price_tests.js && node test/check_zuhaowang_product_price_coverage.js",
     "test:product-channel-price": "node test/run_product_channel_price_tests.js",

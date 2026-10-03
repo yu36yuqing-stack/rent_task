@@ -17,6 +17,7 @@ const {
 } = require('../zuhaowang/zuhaowang_price_api');
 const { _internals: { resolveDataIdByAccountAndGame } } = require('../zuhaowang/zuhaowang_api');
 const { normalizePackagePrice: normalizeZuhaowangPackagePrice } = require('./channel_adapters/zuhaowang_price_adapter');
+const { buildConfirmedZuhaowangPriceSnapshot } = require('./zuhaowang_price_snapshot_service');
 const { normalizeZuhaowangAuthPayload } = require('../user/user');
 const { getUhaozuPricingDashboardByUser } = require('./price_h5_service');
 const {
@@ -828,6 +829,16 @@ async function publishZuhaowangAccountPriceSetByUser(userId, input = {}, options
     let requestParams = null;
     let modifyOutput = null;
     let failureStage = 'authorization';
+    const saveConfirmedSnapshot = async (normalized, source) => {
+        failureStage = 'save_snapshot';
+        await upsertUserGameAccount({
+            user_id: uid, game_account: gameAccount, game_id: gameId, game_name: gameName,
+            account_remark: String(row.account_remark || '').trim(),
+            channel_prd_info: { zuhaowang: buildConfirmedZuhaowangPriceSnapshot(info, goodsId, normalized, targetPrices) },
+            desc: 'confirmed zuhaowang price snapshot'
+        });
+        console.log(`[ZHWPriceSnapshot] user_id=${uid} account=${gameAccount} goods_id=${goodsId} source=${source} mode=${normalized.rent_mode} hour_basis=${targetPrices.hour}`);
+    };
     const ensureBatch = async () => {
         if (batchCreated) return;
         await createPricePublishBatchLog({
@@ -875,6 +886,7 @@ async function publishZuhaowangAccountPriceSetByUser(userId, input = {}, options
         }
         beforeNormalized = normalizeZuhaowangTemplate(beforeTemplate);
         if (!forcePublish && sameZuhaowangActivePriceSet(targetPrices, beforeNormalized.prices, beforeNormalized.rent_mode)) {
+            await saveConfirmedSnapshot(beforeNormalized, 'already_matches');
             return {
                 ok: true,
                 changed: false,
@@ -904,26 +916,7 @@ async function publishZuhaowangAccountPriceSetByUser(userId, input = {}, options
             throw new Error(`租号王价格回读不一致: target=${JSON.stringify(targetPrices)} actual=${JSON.stringify(afterNormalized.prices)}`);
         }
 
-        await upsertUserGameAccount({
-            user_id: uid,
-            game_account: gameAccount,
-            game_id: gameId,
-            game_name: gameName,
-            account_remark: String(row.account_remark || '').trim(),
-            channel_prd_info: {
-                zuhaowang: {
-                    ...info,
-                    prd_id: goodsId,
-                    rent_mode: afterNormalized.rent_mode,
-                    price_template_type: String(afterNormalized.account_info.priceTemplateType ?? ''),
-                    hourPrice: afterNormalized.prices.hour,
-                    p24Price: afterNormalized.prices.p24,
-                    p72Price: afterNormalized.prices.p72,
-                    p168Price: afterNormalized.prices.p168
-                }
-            },
-            desc: 'publish account price ladder to zuhaowang'
-        });
+        await saveConfirmedSnapshot(afterNormalized, 'verified_publish');
         await createPricePublishItemLog({
             batch_id: batchId,
             user_id: uid,
@@ -951,7 +944,8 @@ async function publishZuhaowangAccountPriceSetByUser(userId, input = {}, options
             after_data: sanitizePriceLogPayload({
                 template: afterTemplate,
                 prices: afterNormalized.prices,
-                rent_mode: afterNormalized.rent_mode
+                rent_mode: afterNormalized.rent_mode,
+                hour_basis: targetPrices.hour
             }),
             price_before_hour: beforeNormalized.prices.hour,
             price_before_day: beforeNormalized.prices.p24,

@@ -66,6 +66,9 @@ function pickCurrentPriceSet(accountRow = {}) {
     const comparableKeys = mode === 'day_only'
         ? ['p24', 'p72', 'p168']
         : (mode === 'hour_only' ? ['hour'] : capability.package_keys.slice());
+    for (const key of capability.package_keys) {
+        if (!comparableKeys.includes(key)) prices[key] = 0;
+    }
     return {
         goods_id: productId(accountRow),
         prices,
