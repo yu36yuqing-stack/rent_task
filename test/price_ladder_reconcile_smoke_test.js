@@ -128,6 +128,7 @@ async function main() {
     assert.strictEqual(riseLogs[1].from_tier, 1);
     assert.strictEqual(riseLogs[1].to_tier, 4);
     assert.strictEqual(riseLogs[2].confirmed_tier, 4);
+    assert.strictEqual(riseLogs[2].verification_status, 'unknown', 'mock success without returned prices is not full verification');
     assert.strictEqual(riseLogs[2].batch_id, calls.at(-1) ? 'batch-' + calls.length : '');
     assert.strictEqual(riseSummary.scanned_accounts, 1);
     assert.strictEqual(riseSummary.scanned_channels, 1);
@@ -324,7 +325,8 @@ async function main() {
     const secretError = 'token=secret app_secret=hidden authorization=Bearer private';
     const redacted = await reconcile(clock('30', '13:03:00'), {
         accounts: [key(multi)], logger: { log: line => captureLog('log', line) },
-        publisher: async () => ({ ok: false, message: secretError })
+        publisher: async () => ({ ok: false, message: secretError, batch_id: 'redacted-batch',
+            error_detail: { code: 'token=secret', stage: 'app_secret=hidden' } })
     });
     assert.strictEqual(redacted.reconciliation.failed, 1);
     assert.strictEqual((await runtime(multi)).last_error, secretError);
@@ -332,6 +334,9 @@ async function main() {
     assert(!logs.at(-2).error_message.includes('hidden'));
     assert(!logs.at(-2).error_message.includes('private'));
     assert(logs.at(-2).error_message.includes('[REDACTED]'));
+    assert.strictEqual(logs.at(-2).verification_status, 'failed');
+    assert.strictEqual(logs.at(-2).batch_id, 'redacted-batch');
+    assert(!logs.at(-2).error_code.includes('secret'));assert(!logs.at(-2).error_stage.includes('hidden'));
     assert.strictEqual((await reconcilePendingPriceLaddersByUser(99, { logger, trigger_task_id: 'task-empty' })).scanned, 0);
     assert.strictEqual(lastSummary().trace_id, 'task-empty');
     assert.strictEqual(lastSummary().scanned_channels, 0);

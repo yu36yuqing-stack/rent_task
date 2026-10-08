@@ -1,0 +1,153 @@
+'use strict';
+
+const fs=require('fs'),os=require('os'),path=require('path'),assert=require('assert'),sqlite3=require('sqlite3');
+const temp=fs.mkdtempSync(path.join(os.tmpdir(),'rent-daily-policy-'));
+for(const name of ['MAIN','PRICE','RUNTIME','ORDER','STATS']) process.env[`${name}_DB_FILE_PATH`]=path.join(temp,`${name}.db`);
+process.env.ORDER_COUNT_TRACE='false';
+const ratioDb=require('../database/user_channel_package_ratio_db');
+const { savePackageRatioSettingsByUser, getPackageRatioSettingsByUser, validateDailyPolicyForRules }=require('../price/package_ratio_service');
+const { upsertUserGameAccount }=require('../database/user_game_account_db');
+const { upsertAccountPriceLadderRule, getAccountPriceLadderRule }=require('../database/account_price_ladder_rule_db');
+const { getAccountPriceLadderRuntime }=require('../database/account_price_ladder_runtime_db');
+const { setPriceLadderFeatureEnabled }=require('../database/price_ladder_feature_config_db');
+const { savePriceLadderRuleByUser }=require('../price/price_ladder_service');
+const { reconcilePendingPriceLaddersByUser }=require('../price/price_ladder_reconcile_service');
+const { upsertOrder }=require('../database/order_db');
+const { getPriceChannelAdapter }=require('../price/channel_adapters/channel_price_registry');
+const now=time=>new Date(`2026-10-07T${time}`);
+async function main(){
+    const legacy=new sqlite3.Database(process.env.PRICE_DB_FILE_PATH);
+    await new Promise((r,j)=>legacy.exec("CREATE TABLE user_channel_package_ratio (id INTEGER PRIMARY KEY,user_id INTEGER,channel TEXT,ratios_json TEXT,version INTEGER,create_date TEXT,modify_date TEXT,is_deleted INTEGER,desc TEXT); INSERT INTO user_channel_package_ratio VALUES(1,90,'zuhaowang','{\"hour\":1,\"p24\":4.5,\"p72\":13.5,\"p168\":31.5}',7,'old','old',0,'legacy')",e=>e?j(e):r()));
+    await new Promise(r=>legacy.close(r));
+    const migration=require('../database/migrations/20261007_019_daily_price_policy');
+    await migration.up();await migration.up();
+    const old=await ratioDb.getUserChannelPackageRatio(90,'zuhaowang');
+    assert.strictEqual(old.version,7);assert.strictEqual(old.daily_policy.mode,'follow');assert.strictEqual(old.modify_date,'old');
+    const uid=91,account='daily-a';
+    const row={user_id:uid,game_id:'1',game_name:'WZRY',game_account:account,channel_prd_info:{
+        uhaozu:{prd_id:'u',rentalByHour:2,rentalByNight:8,rentalByDay:12,rentalByWeek:70},
+        uuzuhao:{prd_id:'y',hourPrice:2,minRentHour:2},zuhaowang:{prd_id:'z',rent_mode:'day_only',hour_basis:2}}};
+    await upsertUserGameAccount(row);
+    await setPriceLadderFeatureEnabled(uid,true);
+    const calls=[],logs=[];let failY=false;
+    const publisher=async(_,input)=>{
+        calls.push(input);
+        if(failY&&input.goods_id==='y')return {ok:false,batch_id:'fixture-failed',message:'mock rejected',error_detail:{stage:'modify',code:'REMOTE_REJECT'}};
+        const prices=input.goods_id==='u'?{rentalByHour:input.prices.hour,rentalByNight:input.prices.night,rentalByDay:input.prices.day,rentalByWeek:input.prices.week}:input.prices;
+        return {ok:true,batch_id:'fixture',changed:true,prices,
+            ...(input.goods_id==='y'?{verification_status:'partial'}:{}),rent_mode:'day_only'};
+    };
+    const options={now:now('09:00:00'),publisher,logger:{log:l=>logs.push(l),warn:l=>logs.push(l)}};
+    await savePriceLadderRuleByUser(uid,{game_id:'1',game_account:account,prices:[2,2.2,2.4,2.6],expected_version:0},options);
+    const defaults=await getPackageRatioSettingsByUser(uid);assert(defaults.channels.every(c=>c.daily_policy.mode==='follow'));
+    const policy={mode:'decrease',factors:[1,1,0.95,0.9]};
+    for(const channel of ['uhaozu','zuhaowang','uuzuhao']){
+        const adapter=getPriceChannelAdapter(channel);
+        const setting=await savePackageRatioSettingsByUser(uid,{channel,ratios:adapter.default_ratios,daily_policy:policy,expected_version:0});
+        assert.strictEqual(setting.daily_policy.mode,'decrease');assert.strictEqual(setting.queued_count,1);
+        const resolved=await adapter.resolveTierPrices({user_id:uid,rule:{prices:[2,2.2,2.4,2.6]}});
+        assert.strictEqual(resolved.baseline.daily_policy.mode,'decrease');assert.strictEqual(resolved.baseline_version,1);
+    }
+    calls.length=0;
+    const same=await reconcilePendingPriceLaddersByUser(uid,options);
+    assert.strictEqual(same.applied,3);assert(calls.every(c=>c.tier===1&&c.force_publish));
+    assert(logs.some(l=>l.includes('"daily_policy":{"mode":"decrease"')));
+    const parseEvent=event=>logs.filter(l=>l.startsWith(`[PriceLadder][${event}] `)).map(l=>JSON.parse(l.slice(l.indexOf('] ')+2)));
+    const calculation=parseEvent('apply_start').filter(row=>row.daily_policy.mode==='decrease').find(row=>row.channel==='uhaozu');
+    assert.strictEqual(calculation.daily_calculation.base_daily_price,12);
+    assert.strictEqual(calculation.daily_calculation.daily_ratio,6);
+    assert.strictEqual(calculation.daily_calculation.factor,1);
+    assert.strictEqual(calculation.daily_calculation.target_daily_price,12);
+    assert.strictEqual(calculation.rule_version,1);assert.strictEqual(calculation.baseline_version,1);
+    for(const channel of ['uhaozu','zuhaowang','uuzuhao']){
+        const result=parseEvent('result').filter(row=>row.channel===channel).at(-1);
+        assert.strictEqual(result.verification_status,channel==='uuzuhao'?'partial':'full');
+        assert.strictEqual(result.trace_id,calculation.trace_id);
+        if(channel==='uuzuhao')assert.deepStrictEqual(result.verified_price_keys,['hour']);
+    }
+    calls.length=0;assert.strictEqual((await reconcilePendingPriceLaddersByUser(uid,options)).unchanged,3);assert.strictEqual(calls.length,0);
+    for(let i=0;i<3;i++) await upsertOrder({user_id:uid,game_id:'1',game_name:'WZRY',game_account:account,channel:'uhaozu',order_no:`daily-${i}`,order_status:'已完成',rec_amount:8,order_amount:10,start_time:`2026-10-07 08:${10+i}:00`,end_time:`2026-10-07 08:${20+i}:00`});
+    await reconcilePendingPriceLaddersByUser(uid,options);
+    assert(calls.every(c=>c.tier===4));
+    assert.strictEqual(calls.find(c=>c.goods_id==='u').prices.day,10.8);
+    assert.strictEqual(calls.find(c=>c.goods_id==='z').prices.p24,8.1);
+    assert.strictEqual(calls.find(c=>c.goods_id==='y').prices.p24,25.92);
+    calls.length=0;
+    await reconcilePendingPriceLaddersByUser(uid,{...options,now:new Date('2026-10-08T09:00:00')});
+    assert.strictEqual(calls.length,3);assert(calls.every(c=>c.tier===1));
+    assert.strictEqual(calls.find(c=>c.goods_id==='u').prices.day,12,'decrease policy restores higher daily price when orders expire');
+    assert.strictEqual(calls.find(c=>c.goods_id==='z').prices.p24,9);
+    assert.strictEqual(calls.find(c=>c.goods_id==='y').prices.p24,28.8);
+    calls.length=0;
+    await reconcilePendingPriceLaddersByUser(uid,options);
+    assert.strictEqual(calls.length,3);assert(calls.every(c=>c.tier===4));
+    for(const channel of ['uhaozu','zuhaowang','uuzuhao']) await savePackageRatioSettingsByUser(uid,{channel,ratios:getPriceChannelAdapter(channel).default_ratios,daily_policy:{mode:'flat'},expected_version:1});
+    calls.length=0;failY=true;
+    const partial=await reconcilePendingPriceLaddersByUser(uid,{...options,now:now('09:05:00')});
+    assert.strictEqual(partial.applied,2);assert.strictEqual(partial.failed,1);
+    const failedLog=parseEvent('result').filter(row=>row.status==='failed').at(-1);
+    assert.strictEqual(failedLog.verification_status,'failed');assert.strictEqual(failedLog.batch_id,'fixture-failed');
+    assert.strictEqual(failedLog.error_code,'REMOTE_REJECT');assert.strictEqual(failedLog.error_stage,'modify');
+    assert.strictEqual(failedLog.retry_count,1);assert(failedLog.next_retry_at);
+    const failed=await getAccountPriceLadderRuntime(uid,'1',account,'uuzuhao');
+    assert.strictEqual(JSON.parse(failed.applied_price_signature).prices.p24,25.92);
+    failY=false;calls.length=0;
+    await reconcilePendingPriceLaddersByUser(uid,{...options,now:now('10:00:00')});
+    assert.strictEqual(calls.length,1);assert.strictEqual(calls[0].prices.p24,28.8);
+    calls.length=0;
+    await reconcilePendingPriceLaddersByUser(uid,{...options,now:new Date('2026-10-08T09:00:00')});
+    assert.strictEqual(calls.length,3);assert(calls.every(c=>c.tier===1));
+    assert.strictEqual(calls.find(c=>c.goods_id==='u').prices.day,12);
+    // Old clients which omit daily_policy preserve the saved mode rather than silently disabling it.
+    const preserved=await savePackageRatioSettingsByUser(uid,{channel:'uhaozu',ratios:getPriceChannelAdapter('uhaozu').default_ratios,expected_version:2});
+    assert.strictEqual(preserved.daily_policy.mode,'flat');
+    const before=await ratioDb.getUserChannelPackageRatio(uid,'uhaozu');
+    await assert.rejects(()=>savePackageRatioSettingsByUser(uid,{channel:'uhaozu',ratios:{hour:1,night:10,day:6,week:35},daily_policy:policy}),/daily-a.*冲突/);
+    assert.deepStrictEqual(await ratioDb.getUserChannelPackageRatio(uid,'uhaozu'),before);
+    await assert.rejects(()=>savePackageRatioSettingsByUser(uid,{channel:'uhaozu',ratios:{night:4,day:6,week:35},daily_policy:{mode:'bad'}}),/模式/);
+    await assert.rejects(()=>savePriceLadderRuleByUser(uid,{game_id:'1',game_account:account,prices:[2,3,4,5],expected_version:1},options),/冲突/);
+    assert.strictEqual((await getAccountPriceLadderRule(uid,'1',account)).version,1);
+    const other={...row,game_account:'sold',asset_status:'sold'};
+    validateDailyPolicyForRules(getPriceChannelAdapter('uhaozu'),{hour:1,night:100,day:1,week:35},policy,[{game_id:'1',game_account:'sold',prices:[2,3,4,5]}],[other]);
+    const rollback=await savePackageRatioSettingsByUser(uid,{channel:'uhaozu',ratios:getPriceChannelAdapter('uhaozu').default_ratios,daily_policy:{mode:'follow'},expected_version:3});
+    assert.strictEqual(rollback.daily_policy.mode,'follow');
+    assert.strictEqual((await getPriceChannelAdapter('uhaozu').resolveTierPrices({user_id:uid,rule:{prices:[2,2.2,2.4,2.6]}})).tiers[3].prices.day,15.6);
+    calls.length=0;
+    await reconcilePendingPriceLaddersByUser(uid,options);
+    assert.strictEqual(calls.find(c=>c.goods_id==='u').prices.day,15.6,'rollback must publish the restored policy');
+    const discounted={mode:'decrease',factors:[0.95,0.9,0.85,0.85]};
+    for(const channel of ['uhaozu','zuhaowang','uuzuhao']){
+        const adapter=getPriceChannelAdapter(channel);
+        const ratios={...adapter.default_ratios};
+        if(channel==='uhaozu')ratios.night=3;
+        const saved=await savePackageRatioSettingsByUser(uid,{channel,ratios,daily_policy:discounted});
+        assert.deepStrictEqual(saved.daily_policy,discounted);
+        assert.deepStrictEqual((await ratioDb.getUserChannelPackageRatio(uid,channel)).daily_policy,discounted);
+    }
+    calls.length=0;
+    assert.strictEqual((await reconcilePendingPriceLaddersByUser(uid,options)).applied,3);
+    assert.strictEqual(calls.find(c=>c.goods_id==='u').prices.day,10.2);
+    assert.strictEqual(calls.find(c=>c.goods_id==='z').prices.p24,7.6);
+    assert.strictEqual(calls.find(c=>c.goods_id==='y').prices.p24,24.48);
+    calls.length=0;
+    await reconcilePendingPriceLaddersByUser(uid,{...options,now:new Date('2026-10-08T09:00:00')});
+    assert.strictEqual(calls.find(c=>c.goods_id==='u').prices.day,11.4);
+    assert.strictEqual(calls.find(c=>c.goods_id==='z').prices.p24,8.5);
+    assert.strictEqual(calls.find(c=>c.goods_id==='y').prices.p24,27.36);
+    const discountedLog=parseEvent('apply_start').filter(row=>row.channel==='uhaozu').at(-1);
+    assert.strictEqual(discountedLog.daily_calculation.base_daily_price,12);
+    assert.strictEqual(discountedLog.daily_calculation.factor,0.95);
+    assert.strictEqual(discountedLog.daily_calculation.target_daily_price,11.4);
+    const discountBefore=await ratioDb.getUserChannelPackageRatio(uid,'uhaozu');
+    for(const factors of [[0.95,0.96,0.85,0.85],[0,0,0,0],[1.01,0.9,0.85,0.85],[0.1,0.1,0.1,0.1]]){
+        await assert.rejects(()=>savePackageRatioSettingsByUser(uid,{channel:'uhaozu',ratios:discountBefore.ratios,daily_policy:{mode:'decrease',factors}}));
+        assert.deepStrictEqual(await ratioDb.getUserChannelPackageRatio(uid,'uhaozu'),discountBefore);
+    }
+    await savePackageRatioSettingsByUser(uid,{channel:'uhaozu',ratios:discountBefore.ratios,daily_policy:discounted});
+    const brokenLogger={log(){throw new Error('log sink unavailable');},warn(){throw new Error('log sink unavailable');}};
+    assert.strictEqual((await reconcilePendingPriceLaddersByUser(uid,{...options,now:new Date('2026-10-08T09:00:00'),logger:brokenLogger})).applied,1);
+    const successful=await getAccountPriceLadderRuntime(uid,'1',account,'uhaozu');
+    assert.strictEqual(successful.applied_tier,1);assert.strictEqual(successful.last_error,'');
+    console.log('[PASS] legacy migration, policies, same-tier publish, rise/fall, partial failure, retry, validation and rollback');
+}
+main().catch(e=>{console.error(e);process.exitCode=1;});

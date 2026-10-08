@@ -126,7 +126,7 @@ function pricingApplyStatusText(status) {
 
 function pricingTierLabel(tier) {
   const value = Math.min(4, Math.max(1, Number(tier || 1)));
-  return `第 ${value} 档时租价（近24h ${value - 1}${value === 4 ? '+' : ''}单）`;
+  return `${value}档时租价`;
 }
 
 function pricingTierSummary(item = {}) {
@@ -238,6 +238,14 @@ function renderPricingRatioSettings() {
   const selected = channels.find((item) => item.channel === ratioState.selected_channel) || channels[0];
   const draft = ratioState.drafts[selected.channel] || normalizePricingRatioDraft(selected);
   ratioState.drafts[selected.channel] = draft;
+  ratioState.daily_drafts = ratioState.daily_drafts || {};
+  const dailyDraft = ratioState.daily_drafts[selected.channel] || window.DailyPricePolicy.draft(selected.daily_policy);
+  ratioState.daily_drafts[selected.channel] = dailyDraft;
+  const refreshDailyPreview = () => {
+    const output = panel.querySelector('[data-daily-preview]');
+    if (output) output.textContent = window.DailyPricePolicy.preview(dailyDraft,
+      { ...selected, ratios: draft }, ratioState.preview_hour, normalizePricingPreviewPrice);
+  };
   const labels = selected.package_labels || {};
   const fields = selected.package_keys.map((key) => `
     <label class="pricing-ratio-field">
@@ -258,15 +266,17 @@ function renderPricingRatioSettings() {
       <span>${selected.source === 'saved' ? `已保存${selected.modify_date ? ` · ${escapePricingHtml(selected.modify_date)}` : ''}` : '当前使用系统建议值，保存后转为号主配置'}</span>
     </div>
     <div class="pricing-ratio-grid">${fields}</div>
+    <div id="pricingDailyPolicyPanel" class="pricing-ratio-panel">${window.DailyPricePolicy.render(dailyDraft, ratioState.saving, escapePricingHtml)}</div>
     <div class="pricing-ratio-actions">
-      <span class="head-summary-text">时租固定为 1 倍；保存后，下次价格同步按最新倍率生效。</span>
-      <button class="btn btn-ghost btn-page-action" id="pricingRatioSaveBtn" type="button" ${ratioState.saving ? 'disabled' : ''}>${ratioState.saving ? '保存中...' : '保存倍率'}</button>
+      <span class="head-summary-text">时租固定为1倍；保存前检查全部关联未售账号的四档套餐，冲突时不保存。</span>
+      <button class="btn btn-ghost btn-page-action" id="pricingRatioSaveBtn" type="button" ${ratioState.saving ? 'disabled' : ''}>${ratioState.saving ? '保存中...' : '保存设置'}</button>
     </div>
   `;
   Array.from(panel.querySelectorAll('[data-pricing-ratio-key]')).forEach((input) => {
     input.oninput = () => {
       draft[String(input.getAttribute('data-pricing-ratio-key') || '')] = input.value;
       renderPricingRatioInlineResults(selected, draft, ratioState.preview_hour);
+      refreshDailyPreview();
     };
   });
   const previewHour = document.getElementById('pricingRatioPreviewHour');
@@ -275,9 +285,15 @@ function renderPricingRatioSettings() {
     previewHour.oninput = () => {
       ratioState.preview_hour = previewHour.value;
       renderPricingRatioInlineResults(selected, draft, ratioState.preview_hour);
+      refreshDailyPreview();
     };
   }
   renderPricingRatioInlineResults(selected, draft, ratioState.preview_hour);
+  window.DailyPricePolicy.bind(panel, dailyDraft, (rerender) => {
+    if (rerender) renderPricingRatioSettings();
+    else refreshDailyPreview();
+  });
+  refreshDailyPreview();
   const save = document.getElementById('pricingRatioSaveBtn');
   if (save) save.onclick = () => void savePricingRatioSettings(selected);
 }
@@ -286,8 +302,10 @@ async function savePricingRatioSettings(channel) {
   const ratioState = ensurePricingLadderState().ratio_settings;
   if (ratioState.saving) return;
   let ratios;
+  let dailyPolicy;
   try {
     ratios = validatePricingRatioDraft(channel, ratioState.drafts[channel.channel] || {});
+    dailyPolicy = window.DailyPricePolicy.parse(ratioState.daily_drafts[channel.channel]);
   } catch (e) {
     showToast(e.message || '套餐倍率不合法');
     return;
@@ -300,14 +318,16 @@ async function savePricingRatioSettings(channel) {
       body: JSON.stringify({
         channel: channel.channel,
         ratios,
+        daily_policy: dailyPolicy,
         expected_version: Number(channel.version || 0)
       })
     });
     const saved = out && out.setting ? out.setting : {};
     Object.assign(channel, saved);
     ratioState.drafts[channel.channel] = normalizePricingRatioDraft(channel);
+    ratioState.daily_drafts[channel.channel] = window.DailyPricePolicy.draft(channel.daily_policy);
     const queued = Number(saved.queued_count || 0);
-    showToast(queued > 0 ? `倍率已保存，${queued} 个账号将在下次同步生效` : '倍率已保存');
+    showToast(queued > 0 ? `设置已保存，${queued} 个账号将在下次同步生效` : '设置已保存');
   } catch (e) {
     showToast(e.message || '套餐倍率保存失败');
   } finally {
@@ -325,6 +345,7 @@ async function loadPricingRatioSettings() {
     const out = await request('/api/pricing/ladder/package-ratios');
     ratioState.channels = Array.isArray(out && out.channels) ? out.channels : [];
     ratioState.drafts = Object.fromEntries(ratioState.channels.map((channel) => [channel.channel, normalizePricingRatioDraft(channel)]));
+    ratioState.daily_drafts = Object.fromEntries(ratioState.channels.map((channel) => [channel.channel, window.DailyPricePolicy.draft(channel.daily_policy)]));
     ratioState.loaded_once = true;
   } catch (e) {
     ratioState.error = String(e && e.message || '套餐倍率加载失败');
@@ -794,7 +815,7 @@ function renderPricingList() {
         <span>${escapePricingHtml(pricingTierLabel(tier))}</span>
         <div class="pricing-price-input">
           <input data-pricing-tier="${tier}" type="number" min="0.01" step="0.01" inputmode="decimal"
-            aria-label="第 ${tier} 档时租价" value="${escapePricingHtml(draft.prices[index] || '')}" ${editing && !saving ? '' : 'disabled'}>
+            aria-label="${tier}档时租价" value="${escapePricingHtml(draft.prices[index] || '')}" ${editing && !saving ? '' : 'disabled'}>
           <span>元</span>
         </div>
       </label>
@@ -898,6 +919,11 @@ function renderPricingView() {
   renderPricingFeatureState();
   const windowText = document.getElementById('pricingWindowText');
   if (windowText) windowText.textContent = `订单周期：${pricing.count_window || '近24小时'}`;
+  if (window.HelpSheet) window.HelpSheet.bind(
+    document.getElementById('pricingWindowHelpBtn'),
+    document.getElementById('pricingWindowHelpSheet'),
+    document.getElementById('pricingWindowHelpCloseBtn')
+  );
   if (els.pricingSearchInput) {
     if (document.activeElement !== els.pricingSearchInput) els.pricingSearchInput.value = pricing.query;
     els.pricingSearchInput.oninput = () => {

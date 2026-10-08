@@ -1,6 +1,7 @@
 'use strict';
 
 const { getUserChannelPackageRatio } = require('../database/user_channel_package_ratio_db');
+const { normalizeDailyPolicy } = require('./daily_price_policy');
 
 function roundRatio(value) {
     const n = Number(value);
@@ -35,6 +36,7 @@ async function resolvePackageRatios(userId, capability = {}) {
     const ratios = normalizeRatios(capability, saved && saved.ratios || {}, { strict: true });
     return {
         ratios,
+        daily_policy: normalizeDailyPolicy(saved ? saved.daily_policy : undefined),
         version: Number(saved && saved.version || 0),
         source: saved ? 'saved' : 'default',
         modify_date: String(saved && saved.modify_date || '').trim()

@@ -34,9 +34,11 @@ assert.strictEqual(helpers.pricingApplyStatusText('pending'), '待执行换档')
 assert.strictEqual(helpers.pricingApplyStatusText('blocked'), '受上下架安全规则阻塞');
 assert.strictEqual(helpers.pricingApplyStatusText('failed'), '上次换档失败');
 assert.strictEqual(helpers.pricingApplyStatusText('unknown'), '套餐数据暂不完整');
-assert.strictEqual(helpers.pricingTierLabel(1), '第 1 档时租价（近24h 0单）');
-assert.strictEqual(helpers.pricingTierLabel(2), '第 2 档时租价（近24h 1单）');
-assert.strictEqual(helpers.pricingTierLabel(9), '第 4 档时租价（近24h 3+单）');
+assert.strictEqual(helpers.pricingTierLabel(1), '1档时租价');
+assert.strictEqual(helpers.pricingTierLabel(2), '2档时租价');
+assert.strictEqual(helpers.pricingTierLabel(3), '3档时租价');
+assert.strictEqual(helpers.pricingTierLabel(9), '4档时租价');
+assert.strictEqual(helpers.pricingTierLabel(0), '1档时租价');
 assert.strictEqual(helpers.pricingLogStatusText('success'), '成功');
 assert.strictEqual(helpers.pricingLogStatusText('fail'), '失败');
 assert.strictEqual(helpers.pricingLogTriggerText('rule_saved'), '保存策略');
@@ -66,6 +68,8 @@ context.renderPricingView();
 assert.strictEqual(windowText.textContent, '订单周期：近24小时');
 assert(listContainer.innerHTML.includes('近24h 2单'));
 assert(listContainer.innerHTML.includes('当前第2档 · 目标第3档 · 待换档'));
+assert(listContainer.innerHTML.includes('aria-label="1档时租价"'));
+assert(!listContainer.innerHTML.includes('档时租价（'));
 
 const errorDetail = helpers.formatPricingErrorDetail({
     fail_message: '商品更新失败',

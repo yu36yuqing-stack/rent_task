@@ -1418,6 +1418,9 @@ async function handleSetPricingLadderAccount(req, res) {
         });
         return json(res, 200, { ok: true, rule });
     } catch (err) {
+        if (err && err.code === 'DAILY_PRICE_POLICY_INVALID') {
+            return json(res, 400, { ok: false, message: err.message });
+        }
         if (err && err.code === 'PRICE_LADDER_VERSION_CONFLICT') {
             return json(res, 409, { ok: false, message: err.message });
         }
@@ -1468,10 +1471,14 @@ async function handleSetPricingPackageRatios(req, res) {
         const setting = await savePackageRatioSettingsByUser(user.id, {
             channel: body.channel,
             ratios: body.ratios,
+            daily_policy: body.daily_policy,
             expected_version: body.expected_version
         });
         return json(res, 200, { ok: true, setting });
     } catch (err) {
+        if (err && err.code === 'DAILY_PRICE_POLICY_INVALID') {
+            return json(res, 400, { ok: false, message: err.message });
+        }
         if (err && err.code === 'PRICE_LADDER_VERSION_CONFLICT') {
             return json(res, 409, { ok: false, message: err.message });
         }

@@ -128,7 +128,9 @@
         <div class="pricing-ladder-head">
           <div>
             <p class="auth-title">账号阶梯价格</p>
-            <p id="pricingWindowText" class="head-summary-text">订单周期：近24小时</p>
+            <p class="head-summary-text"><span id="pricingWindowText">订单周期：近24小时</span>
+              <button id="pricingWindowHelpBtn" class="drawer-help-btn" type="button" aria-label="查看阶梯档位说明" aria-haspopup="dialog" aria-controls="pricingWindowHelpSheet" aria-expanded="false">?</button>
+            </p>
           </div>
           <label class="feature-switch" for="pricingFeatureToggle">
             <span class="feature-switch-copy">
@@ -139,7 +141,6 @@
             <span class="feature-switch-track" aria-hidden="true"></span>
           </label>
         </div>
-        <p class="pricing-channel-note">统一时租基准价生效渠道：U号租、租号王、悠悠租号</p>
         <div class="field list-search-field pricing-search-field">
           <label for="pricingSearchInput">搜索账号</label>
           <input id="pricingSearchInput" type="search" placeholder="输入账号名称或账号" autocomplete="off">
@@ -151,10 +152,10 @@
         <div class="pricing-ladder-head">
           <div>
             <p class="auth-title">套餐比例设置</p>
-            <p class="head-summary-text">套餐总价 = 当前档时租基准价 × 套餐倍率</p>
+            <p class="head-summary-text">常规套餐跟随当前档时租；日租可单独持平或递减。</p>
           </div>
           <label class="pricing-ratio-example">
-            <span>示例时租价</span>
+            <span>首档示例时租价</span>
             <div class="pricing-price-input">
               <input id="pricingRatioPreviewHour" type="number" min="0.01" step="0.01" inputmode="decimal" value="2" aria-label="示例时租价">
               <span>元</span>
@@ -347,6 +348,28 @@
       </div>
       <div id="overlayBody" class="overlay-body"></div>
     </div>
+  </div>
+
+  <div id="pricingWindowHelpSheet" class="sheet hidden" aria-hidden="true">
+    <section class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="pricingWindowHelpTitle">
+      <div class="sheet-head">
+        <div class="sheet-title-wrap">
+          <span class="sheet-icon" aria-hidden="true">?</span>
+          <div id="pricingWindowHelpTitle" class="sheet-title">阶梯档位说明</div>
+        </div>
+      </div>
+      <p class="head-summary-text">档位按近24小时有效订单数计算：</p>
+      <div>
+        <p class="head-summary-text">1档：0单</p>
+        <p class="head-summary-text">2档：1单</p>
+        <p class="head-summary-text">3档：2单</p>
+        <p class="head-summary-text">4档：3单及以上</p>
+      </div>
+      <p class="head-summary-text">按当前时间向前滚动24小时统计，订单移出窗口后，档位可能下降。</p>
+      <div class="sheet-actions">
+        <button id="pricingWindowHelpCloseBtn" class="sheet-btn" type="button">关闭</button>
+      </div>
+    </section>
   </div>
 
   <div id="pricingChannelSheet" class="sheet hidden" aria-hidden="true">
@@ -833,7 +856,9 @@
   <script defer src="/js/menu_orders.js?v=20260303a"></script>
   <script defer src="/js/menu_risk.js?v=20260303a"></script>
   <script defer src="/js/menu_stats.js?v=20260329b"></script>
-  <script defer src="/js/menu_price.js?v=20261001a"></script>
+  <script defer src="/js/ui/daily_price_policy.js?v=20261008a"></script>
+  <script defer src="/js/ui/help_sheet.js?v=20261007a"></script>
+  <script defer src="/js/menu_price.js?v=20261007b"></script>
   <script defer src="/js/menu_board.js?v=20260329a"></script>
   <script defer src="/js/menu_maintenance.js?v=20260920b"></script>
 </body>

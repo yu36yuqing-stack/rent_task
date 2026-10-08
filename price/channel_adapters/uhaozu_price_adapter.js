@@ -1,6 +1,7 @@
 'use strict';
 
 const { resolvePackageRatios } = require('../channel_package_ratio');
+const { applyDailyPolicy } = require('../daily_price_policy');
 
 const capability = Object.freeze({
     channel: 'uhaozu',
@@ -99,7 +100,8 @@ function samePriceSet(left = {}, right = {}) {
 async function resolveTierPrices(context = {}) {
     const { user_id: userId, rule } = context;
     const ratioConfig = await resolvePackageRatios(userId, capability);
-    const tiers = buildTierPricesByRatios(rule.prices, ratioConfig.ratios);
+    const tiers = applyDailyPolicy(buildTierPricesByRatios(rule.prices, ratioConfig.ratios),
+        capability, ratioConfig.daily_policy, (key, value) => roundMoney(value));
     const ready = Boolean(
         tiers.length === 4
         && tiers.every((item) => Object.values(item.prices).every((value) => Number(value) > 0))
@@ -111,6 +113,7 @@ async function resolveTierPrices(context = {}) {
         tiers,
         baseline: {
             ratios: ratioConfig.ratios,
+            daily_policy: ratioConfig.daily_policy,
             version: ratioConfig.version,
             modify_date: ratioConfig.modify_date
         },

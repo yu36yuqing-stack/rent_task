@@ -276,6 +276,52 @@ function safeLogMessage(value) {
         .slice(0, 400);
 }
 
+function dailyCalculationLog(adapter, rule, resolved, desired) {
+    try {
+        const key = adapter.channel === 'uhaozu' ? 'day' : 'p24';
+        const { ratios, daily_policy: policy } = resolved.baseline;
+        const build = adapter.buildTierPricesByRatios || adapter.buildTierPrices;
+        const base = build([rule.prices[0]], ratios)[0].prices;
+        const factor = policy.mode === 'decrease' ? policy.factors[desired.tier - 1] : 1;
+        return {
+            mode: policy.mode, daily_price_key: key,
+            first_tier_hour_price: base.hour, target_tier_hour_price: desired.prices.hour,
+            daily_ratio: ratios[key], base_daily_price: base[key],
+            calculation_base: policy.mode === 'follow' ? 'target_tier_hour' : 'first_tier_daily',
+            factor, target_daily_price: desired.prices[key]
+        };
+    } catch (_) {
+        return null;
+    }
+}
+
+function publishVerificationLog(adapter, published, targetPrices) {
+    const unknown = { verification_status: 'unknown', verified_price_keys: [], readback_prices: {} };
+    try {
+        if (!published || !published.ok) return { ...unknown, verification_status: 'failed' };
+        const prices = published.prices || {};
+        const keys = adapter.channel === 'uuzuhao' ? ['hour']
+            : adapter.channel === 'zuhaowang' && published.rent_mode === 'day_only' ? ['p24', 'p72', 'p168']
+                : adapter.channel === 'zuhaowang' && published.rent_mode === 'hour_only' ? ['hour'] : adapter.package_keys;
+        const uFields = { hour: 'rentalByHour', night: 'rentalByNight', day: 'rentalByDay', week: 'rentalByWeek' };
+        const readback = {};
+        for (const key of keys) {
+            const value = prices[adapter.channel === 'uhaozu' ? uFields[key] : key];
+            if (typeof value === 'number' && Number.isFinite(value) && value > 0) readback[key] = value;
+        }
+        const matched = keys.filter(key => Object.hasOwn(readback, key) && readback[key] === targetPrices[key]);
+        // Only compare returned facts. The YY publisher returns target packages, not package readback.
+        const complete = matched.length === keys.length && keys.length > 0;
+        const partial = published.verification_status === 'partial' || adapter.channel === 'uuzuhao';
+        return {
+            verification_status: complete ? (partial ? 'partial' : 'full') : 'unknown',
+            verified_price_keys: matched, readback_prices: readback
+        };
+    } catch (_) {
+        return unknown;
+    }
+}
+
 function writePriceLadderLog(logger, event, data) {
     try {
         const method = data.status === 'failed' || data.status === 'error' || data.status === 'partial_failed' ? 'warn' : 'log';
@@ -536,7 +582,10 @@ async function executePriceLadderReconciliation(userId, options, observe) {
                 game_id: runtime.game_id, game_account: runtime.game_account, channel: runtime.channel,
                 status: 'applying', count_24h: count, from_tier: appliedTier, to_tier: desiredTier,
                 trigger_source: runtime.trigger_source, retry_count: runtime.retry_count,
-                target_prices: desired.prices
+                target_prices: desired.prices,
+                daily_policy: resolved.baseline && resolved.baseline.daily_policy,
+                daily_calculation: dailyCalculationLog(adapter, rule, resolved, desired),
+                rule_version: Number(rule.version || 0), baseline_version: baselineVersion
             });
             published = await publisher(uid, {
                 game_id: runtime.game_id,
@@ -551,6 +600,7 @@ async function executePriceLadderReconciliation(userId, options, observe) {
         } catch (error) {
             published = { ok: false, message: String(error && error.message ? error.message : error) };
         }
+        const verification = publishVerificationLog(adapter, published, desired.prices);
         if (published && published.ok) {
             await upsertAccountPriceLadderRuntime(uid, {
                 ...runtime,
@@ -572,7 +622,7 @@ async function executePriceLadderReconciliation(userId, options, observe) {
             if (published.changed === false) {
                 summary.unchanged += 1;
                 recordResult(runtime, { game_account: runtime.game_account, channel: runtime.channel, status: 'unchanged', tier: desiredTier }, {
-                    publish_attempted: true, confirmed_tier: desiredTier, batch_id: published.batch_id || '', retry_count: 0, next_retry_at: ''
+                    ...verification, publish_attempted: true, confirmed_tier: desiredTier, batch_id: published.batch_id || '', retry_count: 0, next_retry_at: ''
                 });
             } else {
                 summary.applied += 1;
@@ -582,7 +632,7 @@ async function executePriceLadderReconciliation(userId, options, observe) {
                     status: 'applied',
                     tier: desiredTier,
                     batch_id: published.batch_id || ''
-                }, { publish_attempted: true, confirmed_tier: desiredTier, retry_count: 0, next_retry_at: '' });
+                }, { ...verification, publish_attempted: true, confirmed_tier: desiredTier, retry_count: 0, next_retry_at: '' });
             }
         } else {
             const message = String(published && published.message || '价格发布失败');
@@ -603,6 +653,9 @@ async function executePriceLadderReconciliation(userId, options, observe) {
             summary.failed += 1;
             recordResult(runtime, { game_account: runtime.game_account, channel: runtime.channel, status: 'failed', reason: message }, {
                 reason: 'publish_failed', publish_attempted: true, error_message: safeLogMessage(message),
+                ...verification, batch_id: published && published.batch_id || '',
+                error_code: safeLogMessage(published && published.error_detail && published.error_detail.code),
+                error_stage: safeLogMessage(published && published.error_detail && published.error_detail.stage),
                 next_retry_at: retryAtText(now), retry_count: runtime.retry_count + 1
             });
         }
@@ -645,6 +698,8 @@ module.exports = {
         retryAtText,
         isRetryDue,
         listAllAccountsByUser,
+        dailyCalculationLog,
+        publishVerificationLog,
         CHANNEL
     }
 };

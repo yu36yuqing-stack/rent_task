@@ -199,7 +199,11 @@ async function main() {
         assert(staticHtml.includes('账号阶梯价格'));
         assert(staticHtml.includes('pricingFeatureToggle'));
         assert(staticHtml.includes('pricingSearchInput'));
-        assert(staticHtml.includes('统一时租基准价生效渠道：U号租、租号王、悠悠租号'));
+        assert(!staticHtml.includes('统一时租基准价生效渠道：'));
+        assert(staticHtml.includes('id="pricingWindowHelpBtn"'));
+        assert(staticHtml.includes('id="pricingWindowHelpSheet"'));
+        assert(staticHtml.includes('4档：3单及以上'));
+        assert(staticHtml.includes('/js/ui/help_sheet.js?v=20261007a'));
         assert(staticHtml.includes('套餐比例设置'));
         assert(staticHtml.includes('pricingRatioPanel'));
         assert(staticHtml.includes('pricingChannelSheet'));

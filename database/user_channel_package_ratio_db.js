@@ -1,6 +1,7 @@
 'use strict';
 
 const { openPriceDatabase } = require('./sqlite_client');
+const { normalizeDailyPolicy } = require('../price/daily_price_policy');
 
 function nowText() {
     const d = new Date();
@@ -50,6 +51,7 @@ function toRatioConfig(row = {}) {
         user_id: Number(row.user_id || 0),
         channel: String(row.channel || '').trim(),
         ratios: parseRatios(row.ratios_json),
+        daily_policy: normalizeDailyPolicy(JSON.parse(row.daily_policy_json || '{}')),
         version: Number(row.version || 0),
         create_date: String(row.create_date || '').trim(),
         modify_date: String(row.modify_date || '').trim(),
@@ -67,6 +69,7 @@ async function initUserChannelPackageRatioDb() {
                 user_id INTEGER NOT NULL,
                 channel TEXT NOT NULL,
                 ratios_json TEXT NOT NULL DEFAULT '{}',
+                daily_policy_json TEXT NOT NULL DEFAULT '{}',
                 version INTEGER NOT NULL DEFAULT 1,
                 create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -74,6 +77,10 @@ async function initUserChannelPackageRatioDb() {
                 desc TEXT NOT NULL DEFAULT ''
             )
         `);
+        const columns = await all(db, 'PRAGMA table_info(user_channel_package_ratio)');
+        if (!columns.some((column) => column.name === 'daily_policy_json')) {
+            await run(db, "ALTER TABLE user_channel_package_ratio ADD COLUMN daily_policy_json TEXT NOT NULL DEFAULT '{}'");
+        }
         await run(db, `
             CREATE UNIQUE INDEX IF NOT EXISTS uq_user_channel_package_ratio_alive
             ON user_channel_package_ratio(user_id, channel)
@@ -155,18 +162,20 @@ async function saveUserChannelPackageRatio(userId, input = {}, options = {}) {
         }
         const now = nowText();
         const ratiosJson = JSON.stringify(ratios);
+        const dailyPolicyJson = JSON.stringify(normalizeDailyPolicy(input.daily_policy === undefined
+            ? JSON.parse(exists && exists.daily_policy_json || '{}') : input.daily_policy));
         if (exists) {
             await run(db, `
                 UPDATE user_channel_package_ratio
-                SET ratios_json = ?, version = version + 1, modify_date = ?, desc = ?
+                SET ratios_json = ?, daily_policy_json = ?, version = version + 1, modify_date = ?, desc = ?
                 WHERE id = ?
-            `, [ratiosJson, now, String(options.desc || input.desc || '').trim(), Number(exists.id)]);
+            `, [ratiosJson, dailyPolicyJson, now, String(options.desc || input.desc || '').trim(), Number(exists.id)]);
         } else {
             await run(db, `
                 INSERT INTO user_channel_package_ratio
-                (user_id, channel, ratios_json, version, create_date, modify_date, is_deleted, desc)
-                VALUES (?, ?, ?, 1, ?, ?, 0, ?)
-            `, [uid, channel, ratiosJson, now, now, String(options.desc || input.desc || '').trim()]);
+                (user_id, channel, ratios_json, daily_policy_json, version, create_date, modify_date, is_deleted, desc)
+                VALUES (?, ?, ?, ?, 1, ?, ?, 0, ?)
+            `, [uid, channel, ratiosJson, dailyPolicyJson, now, now, String(options.desc || input.desc || '').trim()]);
         }
         const row = await get(db, `
             SELECT * FROM user_channel_package_ratio

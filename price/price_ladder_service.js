@@ -217,6 +217,16 @@ async function savePriceLadderRuleByUser(userId, input = {}, options = {}) {
     }
 
     const prices = normalizePrices(input.prices);
+    // New hourly ladders must remain compatible with the saved daily policy before persisting.
+    const { resolvePackageRatios } = require('./channel_package_ratio');
+    const { validateDailyPolicyForRules } = require('./package_ratio_service');
+    for (const capability of CHANNEL_CAPABILITIES) {
+        const adapter = getPriceChannelAdapter(capability.channel);
+        if (!adapter.isAvailable(target)) continue;
+        const config = await resolvePackageRatios(uid, capability);
+        validateDailyPolicyForRules(adapter, config.ratios, config.daily_policy,
+            [{ game_id: game.game_id, game_name: game.game_name, game_account: account, prices }], [target]);
+    }
 
     const copiedFrom = String(input.copied_from_game_account || '').trim();
     if (copiedFrom) {
