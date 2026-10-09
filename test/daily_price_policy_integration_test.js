@@ -173,6 +173,36 @@ async function main(){
     const repairedConfig=await ratioDb.getUserChannelPackageRatio(repairedUid,'uhaozu');
     await assert.rejects(()=>savePackageRatioSettingsByUser(repairedUid,{channel:'uhaozu',ratios:{hour:1,night:7,day:6,week:35},daily_policy:discounted}),/包夜/);
     assert.deepStrictEqual(await ratioDb.getUserChannelPackageRatio(repairedUid,'uhaozu'),repairedConfig);
+
+    const shortRatios={hour:1,p2:1.8,p3:2.4,p5:3.5,p7:4.9,p9:6,p10:6,p24:6.5,p168:40};
+    const shortConfig=await savePackageRatioSettingsByUser(repairedUid,{channel:'uuzuhao',ratios:shortRatios,daily_policy:discounted});
+    assert.strictEqual(shortConfig.queued_count,1);
+    const beforeShortApply=await getAccountPriceLadderRuntime(repairedUid,'1',repairedAccount,'uuzuhao');
+    calls.length=0;failY=true;
+    const shortFailed=await reconcilePendingPriceLaddersByUser(repairedUid,options);
+    assert.strictEqual(shortFailed.failed,1);
+    assert.strictEqual((await getAccountPriceLadderRuntime(repairedUid,'1',repairedAccount,'uuzuhao')).applied_price_signature,beforeShortApply.applied_price_signature);
+    const shortCall=calls.find(c=>c.goods_id==='y');
+    assert.deepStrictEqual(shortCall.prices,{hour:2.5,p2:2.45,p3:3.26,p5:4.76,p7:6.66,p9:8.16,p10:8.16,p24:8.84,p168:100});
+    failY=false;calls.length=0;
+    await reconcilePendingPriceLaddersByUser(repairedUid,{...options,now:now('10:00:00')});
+    assert.strictEqual(calls.length,1);assert.deepStrictEqual(calls[0].prices,shortCall.prices);
+    const shortLog=parseEvent('apply_start').filter(r=>r.user_id===repairedUid&&r.channel==='uuzuhao').at(-1);
+    assert.deepStrictEqual(shortLog.daily_calculation.short_package_calculation.p10,{calculation_base:'first_tier_package',ratio:6,base_price:9.6,factor:0.85,target_price:8.16});
+    calls.length=0;
+    await reconcilePendingPriceLaddersByUser(repairedUid,{...options,now:now('10:00:00')});
+    assert.strictEqual(calls.length,0);
+    await reconcilePendingPriceLaddersByUser(repairedUid,{...options,now:new Date('2026-10-08T09:00:00')});
+    assert.strictEqual(calls.find(c=>c.goods_id==='y').prices.p10,9.12);
+    assert.strictEqual(calls.find(c=>c.goods_id==='y').prices.p24,9.88);
+    const savedShort=await ratioDb.getUserChannelPackageRatio(repairedUid,'uuzuhao');
+    await assert.rejects(()=>savePackageRatioSettingsByUser(repairedUid,{channel:'uuzuhao',ratios:{...shortRatios,p10:7},daily_policy:discounted}),/10小时/);
+    assert.deepStrictEqual(await ratioDb.getUserChannelPackageRatio(repairedUid,'uuzuhao'),savedShort);
+    await savePackageRatioSettingsByUser(repairedUid,{channel:'uuzuhao',ratios:shortRatios,daily_policy:{mode:'follow'}});
+    calls.length=0;
+    await reconcilePendingPriceLaddersByUser(repairedUid,options);
+    assert.strictEqual(calls.find(c=>c.goods_id==='y').prices.p10,15);
+    assert.strictEqual(calls.find(c=>c.goods_id==='y').prices.p24,16.25);
     console.log('[PASS] legacy migration, policies, same-tier publish, rise/fall, partial failure, retry, validation and rollback');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

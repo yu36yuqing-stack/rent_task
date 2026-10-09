@@ -16,7 +16,7 @@
     return { mode: value.mode, factors };
   }
   function render(value, saving, escape) {
-    return `<div class="pricing-ratio-copy"><strong>日租阶梯</strong><span>调整包天/24小时套餐；U号租递减模式下包夜也按首档基准同比递减。保存后作用于该渠道全部已配置账号。</span></div>
+    return `<div class="pricing-ratio-copy"><strong>日租阶梯</strong><span>递减模式下，U号租包夜、悠悠2至10小时套餐也按首档基准同比递减。保存后作用于该渠道全部已配置账号。</span></div>
       <div class="orders-tabs">${Object.entries(modes).map(([mode, label]) => `<button type="button" class="orders-tab header-tab ${value.mode === mode ? 'active' : ''}" data-daily-mode="${mode}" ${saving ? 'disabled' : ''}>${label}</button>`).join('')}</div>
       <div class="pricing-ratio-grid ${value.mode === 'decrease' ? '' : 'hidden'}">${value.percentages.map((percentage, i) => `<label class="pricing-ratio-field"><span>第${i + 1}档日租</span><div class="pricing-price-input"><input type="number" min="0.01" max="100" step="0.01" inputmode="decimal" data-daily-factor="${i}" aria-label="第${i + 1}档日租百分比" value="${escape(percentage)}" ${saving ? 'disabled' : ''}><span>%</span></div></label>`).join('')}</div>
       <p class="head-summary-text" data-daily-preview></p>`;
@@ -34,7 +34,19 @@
         if (!Number.isFinite(nightBase) || nightBase <= 0) return '请输入有效的包夜倍率。';
         night = `；四档包夜示例：${policy.factors.map(factor => `¥${normalize(nightBase * factor, (channel.price_rules || {}).night).toFixed(2)}`).join(' / ')}`;
       }
-      return `四档日租示例：${policy.factors.map(factor => `¥${normalize(base * factor, (channel.price_rules || {})[key]).toFixed(2)}`).join(' / ')}${night}；各账号以自己的首档价格计算。`;
+      let short = '';
+      if (channel.channel === 'uuzuhao' && policy.mode === 'decrease') {
+        const samples = [];
+        for (const hours of [2, 3, 5, 7, 9, 10]) {
+          const shortKey = `p${hours}`;
+          const priceRule = (channel.price_rules || {})[shortKey];
+          const shortBase = normalize(Number(hourly) * Number(channel.ratios[shortKey]), priceRule);
+          if (!Number.isFinite(shortBase) || shortBase <= 0) return `请输入有效的${hours}小时倍率。`;
+          samples.push(`${hours}h ${policy.factors.map(factor => `¥${normalize(shortBase * factor, priceRule).toFixed(2)}`).join(' / ')}`);
+        }
+        short = `；四档短租示例：${samples.join('；')}`;
+      }
+      return `四档日租示例：${policy.factors.map(factor => `¥${normalize(base * factor, (channel.price_rules || {})[key]).toFixed(2)}`).join(' / ')}${night}${short}；各账号以自己的首档价格计算。`;
     } catch (error) {
       return error.message;
     }

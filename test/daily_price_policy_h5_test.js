@@ -14,6 +14,8 @@ async function main(){
     const user=await createUserByAdmin({account:'daily_h5',password:'test-local-123',name:'日租测试',user_type:'内部',status:'enabled'});
     await upsertUserGameAccount({user_id:user.id,game_id:'1',game_name:'WZRY',game_account:'daily-h5',channel_prd_info:{uhaozu:{prd_id:'u'},uuzuhao:{prd_id:'y'},zuhaowang:{prd_id:'z'}}});
     await savePriceLadderRuleByUser(user.id,{game_id:'1',game_account:'daily-h5',prices:[2,2.2,2.4,2.6],expected_version:0});
+    await upsertUserGameAccount({user_id:user.id,game_id:'1',game_name:'WZRY',game_account:'2630403808',channel_prd_info:{uuzuhao:{prd_id:'yy-regression'}}});
+    await savePriceLadderRuleByUser(user.id,{game_id:'1',game_account:'2630403808',prices:[1.6,1.9,2.1,2.5],expected_version:0});
     const server=await bootstrap();let browser;
     const base=`http://127.0.0.1:${process.env.H5_PORT}`,token=createAccessToken(user);
     const endpoint='/api/pricing/ladder/package-ratios';
@@ -36,6 +38,12 @@ async function main(){
         const badRule=await fetch(base+'/api/pricing/ladder/account',{method:'POST',headers,body:JSON.stringify({game_id:'1',game_account:'daily-h5',prices:[2,3,4,5],expected_version:1})});
         assert.strictEqual(badRule.status,400);assert((await badRule.json()).message.includes('冲突'));
         assert.strictEqual((await read()).channels[0].version,1);
+        const shortRatios={hour:1,p2:1.8,p3:2.4,p5:3.5,p7:4.9,p9:6,p10:6,p24:6.5,p168:40};
+        const shortSaved=await send({channel:'uuzuhao',ratios:shortRatios,daily_policy:{mode:'decrease',factors:[0.95,0.9,0.85,0.85]},expected_version:0});
+        assert.strictEqual(shortSaved.status,200);
+        assert.strictEqual(shortSaved.body.setting.version,1);
+        assert.strictEqual((await send({channel:'uuzuhao',ratios:{...shortRatios,p10:7},daily_policy:{mode:'decrease',factors:[0.95,0.9,0.85,0.85]},expected_version:1})).status,400);
+        assert.deepStrictEqual((await read()).channels.find(c=>c.channel==='uuzuhao').daily_policy,{mode:'decrease',factors:[0.95,0.9,0.85,0.85]});
         browser=await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
         const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
         await page.coverage.startJSCoverage({resetOnNavigation:false,includeRawScriptCoverage:true});
@@ -77,6 +85,11 @@ async function main(){
                 await page.click(`[data-pricing-ratio-channel="${channel}"]`);
                 await page.click('[data-daily-mode="decrease"]');
                 assert.strictEqual(await page.$eval('[data-daily-factor="0"]',i=>i.disabled),false);
+                if(channel==='uuzuhao'){
+                    const preview=await page.$eval('[data-daily-preview]',n=>n.textContent);
+                    assert(preview.includes('四档短租示例'));
+                    for(const hours of [2,3,5,7,9,10])assert(preview.includes(`${hours}h `));
+                }
                 const size=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:innerWidth,buttons:[...document.querySelectorAll('[data-daily-mode]')].map(b=>b.getBoundingClientRect().height)}));
                 assert(size.scroll<=size.width,JSON.stringify(size));assert(size.buttons.every(h=>h>0&&h<=42));
                 await page.screenshot({path:path.join(directory,`${channel}-${width}.png`),fullPage:true});

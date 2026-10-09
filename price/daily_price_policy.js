@@ -1,6 +1,7 @@
 'use strict';
 
 const DEFAULT_FACTORS = Object.freeze([1, 1, 0.95, 0.9]);
+const UUZUHAO_SHORT_PACKAGE_KEYS = Object.freeze(['p2', 'p3', 'p5', 'p7', 'p9', 'p10']);
 
 function policyError(message) {
     const error = new Error(message);
@@ -43,7 +44,12 @@ function applyDailyPolicy(tiers, capability, input, normalizePrice) {
         if (capability.channel === 'uhaozu' && policy.mode === 'decrease') {
             prices.night = normalizePrice('night', tiers[0].prices.night * policy.factors[i]);
         }
-        // Validate only relationships affected by the new daily price, not unrelated legacy packages.
+        if (capability.channel === 'uuzuhao' && policy.mode === 'decrease') {
+            for (const shortKey of UUZUHAO_SHORT_PACKAGE_KEYS) {
+                prices[shortKey] = normalizePrice(shortKey, tiers[0].prices[shortKey] * policy.factors[i]);
+            }
+        }
+        // Keep the existing daily-package ordering check after applying all related discounts.
         for (const [index, other] of capability.package_keys.entries()) {
             if (index === dayIndex) continue;
             const price = prices[other];
@@ -56,4 +62,4 @@ function applyDailyPolicy(tiers, capability, input, normalizePrice) {
     });
 }
 
-module.exports = { DEFAULT_FACTORS, normalizeDailyPolicy, applyDailyPolicy };
+module.exports = { DEFAULT_FACTORS, UUZUHAO_SHORT_PACKAGE_KEYS, normalizeDailyPolicy, applyDailyPolicy };

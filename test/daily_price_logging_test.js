@@ -31,6 +31,13 @@ for (const channel of ['uhaozu', 'zuhaowang', 'uuzuhao']) {
                         base_night_price: 8, factor: policy.factors[desired.tier - 1],
                         target_night_price: desired.prices.night
                     }
+                } : {}),
+                ...(channel === 'uuzuhao' && mode === 'decrease' ? {
+                    short_package_calculation: Object.fromEntries(['p2','p3','p5','p7','p9','p10'].map(shortKey=>[shortKey,{
+                        calculation_base:'first_tier_package',ratio:adapter.default_ratios[shortKey],
+                        base_price:original[0].prices[shortKey],factor:policy.factors[desired.tier-1],
+                        target_price:desired.prices[shortKey]
+                    }]))
                 } : {})
             });
         }

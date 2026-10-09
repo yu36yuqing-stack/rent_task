@@ -1,6 +1,7 @@
 'use strict';
 
 const { randomUUID } = require('crypto');
+const { UUZUHAO_SHORT_PACKAGE_KEYS } = require('./daily_price_policy');
 const {
     _internal: { businessDateText, isFinishedPriceLadderStatus }
 } = require('../database/order_db');
@@ -294,6 +295,12 @@ function dailyCalculationLog(adapter, rule, resolved, desired) {
                     calculation_base: 'first_tier_night', night_ratio: ratios.night,
                     base_night_price: base.night, factor, target_night_price: desired.prices.night
                 }
+            } : {}),
+            ...(adapter.channel === 'uuzuhao' && policy.mode === 'decrease' ? {
+                short_package_calculation: Object.fromEntries(UUZUHAO_SHORT_PACKAGE_KEYS.map(shortKey => [shortKey, {
+                    calculation_base: 'first_tier_package', ratio: ratios[shortKey],
+                    base_price: base[shortKey], factor, target_price: desired.prices[shortKey]
+                }]))
             } : {})
         };
     } catch (_) {

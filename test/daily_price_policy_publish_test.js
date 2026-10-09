@@ -91,6 +91,11 @@ async function main() {
                         assert.strictEqual(payload.hourPrice, target.hour);
                         for (const key of ['p2', 'p3', 'p5', 'p7', 'p9', 'p10', 'p168']) {
                             assert.strictEqual(payload[`${key}Price`], target[key]);
+                            const first = build([2],adapter.default_ratios)[0].prices[key];
+                            const expected = mode === 'decrease' && key !== 'p168'
+                                ? normalize(key,first * (policy.factors ? policy.factors[3] : 0.9))
+                                : normalize(key,2.3 * adapter.default_ratios[key]);
+                            assert.strictEqual(payload[`${key}Price`],expected);
                         }
                         hourPrice = payload.hourPrice;
                         return { raw: { code: 0 }, hour_price: hourPrice };
