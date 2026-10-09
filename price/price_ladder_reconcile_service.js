@@ -288,7 +288,13 @@ function dailyCalculationLog(adapter, rule, resolved, desired) {
             first_tier_hour_price: base.hour, target_tier_hour_price: desired.prices.hour,
             daily_ratio: ratios[key], base_daily_price: base[key],
             calculation_base: policy.mode === 'follow' ? 'target_tier_hour' : 'first_tier_daily',
-            factor, target_daily_price: desired.prices[key]
+            factor, target_daily_price: desired.prices[key],
+            ...(adapter.channel === 'uhaozu' && policy.mode === 'decrease' ? {
+                night_calculation: {
+                    calculation_base: 'first_tier_night', night_ratio: ratios.night,
+                    base_night_price: base.night, factor, target_night_price: desired.prices.night
+                }
+            } : {})
         };
     } catch (_) {
         return null;

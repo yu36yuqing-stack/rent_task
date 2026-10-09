@@ -49,6 +49,7 @@ async function main(){
         // Flat's saved coefficients are all 100%; set third tier explicitly to the requested suggestion.
         await page.$eval('[data-daily-factor="2"]',input=>{input.value='95';input.dispatchEvent(new Event('input',{bubbles:true}));});
         assert((await page.$eval('[data-daily-preview]',n=>n.textContent)).includes('¥12.00 / ¥12.00 / ¥11.40 / ¥10.80'));
+        assert((await page.$eval('[data-daily-preview]',n=>n.textContent)).includes('四档包夜示例：¥8.00 / ¥8.00 / ¥7.60 / ¥7.20'));
         await page.$eval('#pricingRatioPreviewHour',i=>{i.value='3';i.dispatchEvent(new Event('input',{bubbles:true}));});
         assert((await page.$eval('[data-daily-preview]',n=>n.textContent)).includes('¥18.00 / ¥18.00 / ¥17.10 / ¥16.20'));
         await page.$eval('#pricingRatioPreviewHour',i=>{i.value='2';i.dispatchEvent(new Event('input',{bubbles:true}));});
@@ -56,7 +57,7 @@ async function main(){
         assert((await page.$eval('[data-daily-preview]',n=>n.textContent)).includes('¥14.00 / ¥14.00 / ¥13.30 / ¥12.60'));
         await page.$eval('[data-pricing-ratio-key="day"]',i=>{i.value='6';i.dispatchEvent(new Event('input',{bubbles:true}));});
         assert.strictEqual(await page.$eval('[data-daily-factor="0"]',i=>i.disabled),false);
-        // Keep the daily total above the unchanged night package at every tier.
+        // Uhaozu night and daily packages now share the first-tier base and factors.
         await page.$eval('[data-pricing-ratio-key="day"]',i=>{i.value='7';i.dispatchEvent(new Event('input',{bubbles:true}));});
         for(const [index,value] of ['95','90','85','85'].entries()){
             await page.$eval(`[data-daily-factor="${index}"]`,(i,v)=>{i.value=v;i.dispatchEvent(new Event('input',{bubbles:true}));},value);

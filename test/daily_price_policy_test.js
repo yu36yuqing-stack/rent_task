@@ -30,7 +30,9 @@ for (const adapter of adapters) {
         assert.strictEqual(discountedTiers[i].prices[key], normalize(key, discountBase[0].prices[key] * discounted.factors[i]),
             'every tier uses the undiscounted daily base, not the discounted first tier');
         for (const other of adapter.package_keys.filter(k => k !== key)) {
-            assert.strictEqual(discountedTiers[i].prices[other], discountBase[i].prices[other]);
+            const expected = adapter.channel === 'uhaozu' && other === 'night'
+                ? normalize('night', discountBase[0].prices.night * discounted.factors[i]) : discountBase[i].prices[other];
+            assert.strictEqual(discountedTiers[i].prices[other], expected);
         }
     }
     assert.strictEqual(discountedTiers[2].prices[key], discountedTiers[3].prices[key]);
@@ -40,7 +42,12 @@ for (const adapter of adapters) {
     for (let i = 0; i < 4; i++) {
         assert.strictEqual(flat[i].prices[key], original[0].prices[key]);
         assert.strictEqual(down[i].prices[key], normalize(key, original[0].prices[key] * decrease.factors[i]));
-        for (const other of adapter.package_keys.filter(k => k !== key)) assert.strictEqual(down[i].prices[other], original[i].prices[other]);
+        for (const other of adapter.package_keys.filter(k => k !== key)) {
+            const expected = adapter.channel === 'uhaozu' && other === 'night'
+                ? normalize('night', original[0].prices.night * decrease.factors[i]) : original[i].prices[other];
+            assert.strictEqual(down[i].prices[other], expected);
+            assert.strictEqual(flat[i].prices[other], original[i].prices[other]);
+        }
     }
     assert.deepStrictEqual(original, build([2,2.2,2.4,2.6], adapter.default_ratios), 'source prices not mutated');
     assert.throws(() => applyDailyPolicy([], adapter.capability, decrease, normalize), /不完整/);
@@ -55,6 +62,23 @@ for (const adapter of adapters) {
     const zero = original.map(t => ({...t, prices: {...t.prices, [long]: NaN}}));
     assert.throws(() => applyDailyPolicy(zero, adapter.capability, decrease, normalize), /大于0/);
 }
+
+const uhaozu = adapters[0];
+const actual = uhaozu.buildTierPricesByRatios([1.6,1.9,2.1,2.5], uhaozu.default_ratios);
+const repaired = applyDailyPolicy(actual, uhaozu.capability, discounted, money);
+assert.deepStrictEqual(repaired.map(t => t.prices.night), [6.08,5.76,5.44,5.44]);
+assert.deepStrictEqual(repaired.map(t => t.prices.day), [9.12,8.64,8.16,8.16]);
+assert.deepStrictEqual(repaired.map(t => t.prices.hour), [1.6,1.9,2.1,2.5]);
+assert.deepStrictEqual(repaired.map(t => t.prices.week), actual.map(t => t.prices.week));
+assert.throws(() => applyDailyPolicy(actual, uhaozu.capability, {mode:'flat'}, money), /包夜/);
+for (const night of [NaN,0,-1]) {
+    const broken = actual.map((t,i) => ({...t,prices:{...t.prices,night:i === 0 ? night : t.prices.night}}));
+    assert.throws(() => applyDailyPolicy(broken, uhaozu.capability, discounted, money), /大于0/);
+}
+assert.throws(() => applyDailyPolicy(actual, uhaozu.capability, discounted,
+    (key,value) => key === 'night' ? 0 : money(key,value)), /大于0/);
+const inverted = uhaozu.buildTierPricesByRatios([1.6,1.9,2.1,2.5], {...uhaozu.default_ratios,night:7});
+assert.throws(() => applyDailyPolicy(inverted, uhaozu.capability, discounted, money), /包夜/);
 
 const draft = ui.draft(decrease);
 assert.deepStrictEqual(draft.percentages, ['100','100','95','90']);
@@ -76,8 +100,14 @@ assert.strictEqual((ui.render(draft,true,escape).match(/<input[^>]*disabled/g) |
 assert(ui.render({mode:'flat',percentages:['<bad>',100,100,100]},true,escape).includes('&lt;bad>'));
 assert(ui.render(ui.draft(),false,escape).includes('hidden'));
 const normalize = (value, rule={}) => rule.rounding==='truncate' ? Math.trunc(Number((value*10).toFixed(8)))/10 : Number(value.toFixed(2));
-const channel={channel:'uhaozu',ratios:{day:6}};
+const channel={channel:'uhaozu',ratios:{day:6,night:4}};
 assert(ui.preview(ui.draft(discounted),channel,2,normalize).includes('¥11.40 / ¥10.80 / ¥10.20 / ¥10.20'));
+assert(ui.preview(ui.draft(discounted),channel,1.6,normalize).includes('四档包夜示例：¥6.08 / ¥5.76 / ¥5.44 / ¥5.44'));
+for (const night of [undefined,0,NaN]) {
+    assert(ui.preview(ui.draft(discounted),{...channel,ratios:{day:6,night}},2,normalize).includes('有效的包夜倍率'));
+}
+assert(!ui.preview(ui.draft({mode:'flat'}),channel,2,normalize).includes('包夜示例'));
+assert(!ui.preview(ui.draft(discounted),{channel:'uuzuhao',ratios:{p24:6}},2,normalize).includes('包夜示例'));
 assert(ui.preview(draft,channel,2,normalize).includes('¥12.00 / ¥12.00 / ¥11.40 / ¥10.80'));
 assert(ui.preview(ui.draft(),channel,2,normalize).includes('各档时租'));
 assert(ui.preview(draft,channel,0,normalize).includes('请输入'));

@@ -40,6 +40,9 @@ function applyDailyPolicy(tiers, capability, input, normalizePrice) {
         const daily = normalizePrice(key, base * policy.factors[i]);
         if (!Number.isFinite(daily) || daily <= 0) throw policyError('日租价按渠道精度处理后必须大于0');
         const prices = { ...item.prices, [key]: daily };
+        if (capability.channel === 'uhaozu' && policy.mode === 'decrease') {
+            prices.night = normalizePrice('night', tiers[0].prices.night * policy.factors[i]);
+        }
         // Validate only relationships affected by the new daily price, not unrelated legacy packages.
         for (const [index, other] of capability.package_keys.entries()) {
             if (index === dayIndex) continue;

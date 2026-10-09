@@ -24,7 +24,14 @@ for (const channel of ['uhaozu', 'zuhaowang', 'uuzuhao']) {
                 base_daily_price: original[0].prices[key],
                 calculation_base: mode === 'follow' ? 'target_tier_hour' : 'first_tier_daily',
                 factor: mode === 'decrease' ? policy.factors[desired.tier - 1] : 1,
-                target_daily_price: desired.prices[key]
+                target_daily_price: desired.prices[key],
+                ...(channel === 'uhaozu' && mode === 'decrease' ? {
+                    night_calculation: {
+                        calculation_base: 'first_tier_night', night_ratio: 4,
+                        base_night_price: 8, factor: policy.factors[desired.tier - 1],
+                        target_night_price: desired.prices.night
+                    }
+                } : {})
             });
         }
     }

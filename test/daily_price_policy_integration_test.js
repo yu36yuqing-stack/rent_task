@@ -70,12 +70,14 @@ async function main(){
     await reconcilePendingPriceLaddersByUser(uid,options);
     assert(calls.every(c=>c.tier===4));
     assert.strictEqual(calls.find(c=>c.goods_id==='u').prices.day,10.8);
+    assert.strictEqual(calls.find(c=>c.goods_id==='u').prices.night,7.2);
     assert.strictEqual(calls.find(c=>c.goods_id==='z').prices.p24,8.1);
     assert.strictEqual(calls.find(c=>c.goods_id==='y').prices.p24,25.92);
     calls.length=0;
     await reconcilePendingPriceLaddersByUser(uid,{...options,now:new Date('2026-10-08T09:00:00')});
     assert.strictEqual(calls.length,3);assert(calls.every(c=>c.tier===1));
     assert.strictEqual(calls.find(c=>c.goods_id==='u').prices.day,12,'decrease policy restores higher daily price when orders expire');
+    assert.strictEqual(calls.find(c=>c.goods_id==='u').prices.night,8);
     assert.strictEqual(calls.find(c=>c.goods_id==='z').prices.p24,9);
     assert.strictEqual(calls.find(c=>c.goods_id==='y').prices.p24,28.8);
     calls.length=0;
@@ -148,6 +150,29 @@ async function main(){
     assert.strictEqual((await reconcilePendingPriceLaddersByUser(uid,{...options,now:new Date('2026-10-08T09:00:00'),logger:brokenLogger})).applied,1);
     const successful=await getAccountPriceLadderRuntime(uid,'1',account,'uhaozu');
     assert.strictEqual(successful.applied_tier,1);assert.strictEqual(successful.last_error,'');
+
+    // Reproduce the production account using isolated fixture databases and stub publishers.
+    const repairedUid=93,repairedAccount='2630403808';
+    await upsertUserGameAccount({...row,user_id:repairedUid,game_account:repairedAccount});
+    await upsertAccountPriceLadderRule(repairedUid,{game_id:'1',game_name:'WZRY',game_account:repairedAccount,prices:[1.6,1.9,2.1,2.5]});
+    await setPriceLadderFeatureEnabled(repairedUid,true);
+    const config=await savePackageRatioSettingsByUser(repairedUid,{channel:'uhaozu',ratios:getPriceChannelAdapter('uhaozu').default_ratios,daily_policy:discounted});
+    assert.strictEqual(config.queued_count,1);
+    for(let i=0;i<3;i++)await upsertOrder({user_id:repairedUid,game_id:'1',game_name:'WZRY',game_account:repairedAccount,channel:'uhaozu',order_no:`night-${i}`,order_status:'已完成',rec_amount:8,order_amount:10,start_time:`2026-10-07 08:${10+i}:00`,end_time:`2026-10-07 08:${20+i}:00`});
+    calls.length=0;
+    await reconcilePendingPriceLaddersByUser(repairedUid,options);
+    const nightCall=calls.find(c=>c.goods_id==='u');
+    assert.deepStrictEqual(nightCall.prices,{hour:2.5,night:5.44,day:8.16,week:87.5});
+    const nightLog=parseEvent('apply_start').filter(r=>r.user_id===repairedUid&&r.channel==='uhaozu').at(-1);
+    assert.deepStrictEqual(nightLog.daily_calculation.night_calculation,{calculation_base:'first_tier_night',night_ratio:4,base_night_price:6.4,factor:0.85,target_night_price:5.44});
+    calls.length=0;
+    await reconcilePendingPriceLaddersByUser(repairedUid,options);
+    assert.strictEqual(calls.length,0,'unchanged policy must not repeatedly publish');
+    await reconcilePendingPriceLaddersByUser(repairedUid,{...options,now:new Date('2026-10-08T09:00:00')});
+    assert.deepStrictEqual(calls.find(c=>c.goods_id==='u').prices,{hour:1.6,night:6.08,day:9.12,week:56});
+    const repairedConfig=await ratioDb.getUserChannelPackageRatio(repairedUid,'uhaozu');
+    await assert.rejects(()=>savePackageRatioSettingsByUser(repairedUid,{channel:'uhaozu',ratios:{hour:1,night:7,day:6,week:35},daily_policy:discounted}),/包夜/);
+    assert.deepStrictEqual(await ratioDb.getUserChannelPackageRatio(repairedUid,'uhaozu'),repairedConfig);
     console.log('[PASS] legacy migration, policies, same-tier publish, rise/fall, partial failure, retry, validation and rollback');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

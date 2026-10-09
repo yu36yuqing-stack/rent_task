@@ -56,6 +56,12 @@ async function main() {
             const normalize = adapter.normalizePackagePrice || ((key, value) => Number(value.toFixed(2)));
             const expectedDaily = normalize(dailyKey, base * (scenario === 'discounted' ? 0.85 : mode === 'flat' ? 1 : 0.9));
             assert.strictEqual(target[dailyKey], expectedDaily);
+            if (channel === 'uhaozu') {
+                assert.strictEqual(target.night, mode === 'decrease'
+                    ? normalize('night', 8 * (policy.factors ? policy.factors[3] : 0.9)) : 9.2);
+                assert.strictEqual(target.hour, 2.3);
+                assert.strictEqual(target.week, 80.5);
+            }
             const input = { game_id: '1', game_name: 'WZRY', game_account: 'daily-publish',
                 prices: target, tier: 4, force_publish: true, trigger_source: 'package_ratio_saved' };
             let result;

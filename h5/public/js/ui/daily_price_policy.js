@@ -16,7 +16,7 @@
     return { mode: value.mode, factors };
   }
   function render(value, saving, escape) {
-    return `<div class="pricing-ratio-copy"><strong>日租阶梯</strong><span>仅包天/24小时套餐；其他套餐不变，保存后按渠道作用于全部已配置账号。</span></div>
+    return `<div class="pricing-ratio-copy"><strong>日租阶梯</strong><span>调整包天/24小时套餐；U号租递减模式下包夜也按首档基准同比递减。保存后作用于该渠道全部已配置账号。</span></div>
       <div class="orders-tabs">${Object.entries(modes).map(([mode, label]) => `<button type="button" class="orders-tab header-tab ${value.mode === mode ? 'active' : ''}" data-daily-mode="${mode}" ${saving ? 'disabled' : ''}>${label}</button>`).join('')}</div>
       <div class="pricing-ratio-grid ${value.mode === 'decrease' ? '' : 'hidden'}">${value.percentages.map((percentage, i) => `<label class="pricing-ratio-field"><span>第${i + 1}档日租</span><div class="pricing-price-input"><input type="number" min="0.01" max="100" step="0.01" inputmode="decimal" data-daily-factor="${i}" aria-label="第${i + 1}档日租百分比" value="${escape(percentage)}" ${saving ? 'disabled' : ''}><span>%</span></div></label>`).join('')}</div>
       <p class="head-summary-text" data-daily-preview></p>`;
@@ -28,7 +28,13 @@
       const key = channel.channel === 'uhaozu' ? 'day' : 'p24';
       const base = normalize(Number(hourly) * Number(channel.ratios[key]), (channel.price_rules || {})[key]);
       if (!(base > 0)) return '请输入有效的首档示例时租价和日租倍率。';
-      return `四档日租示例：${policy.factors.map(factor => `¥${normalize(base * factor, (channel.price_rules || {})[key]).toFixed(2)}`).join(' / ')}；各账号以自己的首档价格计算。`;
+      let night = '';
+      if (channel.channel === 'uhaozu' && policy.mode === 'decrease') {
+        const nightBase = normalize(Number(hourly) * Number(channel.ratios.night), (channel.price_rules || {}).night);
+        if (!Number.isFinite(nightBase) || nightBase <= 0) return '请输入有效的包夜倍率。';
+        night = `；四档包夜示例：${policy.factors.map(factor => `¥${normalize(nightBase * factor, (channel.price_rules || {}).night).toFixed(2)}`).join(' / ')}`;
+      }
+      return `四档日租示例：${policy.factors.map(factor => `¥${normalize(base * factor, (channel.price_rules || {})[key]).toFixed(2)}`).join(' / ')}${night}；各账号以自己的首档价格计算。`;
     } catch (error) {
       return error.message;
     }
