@@ -1749,6 +1749,102 @@
       margin-top: 4px;
     }
 
+    #pricingLadderPane .pricing-ladder-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      justify-content: stretch;
+      align-items: stretch;
+      gap: 12px;
+    }
+
+    #pricingView .pricing-title-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #pricingView .pricing-settings-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-items: start;
+      gap: 24px;
+    }
+
+    #pricingView .pricing-count-field {
+      display: grid;
+      grid-template-rows: 16px 36px;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      margin: 0;
+    }
+
+    #pricingView .pricing-count-field label,
+    #pricingView .pricing-settings-row .feature-switch-copy strong {
+      margin: 0;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 16px;
+    }
+
+    #pricingView .pricing-count-control {
+      position: relative;
+      width: 100%;
+      max-width: 192px;
+      min-width: 0;
+    }
+
+    #pricingView .pricing-count-control::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: 14px;
+      width: 6px;
+      height: 6px;
+      border-right: 1.5px solid var(--muted);
+      border-bottom: 1.5px solid var(--muted);
+      transform: translateY(-70%) rotate(45deg);
+      pointer-events: none;
+    }
+
+    #pricingView .pricing-ladder-head .pricing-count-field select {
+      width: 100%;
+      height: 36px;
+      padding-right: 36px;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+
+    #pricingView .pricing-settings-row .feature-switch {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-rows: 16px 36px;
+      align-items: center;
+      gap: 6px 10px;
+      min-width: 0;
+      margin: 0;
+    }
+
+    #pricingView .pricing-settings-row .feature-switch-copy {
+      display: contents;
+    }
+
+    #pricingView .pricing-settings-row .feature-switch-copy strong {
+      grid-column: 1 / -1;
+    }
+
+    #pricingView .pricing-settings-row .feature-switch-copy small {
+      grid-row: 2;
+      line-height: 15px;
+      white-space: nowrap;
+    }
+
+    #pricingView .pricing-settings-row .feature-switch-track {
+      grid-column: 2;
+      grid-row: 2;
+    }
+
     .feature-switch {
       display: flex;
       align-items: center;
@@ -1919,7 +2015,8 @@
       font-weight: 600;
     }
 
-    #pricingView .pricing-copy-field select {
+    #pricingView .pricing-copy-field select,
+    #pricingView .pricing-count-field select {
       width: 100%;
       min-width: 0;
       height: 34px;

@@ -781,7 +781,7 @@ async function listBusinessDayFinishedOrderCountByAccounts(userId, gameAccounts 
     }
 }
 
-async function listRolling24hPaidOrderCountByAccounts(userId, gameAccounts = [], options = {}) {
+async function listWindowPaidOrderCountByAccounts(userId, gameAccounts = [], options = {}) {
     await initOrderDb();
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
@@ -789,12 +789,12 @@ async function listRolling24hPaidOrderCountByAccounts(userId, gameAccounts = [],
     const keys = normalizeAccountKeys(gameAccounts);
     if (keys.length === 0) return {};
 
-    const now = new Date(options.now === undefined ? Date.now() : options.now);
-    if (!Number.isFinite(now.getTime())) throw new Error('now 不合法');
-    const endTime = toDateTimeText(now.getTime());
-    const startTime = toDateTimeText(now.getTime() - 24 * 3600 * 1000);
+    const { resolvePriceLadderCountWindow } = require('../common/price_ladder_count_mode');
+    const window = resolvePriceLadderCountWindow(options.mode, options.now);
+    const { query_start: startTime, query_end: endTime } = window;
+    const logLabel = window.count_mode === 'rolling_24h' ? 'OrderCount24h' : 'OrderCountBusinessDay';
     traceOrderCount(
-        `[OrderCount24h] uid=${uid} now="${now.toString()}" tz="${Intl.DateTimeFormat().resolvedOptions().timeZone || ''}" window=[${startTime}, ${endTime}) accounts=${keys.length}`
+        `[${logLabel}] uid=${uid} tz="Asia/Shanghai" window=[${startTime}, ${endTime}) accounts=${keys.length}`
     );
     const tupleSql = keys.map(() => `(game_id = ? AND game_account = ?)`).join(' OR ');
     const db = openOrderDatabase();
@@ -827,12 +827,20 @@ async function listRolling24hPaidOrderCountByAccounts(userId, gameAccounts = [],
             .map((acc) => `${acc}:${Number(out[acc] || 0)}`)
             .join(',');
         traceOrderCount(
-            `[OrderCount24h] uid=${uid} result hit_accounts=${hitAccounts.length}/${keys.length} total_cnt=${totalCnt} sample="${sample}"`
+            `[${logLabel}] uid=${uid} result hit_accounts=${hitAccounts.length}/${keys.length} total_cnt=${totalCnt} sample="${sample}"`
         );
         return out;
     } finally {
         db.close();
     }
+}
+
+async function listRolling24hPaidOrderCountByAccounts(userId, gameAccounts = [], options = {}) {
+    return listWindowPaidOrderCountByAccounts(userId, gameAccounts, { ...options, mode: 'rolling_24h' });
+}
+
+async function listBusinessDayPaidOrderCountByAccounts(userId, gameAccounts = [], options = {}) {
+    return listWindowPaidOrderCountByAccounts(userId, gameAccounts, { ...options, mode: 'business_day' });
 }
 
 async function listRentingOrderWindowByAccounts(userId, gameAccounts = []) {
@@ -887,6 +895,7 @@ module.exports = {
     listTodayPaidOrderCountByAccounts,
     listBusinessDayFinishedOrderCountByAccounts,
     listRolling24hPaidOrderCountByAccounts,
+    listBusinessDayPaidOrderCountByAccounts,
     listRentingOrderWindowByAccounts,
     _internal: {
         run,

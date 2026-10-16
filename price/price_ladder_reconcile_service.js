@@ -14,7 +14,8 @@ const {
     listAccountPriceLadderRuntimesByUser,
     upsertAccountPriceLadderRuntime
 } = require('../database/account_price_ladder_runtime_db');
-const { listPaidCountByAccounts } = require('../order/service/order_query_service');
+const { getPriceLadderCountContext, listPriceLadderOrderCounts } = require('./price_ladder_count_service');
+const { normalizePriceLadderCountMode } = require('../common/price_ladder_count_mode');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const {
     getPriceLadderFeatureConfig,
@@ -143,9 +144,10 @@ function applicableAdapters(accountRow = {}) {
 async function initializePriceLadderRuntimeOnRuleSave(userId, rule, options = {}) {
     const uid = Number(userId || 0);
     if (!uid || !rule) return null;
-    const day = businessDateText(6, options.now || new Date());
+    const context = options.count_context || await getPriceLadderCountContext(uid, options);
+    const day = context.business_date;
     const key = { game_id: rule.game_id, game_account: rule.game_account };
-    const counts = await listPaidCountByAccounts(uid, [key], { mode: 'rolling_24h', now: options.now });
+    const { counts } = await listPriceLadderOrderCounts(uid, [key], { context });
     const count = Number(counts[`${rule.game_id}::${rule.game_account}`] || 0);
     const tier = tierByCompletedCount(count);
     const rows = options.account_row ? [options.account_row] : await listAllAccountsByUser(uid);
@@ -348,14 +350,13 @@ function writePriceLadderLog(logger, event, data) {
 async function observePriceLadderReconciliation(userId, options, execute) {
     const startedAt = Date.now();
     const now = options.now || new Date();
-    const end = new Date(now).getTime();
     const logger = options.logger || console;
     const context = {
         user_id: Number(userId || 0),
         trace_id: String(options.trace_id || options.trigger_task_id || randomUUID()),
-        count_mode: 'rolling_24h',
-        window_start: Number.isFinite(end) ? new Date(end - 24 * 3600 * 1000).toISOString() : '',
-        window_end: Number.isFinite(end) ? new Date(end).toISOString() : '',
+        count_mode: '',
+        window_start: '',
+        window_end: '',
         allow_apply: options.allow_apply !== false
     };
     const accounts = new Set();
@@ -370,9 +371,16 @@ async function observePriceLadderReconciliation(userId, options, execute) {
         if (data.status === 'unchanged' && !data.publish_attempted) return;
         writePriceLadderLog(logger, event, { ...context, ...data });
     };
-    writePriceLadderLog(logger, 'start', context);
     try {
-        const output = await execute({ ...options, now }, observe);
+        const countContext = await getPriceLadderCountContext(userId, { now });
+        Object.assign(context, {
+            count_mode: countContext.count_mode,
+            window_start: countContext.window_start,
+            window_end: countContext.window_end,
+            feature_version: countContext.feature.version
+        });
+        writePriceLadderLog(logger, 'start', context);
+        const output = await execute({ ...options, now, count_context: countContext }, observe);
         const result = output.reconciliation || output;
         writePriceLadderLog(logger, 'summary', {
             ...context,
@@ -410,7 +418,10 @@ async function executePriceLadderReconciliation(userId, options, observe) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
     const now = options.now || new Date();
-    const day = businessDateText(6, now);
+    const countContext = options.count_context;
+    const day = countContext.business_date;
+    const countMode = countContext.count_mode;
+    const reconcileTrigger = countMode === 'business_day' ? 'business_day_reconcile' : 'rolling_24h_reconcile';
     const allowApply = options.allow_apply !== false;
     const accountKeys = new Set((Array.isArray(options.accounts) ? options.accounts : [])
         .map((item) => `${String(item && item.game_id || '').trim()}::${String(item && item.game_account || '').trim()}`)
@@ -423,10 +434,10 @@ async function executePriceLadderReconciliation(userId, options, observe) {
     const accountRows = await listAllAccountsByUser(uid);
     const accountMap = new Map(accountRows.map((row) => [`${String(row.game_id || '').trim()}::${String(row.game_account || '').trim()}`, row]));
     // A failed/incomplete sync is not a zero-order snapshot: never publish from it.
-    const counts = allowApply ? await listPaidCountByAccounts(uid, runtimes.map((row) => ({
+    const counts = allowApply ? (await listPriceLadderOrderCounts(uid, runtimes.map((row) => ({
         game_id: row.game_id,
         game_account: row.game_account
-    })), { mode: 'rolling_24h', now }) : null;
+    })), { context: countContext })).counts : null;
     const disabledChannels = new Set((await listUserPlatformAuth(uid))
         .filter((row) => row.channel_enabled === false).map((row) => row.platform));
     const featureGuard = options.feature_guard || getPriceLadderFeatureConfig;
@@ -439,6 +450,7 @@ async function executePriceLadderReconciliation(userId, options, observe) {
             game_account: runtime.game_account,
             channel: runtime.channel,
             count_24h: count,
+            order_count: count,
             count_snapshot_valid: counts !== null,
             from_tier: Number(runtime.applied_tier || 0),
             to_tier: counts ? tierByCompletedCount(count) : Number(runtime.desired_tier || 0),
@@ -473,14 +485,14 @@ async function executePriceLadderReconciliation(userId, options, observe) {
         }
         const count = Number(counts[key] || 0);
         const desiredTier = tierByCompletedCount(count);
-        const runtimeTrigger = runtime.status === 'applied' ? 'rolling_24h_reconcile' : String(runtime.trigger_source || '').trim();
+        const runtimeTrigger = runtime.status === 'applied' ? reconcileTrigger : String(runtime.trigger_source || '').trim();
         const appliedTier = Number(runtime.applied_tier || 0);
         // Refresh targets even while a failed channel is waiting for its retry slot.
         runtime.business_date = day;
         runtime.completed_order_count = count;
         runtime.desired_tier = desiredTier;
         runtime.pending_count_delta = 0;
-        runtime.trigger_source = runtimeTrigger || 'rolling_24h_reconcile';
+        runtime.trigger_source = runtimeTrigger || reconcileTrigger;
         if (!isRetryDue(runtime, now)) {
             await upsertAccountPriceLadderRuntime(uid, runtime, { desc: 'refresh rolling target while retry waits' });
             summary.pending += 1;
@@ -522,6 +534,19 @@ async function executePriceLadderReconciliation(userId, options, observe) {
         const tiers = Array.isArray(resolved.tiers) ? resolved.tiers : [];
         const desired = tiers.find((item) => item.tier === desiredTier) || null;
         const signature = desired ? priceSignature(desiredTier, desired.prices, rule.version, baselineVersion) : '';
+        // Recheck the owner's configuration before accepting or publishing a snapshot.
+        const latestFeature = await featureGuard(uid);
+        if (!latestFeature || latestFeature.enabled !== true) {
+            summary.pending += 1;
+            recordResult(runtime, { game_account: runtime.game_account, channel: runtime.channel, status: 'pending', reason: 'feature_disabled' });
+            continue;
+        }
+        if (normalizePriceLadderCountMode(latestFeature.count_mode) !== countMode
+            || (latestFeature.version !== undefined && Number(latestFeature.version) !== Number(countContext.feature.version))) {
+            summary.pending += 1;
+            recordResult(runtime, { game_account: runtime.game_account, channel: runtime.channel, status: 'pending', reason: 'count_config_changed' });
+            continue;
+        }
         const verifyRemote = ['rule_saved', 'package_ratio_saved', 'feature_enabled_reconcile', 'channel_enabled_reconcile'].includes(runtimeTrigger)
             || Number(runtime.rule_version || 0) !== Number(rule.version || 0)
             || Number(runtime.baseline_version || 0) !== baselineVersion;
@@ -568,12 +593,6 @@ async function executePriceLadderReconciliation(userId, options, observe) {
             }, { error_message: safeLogMessage(message), next_retry_at: retryAtText(now), retry_count: runtime.retry_count + 1 });
             continue;
         }
-        const latestFeature = await featureGuard(uid);
-        if (!latestFeature || latestFeature.enabled !== true) {
-            summary.pending += 1;
-            recordResult(runtime, { game_account: runtime.game_account, channel: runtime.channel, status: 'pending', reason: 'feature_disabled' });
-            continue;
-        }
         const latestRule = await getAccountPriceLadderRule(uid, runtime.game_id, runtime.game_account);
         if (!latestRule || Number(latestRule.version || 0) !== Number(rule.version || 0)) {
             summary.pending += 1;
@@ -593,7 +612,7 @@ async function executePriceLadderReconciliation(userId, options, observe) {
                 : (options.publisher || adapter.publish);
             observe('apply_start', {
                 game_id: runtime.game_id, game_account: runtime.game_account, channel: runtime.channel,
-                status: 'applying', count_24h: count, from_tier: appliedTier, to_tier: desiredTier,
+                status: 'applying', count_24h: count, order_count: count, from_tier: appliedTier, to_tier: desiredTier,
                 trigger_source: runtime.trigger_source, retry_count: runtime.retry_count,
                 target_prices: desired.prices,
                 daily_policy: resolved.baseline && resolved.baseline.daily_policy,
@@ -679,17 +698,22 @@ async function executePriceLadderReconciliation(userId, options, observe) {
 async function reconcilePriceLadderAfterOrderSync(userId, candidates = [], options = {}) {
     return observePriceLadderReconciliation(userId, options, async (effectiveOptions, observe) => {
         const channelBootstrap = await enqueueMissingPriceLadderChannelRuntimes(userId, effectiveOptions);
-        const activation = options.activation_reconcile
+        const feature = effectiveOptions.count_context.feature;
+        const needsActivation = options.activation_reconcile
+            || (feature.reconcile_required && feature.reconcile_reason === 'count_mode_changed');
+        const modeOnly = feature.reconcile_reason === 'count_mode_changed';
+        const activation = needsActivation && !modeOnly && effectiveOptions.allow_apply !== false
             ? await enqueueFeatureActivationReconcile(userId, effectiveOptions)
             : { scanned: 0, queued: 0, initialized: 0 };
         // Candidates are retained at the order boundary for compatibility, not as a gate.
         void candidates;
         const reconciliation = await executePriceLadderReconciliation(userId, effectiveOptions, observe);
         let activationMarked = false;
-        if (options.activation_reconcile && Number(options.feature_version || 0) > 0) {
-            activationMarked = await markPriceLadderFeatureReconciled(userId, options.feature_version);
+        if (needsActivation && Number(feature.version || 0) > 0 && effectiveOptions.allow_apply !== false
+            && (!modeOnly || (reconciliation.pending === 0 && reconciliation.failed === 0))) {
+            activationMarked = await markPriceLadderFeatureReconciled(userId, feature.version);
         }
-        return { channel_bootstrap: channelBootstrap, count_mode: 'rolling_24h', activation, activation_marked: activationMarked, reconciliation };
+        return { channel_bootstrap: channelBootstrap, count_mode: effectiveOptions.count_context.count_mode, activation, activation_marked: activationMarked, reconciliation };
     });
 }
 

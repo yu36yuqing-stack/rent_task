@@ -1434,12 +1434,16 @@ async function handleSetPricingLadderFeature(req, res) {
     try {
         const feature = await setPriceLadderFeatureByUser(user.id, {
             enabled: body.enabled,
+            count_mode: body.count_mode,
             expected_version: body.expected_version
         });
         return json(res, 200, { ok: true, feature });
     } catch (err) {
         if (err && err.code === 'PRICE_LADDER_VERSION_CONFLICT') {
             return json(res, 409, { ok: false, message: err.message });
+        }
+        if (err && err.code === 'PRICE_LADDER_COUNT_MODE_INVALID') {
+            return json(res, 400, { ok: false, message: err.message });
         }
         throw err;
     }

@@ -6,6 +6,8 @@ const { spawnSync } = require('child_process');
 
 const tests = [
     'price_ladder_feature_gate_smoke_test.js',
+    'price_ladder_count_mode_db_test.js',
+    'price_ladder_count_mode_smoke_test.js',
     'price_channel_adapter_smoke_test.js',
     'package_ratio_service_smoke_test.js',
     'uuzuhao_modify_price_api_smoke_test.js',

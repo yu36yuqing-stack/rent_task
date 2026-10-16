@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Rent Task H5</title>
-  <link rel="stylesheet" href="/css/app.css?v=20261002a">
+  <link rel="stylesheet" href="/css/app.css?v=20261016b">
 </head>
 <body>
   <div class="wrap">
@@ -126,20 +126,29 @@
       <div id="pricingLadderPane">
         <div id="pricingGameTabs" class="stats-game-tabs"></div>
         <div class="pricing-ladder-head">
-          <div>
+          <div class="pricing-title-row">
             <p class="auth-title">账号阶梯价格</p>
-            <p class="head-summary-text"><span id="pricingWindowText">订单周期：近24小时</span>
-              <button id="pricingWindowHelpBtn" class="drawer-help-btn" type="button" aria-label="查看阶梯档位说明" aria-haspopup="dialog" aria-controls="pricingWindowHelpSheet" aria-expanded="false">?</button>
-            </p>
+            <button id="pricingWindowHelpBtn" class="drawer-help-btn" type="button" aria-label="查看阶梯档位说明" aria-haspopup="dialog" aria-controls="pricingWindowHelpSheet" aria-expanded="false">?</button>
           </div>
-          <label class="feature-switch" for="pricingFeatureToggle">
-            <span class="feature-switch-copy">
-              <strong>自动阶梯调价</strong>
-              <small id="pricingFeatureStatus">已关闭</small>
-            </span>
-            <input id="pricingFeatureToggle" type="checkbox" role="switch" aria-label="自动阶梯调价">
-            <span class="feature-switch-track" aria-hidden="true"></span>
-          </label>
+          <div class="pricing-settings-row">
+            <div class="field pricing-count-field">
+              <label for="pricingCountMode">订单周期</label>
+              <div class="pricing-count-control">
+                <select id="pricingCountMode" aria-label="阶梯订单计数周期">
+                  <option value="rolling_24h">近24小时</option>
+                  <option value="business_day">每日06:00切日</option>
+                </select>
+              </div>
+            </div>
+            <label class="feature-switch" for="pricingFeatureToggle">
+              <span class="feature-switch-copy">
+                <strong>自动阶梯调价</strong>
+                <small id="pricingFeatureStatus">已关闭</small>
+              </span>
+              <input id="pricingFeatureToggle" type="checkbox" role="switch" aria-label="自动阶梯调价">
+              <span class="feature-switch-track" aria-hidden="true"></span>
+            </label>
+          </div>
         </div>
         <div class="field list-search-field pricing-search-field">
           <label for="pricingSearchInput">搜索账号</label>
@@ -358,14 +367,16 @@
           <div id="pricingWindowHelpTitle" class="sheet-title">阶梯档位说明</div>
         </div>
       </div>
-      <p class="head-summary-text">档位按近24小时有效订单数计算：</p>
+      <p id="pricingWindowText" class="head-summary-text" hidden></p>
+      <p id="pricingWindowHelpSummary" class="head-summary-text">档位按近24小时有效订单数计算：</p>
       <div>
         <p class="head-summary-text">1档：0单</p>
         <p class="head-summary-text">2档：1单</p>
         <p class="head-summary-text">3档：2单</p>
         <p class="head-summary-text">4档：3单及以上</p>
       </div>
-      <p class="head-summary-text">按当前时间向前滚动24小时统计，订单移出窗口后，档位可能下降。</p>
+      <p id="pricingWindowHelpDescription" class="head-summary-text">按当前时间向前滚动24小时统计，订单移出窗口后，档位可能下降。</p>
+      <p class="head-summary-text">周期设置对全部游戏和渠道生效；保存后，在下一轮订单同步成功时重新计算档位。</p>
       <div class="sheet-actions">
         <button id="pricingWindowHelpCloseBtn" class="sheet-btn" type="button">关闭</button>
       </div>
@@ -858,7 +869,7 @@
   <script defer src="/js/menu_stats.js?v=20260329b"></script>
   <script defer src="/js/ui/daily_price_policy.js?v=20261009b"></script>
   <script defer src="/js/ui/help_sheet.js?v=20261007a"></script>
-  <script defer src="/js/menu_price.js?v=20261007b"></script>
+  <script defer src="/js/menu_price.js?v=20261016b"></script>
   <script defer src="/js/menu_board.js?v=20260329a"></script>
   <script defer src="/js/menu_maintenance.js?v=20260920b"></script>
 </body>

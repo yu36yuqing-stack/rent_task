@@ -3,6 +3,7 @@ const {
     initOrderDb,
     listTodayPaidOrderCountByAccounts,
     listRolling24hPaidOrderCountByAccounts,
+    listBusinessDayPaidOrderCountByAccounts,
     listRentingOrderWindowByAccounts: listRentingWindowByAccounts
 } = require('../../database/order_db');
 
@@ -63,6 +64,9 @@ async function listPaidCountByAccounts(userId, accounts = [], options = {}) {
     const mode = String(options.mode || ORDER_COUNT_MODE_NATURAL_DAY).trim().toLowerCase();
     if (mode === 'rolling_24h') {
         return listRolling24hPaidOrderCountByAccounts(userId, accounts, options);
+    }
+    if (mode === 'business_day') {
+        return listBusinessDayPaidOrderCountByAccounts(userId, accounts, options);
     }
     return listTodayPaidOrderCountByAccounts(userId, accounts, options.dateText || options.date_text || '');
 }

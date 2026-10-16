@@ -36,6 +36,42 @@ async function waitForText(page, selector, expected) {
     }, { timeout: 10000 }, selector, expected);
 }
 
+async function assertPricingHeaderLayout(page) {
+    const layout = await page.evaluate(() => {
+        const rect = selector => document.querySelector(selector).getBoundingClientRect();
+        const select = rect('#pricingCountMode');
+        const track = rect('.pricing-settings-row .feature-switch-track');
+        const label = rect('label[for="pricingCountMode"]');
+        const title = rect('.pricing-settings-row .feature-switch-copy strong');
+        const status = rect('#pricingFeatureStatus');
+        const settings = rect('.pricing-settings-row');
+        const head = rect('#pricingLadderPane .pricing-ladder-head');
+        return {
+            width: innerWidth,
+            scrollWidth: document.documentElement.scrollWidth,
+            labelOffset: Math.abs(label.top - title.top),
+            controlOffset: Math.abs(select.top + select.height / 2 - track.top - track.height / 2),
+            selectWidth: select.width,
+            selectRight: select.right,
+            trackRight: track.right,
+            statusHeight: status.height,
+            settingsWidth: settings.width,
+            headWidth: head.width,
+            appearance: getComputedStyle(document.getElementById('pricingCountMode')).appearance,
+            arrowInset: getComputedStyle(document.querySelector('.pricing-count-control'), '::after').right,
+            duplicateWindow: Boolean(document.querySelector('#pricingLadderPane #pricingWindowText')),
+            rangeInHelp: Boolean(document.querySelector('#pricingWindowHelpSheet #pricingWindowText'))
+        };
+    });
+    if (layout.scrollWidth > layout.width || layout.labelOffset > 1 || layout.controlOffset > 1
+        || layout.selectWidth > 192 || layout.selectRight > layout.width || layout.trackRight > layout.width
+        || layout.statusHeight > 36 || Math.abs(layout.settingsWidth - layout.headWidth) > 5
+        || layout.appearance !== 'none' || layout.arrowInset !== '14px'
+        || layout.duplicateWindow || !layout.rangeInHelp) {
+        throw new Error(`阶梯配置头部未对齐或溢出: ${JSON.stringify(layout)}`);
+    }
+}
+
 async function main() {
     fs.mkdirSync(outputDir, { recursive: true });
     const user = await createUserByAdmin({
@@ -128,6 +164,12 @@ async function main() {
         });
         const page = await browser.newPage();
         const browserEvents = [];
+        const featureRequests = [];
+        page.on('request', request => {
+            if (request.method() === 'POST' && request.url().endsWith('/api/pricing/ladder/feature')) {
+                featureRequests.push(JSON.parse(request.postData()));
+            }
+        });
         page.on('console', (msg) => browserEvents.push(`console:${msg.type()}:${msg.text()}`));
         page.on('pageerror', (err) => browserEvents.push(`pageerror:${err.message}`));
         page.on('response', (response) => {
@@ -159,9 +201,48 @@ async function main() {
         }
 
         const targetCard = '[data-pricing-account-card="hpjy-target"]';
-        await waitForText(page, '#pricingWindowText', '订单周期：近24小时');
+        await page.waitForFunction(() => document.getElementById('pricingCountMode').value === 'rolling_24h'
+            && document.getElementById('pricingWindowText').textContent.includes('北京时间'));
+        await assertPricingHeaderLayout(page);
+        await page.click('[data-pricing-game="WZRY"]');
+        await page.waitForFunction(() => document.getElementById('pricingListContainer').textContent.includes('暂无可配置账号'));
+        await assertPricingHeaderLayout(page);
+        await page.screenshot({ path: path.join(outputDir, 'pricing-header-empty-desktop.png'), fullPage: true });
+        await page.click('[data-pricing-game="和平精英"]');
+        await page.waitForSelector(targetCard);
         if (!(await page.$eval(targetCard, node => node.textContent)).includes('近24h 0单')) {
             throw new Error('滚动窗口计数文案未显示');
+        }
+        await page.select('#pricingCountMode', 'business_day');
+        await page.waitForFunction(() => document.getElementById('pricingCountMode').value === 'business_day'
+            && !document.getElementById('pricingCountMode').disabled
+            && document.querySelector('[data-pricing-account-card="hpjy-target"]').textContent.includes('本周期 0单'));
+        await page.click('#pricingWindowHelpBtn');
+        await page.waitForSelector('#pricingWindowHelpSheet:not(.hidden)');
+        if (!(await page.$eval('#pricingWindowHelpDescription', node => node.textContent)).includes('凌晨6点前从前一天06:00算起')) {
+            throw new Error('固定06:00周期说明未跟随设置');
+        }
+        await page.click('#pricingWindowHelpCloseBtn');
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('#pricingCountMode');
+        await page.waitForFunction(() => document.getElementById('pricingCountMode').value === 'business_day'
+            && document.getElementById('pricingWindowText').textContent.includes('06:00'));
+        await page.click('[data-pricing-game="和平精英"]');
+        await page.waitForSelector(targetCard);
+        await page.screenshot({ path: path.join(outputDir, 'pricing-count-mode-desktop.png'), fullPage: true });
+        const headerClip = await page.$eval('#pricingLadderPane .pricing-ladder-head', node => {
+            const rect = node.getBoundingClientRect();
+            return { x: rect.x - 8, y: rect.y - 8, width: rect.width + 16, height: rect.height + 16 };
+        });
+        await page.screenshot({ path: path.join(outputDir, 'pricing-header-detail.png'), clip: headerClip });
+        await page.select('#pricingCountMode', 'rolling_24h');
+        await page.waitForFunction(() => !document.getElementById('pricingCountMode').disabled
+            && document.getElementById('pricingCountMode').value === 'rolling_24h'
+            && document.querySelector('[data-pricing-account-card="hpjy-target"]').textContent.includes('近24h 0单'));
+        if (featureRequests.length !== 2 || featureRequests.some(body => body.enabled !== false)
+            || featureRequests[0].count_mode !== 'business_day' || featureRequests[1].count_mode !== 'rolling_24h'
+            || featureRequests[1].expected_version <= featureRequests[0].expected_version) {
+            throw new Error(`计数周期设置未复用版本保存或意外开启自动调价: ${JSON.stringify(featureRequests)}`);
         }
         await page.type('#pricingSearchInput', '待复制');
         await page.waitForFunction(() => (
@@ -311,19 +392,30 @@ async function main() {
         await page.waitForSelector('[data-pricing-game="和平精英"]', { visible: true });
         await page.click('[data-pricing-game="和平精英"]');
         await page.waitForSelector(targetCard);
+        await page.select('#pricingCountMode', 'business_day');
+        await page.waitForFunction(() => !document.getElementById('pricingCountMode').disabled
+            && document.getElementById('pricingCountMode').value === 'business_day'
+            && document.querySelector('[data-pricing-account-card="hpjy-target"]').textContent.includes('本周期 0单'));
+        for (const width of [320, 360, 390]) {
+            await page.setViewport({ width, height: 640, deviceScaleFactor: 1 });
+            await assertPricingHeaderLayout(page);
+            if (width === 320) await page.screenshot({ path: path.join(outputDir, 'pricing-header-mobile-320.png'), fullPage: true });
+        }
         const layout = await page.evaluate((selector) => {
             const card = document.querySelector(selector);
             const cardRect = card.getBoundingClientRect();
             const inputs = Array.from(card.querySelectorAll('.pricing-price-input')).map((node) => node.getBoundingClientRect());
+            const countSelect = document.getElementById('pricingCountMode').getBoundingClientRect();
             return {
                 viewportWidth: window.innerWidth,
                 documentWidth: document.documentElement.scrollWidth,
                 cardLeft: cardRect.left,
                 cardRight: cardRect.right,
-                inputsInside: inputs.every((rect) => rect.left >= cardRect.left && rect.right <= cardRect.right)
+                inputsInside: inputs.every((rect) => rect.left >= cardRect.left && rect.right <= cardRect.right),
+                countSelectInside: countSelect.left >= 0 && countSelect.right <= window.innerWidth
             };
         }, targetCard);
-        if (layout.documentWidth > layout.viewportWidth || !layout.inputsInside || layout.cardLeft < 0 || layout.cardRight > layout.viewportWidth) {
+        if (layout.documentWidth > layout.viewportWidth || !layout.inputsInside || !layout.countSelectInside || layout.cardLeft < 0 || layout.cardRight > layout.viewportWidth) {
             throw new Error(`移动端布局溢出: ${JSON.stringify(layout)}`);
         }
         await page.click(`${targetCard} [data-pricing-channel-result]`);
@@ -366,6 +458,9 @@ async function main() {
                 scrollerInside: scrollerRect.left >= rect.left && scrollerRect.right <= rect.right
             };
         });
+        if (!(await page.$eval('#pricingChannelBody', node => node.textContent)).includes('每日06:00切日 · 本周期 0单')) {
+            throw new Error('渠道套餐详情的周期与列表不一致');
+        }
         if (channelLayout.documentWidth > channelLayout.viewportWidth || channelLayout.sheetLeft < 0
             || channelLayout.sheetRight > channelLayout.viewportWidth || !channelLayout.scrollerInside
             || !channelLayout.contentReachable || !channelLayout.tableScrollable || !channelLayout.tableScrolled
@@ -430,13 +525,15 @@ async function main() {
         const ratioMobile = await page.evaluate(() => {
             const panel = document.getElementById('pricingRatioPanel');
             const rect = panel.getBoundingClientRect();
-            const fields = Array.from(panel.querySelectorAll('.pricing-ratio-field')).map((node) => node.getBoundingClientRect());
+            const fields = Array.from(panel.querySelectorAll('.pricing-ratio-field'))
+                .map((node) => node.getBoundingClientRect()).filter(rect => rect.width > 0);
             const previewItems = Array.from(panel.querySelectorAll('.pricing-ratio-result')).map((node) => node.getBoundingClientRect());
             return {
                 documentWidth: document.documentElement.scrollWidth,
                 viewportWidth: window.innerWidth,
                 panelLeft: rect.left,
                 panelRight: rect.right,
+                fieldBounds: fields.map(field => ({ left: field.left, right: field.right })),
                 fieldsInside: fields.every((field) => field.left >= rect.left && field.right <= rect.right),
                 previewInside: previewItems.every((item) => item.left >= rect.left && item.right <= rect.right),
                 previewCount: previewItems.length,

@@ -50,6 +50,30 @@ function pricingGameOptions() {
   ];
 }
 
+function normalizePricingCountMode(value) {
+  return value === 'business_day' ? 'business_day' : 'rolling_24h';
+}
+
+function pricingCountWindowLabel(mode) {
+  return normalizePricingCountMode(mode) === 'business_day' ? '每日06:00切日' : '近24小时';
+}
+
+function pricingCountSummary(mode, count) {
+  return `${normalizePricingCountMode(mode) === 'business_day' ? '本周期' : '近24h'} ${Number(count || 0)}单`;
+}
+
+function pricingCountWindowRange(start, end) {
+  const format = (value) => {
+    if (!value) return '';
+    const timestamp = new Date(value).getTime();
+    if (!Number.isFinite(timestamp)) return '';
+    return new Date(timestamp + 8 * 3600 * 1000).toISOString().slice(5, 16).replace('-', '/').replace('T', ' ');
+  };
+  const from = format(start);
+  const to = format(end);
+  return from && to ? `${from}—${to}（北京时间）` : '';
+}
+
 function ensurePricingLadderState() {
   const pricing = state.pricing || (state.pricing = {});
   if (!pricing.game_name) pricing.game_name = 'WZRY';
@@ -59,8 +83,10 @@ function ensurePricingLadderState() {
   if (!pricing.saving || typeof pricing.saving !== 'object') pricing.saving = {};
   if (!pricing.drafts || typeof pricing.drafts !== 'object') pricing.drafts = {};
   if (!pricing.feature || typeof pricing.feature !== 'object') {
-    pricing.feature = { enabled: false, reconcile_required: false, version: 0 };
+    pricing.feature = { enabled: false, count_mode: 'rolling_24h', reconcile_required: false, version: 0 };
   }
+  pricing.count_mode = normalizePricingCountMode(pricing.count_mode || pricing.feature.count_mode);
+  pricing.feature.count_mode = normalizePricingCountMode(pricing.feature.count_mode || pricing.count_mode);
   if (typeof pricing.feature_saving !== 'boolean') pricing.feature_saving = false;
   if (!pricing.channel_sheet || typeof pricing.channel_sheet !== 'object') {
     pricing.channel_sheet = {
@@ -376,6 +402,8 @@ function pricingLogTriggerText(source) {
     order_finished_changed: '订单换挡',
     daily_reset: '06:00重置',
     rolling_24h_reconcile: '近24h换档',
+    business_day_reconcile: '06:00周期换档',
+    count_mode_changed_reconcile: '计数周期变更',
     feature_enabled_reconcile: '功能启用校准',
     pricing_h5: '手工发布'
   };
@@ -480,6 +508,7 @@ function renderPricingChannelResult(payload = {}, result = {}) {
     ${result.runtime && result.runtime.last_error ? `<div class="pricing-channel-meta">${escapePricingHtml(result.runtime.last_error)}</div>` : ''}
     <div class="pricing-channel-meta">商品 ${escapePricingHtml(result.goods_id || '未关联')}${result.min_rent_hour ? ` · 起租 ${Number(result.min_rent_hour)} 小时` : ''}</div>
     ${result.verification_note ? `<div class="pricing-channel-meta">${escapePricingHtml(result.verification_note)}</div>` : ''}
+    <div class="pricing-channel-meta">订单周期：${escapePricingHtml(payload.count_window || pricingCountWindowLabel(payload.count_mode))} · ${escapePricingHtml(pricingCountSummary(payload.count_mode, payload.current_order_count))}${pricingCountWindowRange(payload.window_start, payload.window_end) ? `<br>${escapePricingHtml(pricingCountWindowRange(payload.window_start, payload.window_end))}` : ''}</div>
   `;
 }
 
@@ -608,14 +637,18 @@ function applyPricingPayload(out) {
   const pricing = ensurePricingLadderState();
   pricing.game_name = normalizePricingGameName(out && out.game_name || pricing.game_name || 'WZRY');
   pricing.list = Array.isArray(out && out.list) ? out.list : [];
-  pricing.count_window = String(out && out.count_window || '近24小时');
+  pricing.count_mode = normalizePricingCountMode(out && (out.count_mode || out.feature && out.feature.count_mode));
+  pricing.count_window = String(out && out.count_window || pricingCountWindowLabel(pricing.count_mode));
+  pricing.window_start = String(out && out.window_start || '');
+  pricing.window_end = String(out && out.window_end || '');
   pricing.feature = out && out.feature && typeof out.feature === 'object'
     ? {
         enabled: out.feature.enabled === true,
+        count_mode: normalizePricingCountMode(out.feature.count_mode || pricing.count_mode),
         reconcile_required: out.feature.reconcile_required === true,
         version: Number(out.feature.version || 0)
       }
-    : { enabled: false, reconcile_required: false, version: 0 };
+    : { enabled: false, count_mode: pricing.count_mode, reconcile_required: false, version: 0 };
   pricing.error = '';
   pricing.loaded_once = true;
 }
@@ -828,7 +861,7 @@ function renderPricingList() {
             <p class="pricing-account-meta">${escapePricingHtml(account || '-')}</p>
           </div>
           <div class="pricing-account-status">
-            <span>近24h ${Number(item.today_order_count || 0)}单</span>
+            <span>${escapePricingHtml(pricingCountSummary(pricing.count_mode, item.today_order_count))}</span>
             <span>${item.configured ? '已配置' : '待配置'}</span>
           </div>
         </div>
@@ -864,28 +897,49 @@ async function updatePricingFeature(enabled) {
     renderPricingFeatureState();
     return;
   }
+  await savePricingFeatureSettings(enabled, pricing.feature.count_mode, false);
+}
+
+async function updatePricingCountMode(value) {
+  const pricing = ensurePricingLadderState();
+  const mode = normalizePricingCountMode(value);
+  if (pricing.feature_saving || pricing.feature.count_mode === mode) return;
+  await savePricingFeatureSettings(pricing.feature.enabled, mode, true);
+}
+
+async function savePricingFeatureSettings(enabled, countMode, modeChanged) {
+  const pricing = ensurePricingLadderState();
   pricing.feature_saving = true;
+  pricing.pending_count_mode = countMode;
   renderPricingFeatureState();
   try {
     const out = await request('/api/pricing/ladder/feature', {
       method: 'POST',
       body: JSON.stringify({
         enabled,
+        count_mode: countMode,
         expected_version: Number(pricing.feature.version || 0)
       })
     });
     const saved = out && out.feature ? out.feature : {};
     pricing.feature = {
       enabled: saved.enabled === true,
+      count_mode: normalizePricingCountMode(saved.count_mode),
       reconcile_required: saved.reconcile_required === true,
       version: Number(saved.version || 0)
     };
-    showToast(pricing.feature.enabled ? '自动阶梯调价已开启' : '自动阶梯调价已关闭');
+    pricing.count_mode = pricing.feature.count_mode;
+    pricing.count_window = pricingCountWindowLabel(pricing.count_mode);
+    await loadPricingView();
+    showToast(modeChanged
+      ? (pricing.feature.enabled ? '计数周期已保存，下一轮订单同步成功后重新计算档位' : '计数周期已保存，开启自动调价后生效')
+      : (pricing.feature.enabled ? '自动阶梯调价已开启' : '自动阶梯调价已关闭'));
   } catch (e) {
-    showToast(e.message || '自动阶梯调价开关保存失败');
+    showToast(e.message || (modeChanged ? '计数周期保存失败' : '自动阶梯调价开关保存失败'));
   } finally {
     pricing.feature_saving = false;
-    renderPricingFeatureState();
+    delete pricing.pending_count_mode;
+    renderPricingView();
   }
 }
 
@@ -899,7 +953,13 @@ function renderPricingFeatureState() {
   if (els.pricingFeatureStatus) {
     els.pricingFeatureStatus.textContent = pricing.feature_saving
       ? '保存中...'
-      : (pricing.feature.enabled ? (pricing.feature.reconcile_required ? '已开启 · 待校准' : '已开启') : '已关闭 · 仅保存配置');
+      : (pricing.feature.enabled ? (pricing.feature.reconcile_required ? '待重算' : '已开启') : '已关闭');
+  }
+  const countSelect = document.getElementById('pricingCountMode');
+  if (countSelect) {
+    countSelect.value = pricing.pending_count_mode || pricing.feature.count_mode;
+    countSelect.disabled = pricing.feature_saving === true;
+    countSelect.onchange = () => void updatePricingCountMode(countSelect.value);
   }
 }
 
@@ -918,7 +978,16 @@ function renderPricingView() {
   renderPricingGameTabs();
   renderPricingFeatureState();
   const windowText = document.getElementById('pricingWindowText');
-  if (windowText) windowText.textContent = `订单周期：${pricing.count_window || '近24小时'}`;
+  if (windowText) {
+    windowText.textContent = pricingCountWindowRange(pricing.window_start, pricing.window_end);
+    windowText.hidden = !windowText.textContent;
+  }
+  const helpSummary = document.getElementById('pricingWindowHelpSummary');
+  if (helpSummary) helpSummary.textContent = `档位按${pricing.count_window || pricingCountWindowLabel(pricing.count_mode)}有效订单数计算：`;
+  const helpDescription = document.getElementById('pricingWindowHelpDescription');
+  if (helpDescription) helpDescription.textContent = pricing.count_mode === 'business_day'
+    ? '统计最近一次北京时间06:00到当前时间的订单；凌晨6点前从前一天06:00算起，06:00进入新周期。'
+    : '按当前时间向前滚动24小时统计，订单移出窗口后，档位可能下降。';
   if (window.HelpSheet) window.HelpSheet.bind(
     document.getElementById('pricingWindowHelpBtn'),
     document.getElementById('pricingWindowHelpSheet'),
@@ -964,6 +1033,10 @@ window.loadPricingView = loadPricingView;
 window.renderPricingView = renderPricingView;
 window.__pricingLadderTest = {
   normalizePricingGameName,
+  normalizePricingCountMode,
+  pricingCountWindowLabel,
+  pricingCountSummary,
+  pricingCountWindowRange,
   formatPricingMoney,
   formatPricingResultMoney,
   normalizePricingDraft,

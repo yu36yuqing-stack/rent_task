@@ -1,7 +1,7 @@
 'use strict';
 
 const { listUserGameAccounts } = require('../database/user_game_account_db');
-const { listPaidCountByAccounts } = require('../order/service/order_query_service');
+const { listPriceLadderOrderCounts } = require('./price_ladder_count_service');
 const {
     listAccountPriceLadderRules,
     getAccountPriceLadderRule,
@@ -137,15 +137,15 @@ async function getPriceLadderDashboardByUser(userId, options = {}) {
         isAvailableAccount(row)
         && String(row.game_id || '').trim() === game.game_id
     ));
-    const [rules, rollingCounts, runtimes, feature] = await Promise.all([
+    const [rules, countSnapshot, runtimes] = await Promise.all([
         listAccountPriceLadderRules(uid, game.game_id),
-        listPaidCountByAccounts(uid, accounts.map((row) => ({
+        listPriceLadderOrderCounts(uid, accounts.map((row) => ({
             game_id: game.game_id,
             game_account: row.game_account
-        })), { mode: 'rolling_24h', now: options.now }),
-        listAccountPriceLadderRuntimesByUser(uid),
-        getPriceLadderFeatureConfig(uid)
+        })), { now: options.now }),
+        listAccountPriceLadderRuntimesByUser(uid)
     ]);
+    const { counts, feature, count_mode, count_window, window_start, window_end } = countSnapshot;
     const ruleMap = new Map(rules.map((rule) => [rule.game_account, rule]));
     const runtimeMap = new Map();
     for (const runtime of runtimes.filter((item) => item.game_id === game.game_id)) {
@@ -157,7 +157,7 @@ async function getPriceLadderDashboardByUser(userId, options = {}) {
         const rule = ruleMap.get(account) || null;
         const runtime = runtimeMap.get(account) || null;
         const currentPrice = pickCurrentUhaozuPrice(row);
-        const orderCount = Number(rollingCounts[`${game.game_id}::${account}`] || 0);
+        const orderCount = Number(counts[`${game.game_id}::${account}`] || 0);
         return {
             game_id: game.game_id,
             game_name: game.game_name,
@@ -179,12 +179,13 @@ async function getPriceLadderDashboardByUser(userId, options = {}) {
     return {
         game_id: game.game_id,
         game_name: game.game_name,
-        count_window: '近24小时',
+        count_mode, count_window, window_start, window_end,
         channel_scope: 'global',
         effective_channel: 'uhaozu',
         effective_channels: CHANNEL_CAPABILITIES.filter((item) => item.enabled).map((item) => item.channel),
         feature: {
             enabled: feature.enabled,
+            count_mode,
             reconcile_required: feature.reconcile_required,
             version: feature.version
         },
@@ -316,11 +317,12 @@ async function getPriceLadderChannelResultByUser(userId, options = {}) {
     ));
     if (!target) throw new Error('账号不存在、已出售或不属于当前游戏');
 
-    const [rule, rollingCounts] = await Promise.all([
+    const [rule, countSnapshot] = await Promise.all([
         getAccountPriceLadderRule(uid, game.game_id, account),
-        listPaidCountByAccounts(uid, [{ game_id: game.game_id, game_account: account }], { mode: 'rolling_24h', now: options.now })
+        listPriceLadderOrderCounts(uid, [{ game_id: game.game_id, game_account: account }], { now: options.now })
     ]);
-    const orderCount = Number(rollingCounts[`${game.game_id}::${account}`] || 0);
+    const { counts, count_mode, count_window, window_start, window_end } = countSnapshot;
+    const orderCount = Number(counts[`${game.game_id}::${account}`] || 0);
     const channelResults = {};
     for (const capability of CHANNEL_CAPABILITIES) {
         const adapter = getPriceChannelAdapter(capability.channel);
@@ -409,7 +411,7 @@ async function getPriceLadderChannelResultByUser(userId, options = {}) {
         current_order_count: orderCount,
         current_tier: Number(selectedResult && selectedResult.current_tier || 0),
         desired_tier: Math.min(4, Math.max(1, orderCount + 1)),
-        count_window: '近24小时',
+        count_mode, count_window, window_start, window_end,
         channels: CHANNEL_CAPABILITIES.map((item) => ({
             ...item,
             available: Boolean(channelResults[item.channel] && channelResults[item.channel].available)
@@ -426,6 +428,7 @@ async function setPriceLadderFeatureByUser(userId, input = {}) {
     if (typeof input.enabled !== 'boolean') throw new Error('enabled 必须是布尔值');
     return setPriceLadderFeatureEnabled(uid, input.enabled, {
         expected_version: input.expected_version,
+        count_mode: input.count_mode,
         desc: input.enabled ? 'enabled by h5 price ladder' : 'disabled by h5 price ladder'
     });
 }

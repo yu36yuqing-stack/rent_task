@@ -10,14 +10,23 @@ const root = path.resolve(__dirname, '..');
 const directory = path.join(root, 'coverage/price-rolling');
 const map = createCoverageMap(JSON.parse(fs.readFileSync(path.join(directory, 'coverage-final.json'), 'utf8')));
 const files = [
+    'common/price_ladder_count_mode.js',
+    'database/price_ladder_feature_config_db.js',
+    'database/migrations/20261016_020_price_ladder_count_mode.js',
     'database/order_db.js',
     'order/order.js',
     'order/service/order_query_service.js',
     'price/price_ladder_reconcile_service.js',
     'price/price_ladder_service.js',
-    'h5/public/js/menu_price.js'
+    'price/price_ladder_count_service.js',
+    'h5/public/js/menu_price.js',
+    'h5/local_h5_server.js'
 ];
-const core = new Set(['price/price_ladder_reconcile_service.js', 'price/price_ladder_service.js']);
+const core = new Set([
+    'common/price_ladder_count_mode.js', 'database/price_ladder_feature_config_db.js',
+    'database/migrations/20261016_020_price_ladder_count_mode.js', 'price/price_ladder_count_service.js',
+    'price/price_ladder_reconcile_service.js', 'price/price_ladder_service.js'
+]);
 const results = files.map(file => {
     const diff = spawnSync('git', ['diff', 'HEAD', '--unified=0', '--', file], { cwd: root, encoding: 'utf8' });
     if (diff.status !== 0) throw new Error(diff.stderr || `git diff failed: ${file}`);
@@ -29,6 +38,9 @@ const results = files.map(file => {
     }
     const coverage = map.fileCoverageFor(path.join(root, file));
     const lines = coverage.getLineCoverage();
+    if (spawnSync('git', ['ls-files', '--error-unmatch', file], { cwd: root }).status !== 0) {
+        for (const line of Object.keys(lines)) changed.add(Number(line));
+    }
     const executable = [...changed].filter(line => Object.hasOwn(lines, line));
     const missed = executable.filter(line => lines[line] === 0);
     const summary = coverage.toSummary();

@@ -18,6 +18,16 @@ vm.runInContext(source, context, { filename: path.join(__dirname, '../h5/public/
 const helpers = context.window.__pricingLadderTest;
 
 assert(helpers);
+assert.strictEqual(helpers.normalizePricingCountMode(), 'rolling_24h');
+assert.strictEqual(helpers.normalizePricingCountMode('invalid'), 'rolling_24h');
+assert.strictEqual(helpers.normalizePricingCountMode('business_day'), 'business_day');
+assert.strictEqual(helpers.pricingCountWindowLabel('rolling_24h'), '近24小时');
+assert.strictEqual(helpers.pricingCountWindowLabel('business_day'), '每日06:00切日');
+assert.strictEqual(helpers.pricingCountSummary('business_day', 2), '本周期 2单');
+assert.strictEqual(helpers.pricingCountSummary('rolling_24h', 0), '近24h 0单');
+assert.strictEqual(helpers.pricingCountWindowRange('2026-10-15T22:00:00.000Z', '2026-10-16T06:00:00.000Z'), '10/16 06:00—10/16 14:00（北京时间）');
+assert.strictEqual(helpers.pricingCountWindowRange('', '2026-10-16T06:00:00.000Z'), '');
+assert.strictEqual(helpers.pricingCountWindowRange('invalid', 'invalid'), '');
 assert.strictEqual(helpers.normalizePricingGameName('CS2'), 'CSGO');
 assert.strictEqual(helpers.normalizePricingGameName('和平精英'), '和平精英');
 assert.strictEqual(helpers.normalizePricingGameName('穿越火线手游'), 'CFM');
@@ -65,11 +75,19 @@ context.els = { pricingView: {}, pricingListContainer: listContainer };
 context.document = { getElementById: id => id === 'pricingWindowText' ? windowText : null };
 context.applyPricingPayload({ list: [{ game_account: 'demo', configured: true, current_tier: 2, desired_tier: 3, today_order_count: 2, prices: [2,3,4,5] }] });
 context.renderPricingView();
-assert.strictEqual(windowText.textContent, '订单周期：近24小时');
+assert.strictEqual(windowText.textContent, '');
+assert.strictEqual(windowText.hidden, true);
 assert(listContainer.innerHTML.includes('近24h 2单'));
 assert(listContainer.innerHTML.includes('当前第2档 · 目标第3档 · 待换档'));
 assert(listContainer.innerHTML.includes('aria-label="1档时租价"'));
 assert(!listContainer.innerHTML.includes('档时租价（'));
+assert.strictEqual(context.state.pricing.feature.count_mode, 'rolling_24h');
+const businessResultHtml = helpers.renderPricingChannelResult({
+    count_mode: 'business_day', count_window: '每日06:00切日', current_order_count: 2,
+    window_start: '2026-10-15T22:00:00Z', window_end: '2026-10-16T06:00:00Z'
+}, { available: true });
+assert(businessResultHtml.includes('每日06:00切日 · 本周期 2单'));
+assert(businessResultHtml.includes('10/16 06:00—10/16 14:00（北京时间）'));
 
 const errorDetail = helpers.formatPricingErrorDetail({
     fail_message: '商品更新失败',
@@ -233,7 +251,100 @@ async function testSavedRuntimeDisplay() {
         assert(listContainer.innerHTML.includes(status === 'applied' ? '当前第3档 · 目标第3档' : '当前第2档 · 目标第3档 · 换档失败'));
     }
 }
-testSavedRuntimeDisplay().then(() => console.log('[OK] pricing_ladder_frontend_helpers_smoke_test passed')).catch(error => {
+async function testCountModeSettings() {
+    const select = { value: 'rolling_24h', disabled: false };
+    const helpSummary = { textContent: '' };
+    const helpDescription = { textContent: '' };
+    const status = { textContent: '' };
+    const toggle = { checked: false, disabled: false };
+    const nodes = { pricingCountMode: select, pricingWindowText: windowText, pricingWindowHelpSummary: helpSummary, pricingWindowHelpDescription: helpDescription };
+    context.document.getElementById = id => nodes[id] || null;
+    context.els.pricingFeatureStatus = status;
+    context.els.pricingFeatureToggle = toggle;
+    const list = context.state.pricing.list;
+    let feature = { enabled: false, count_mode: 'rolling_24h', reconcile_required: false, version: 3 };
+    context.applyPricingPayload({ list, feature });
+    context.renderPricingView();
+    const requests = [];
+    const toasts = [];
+    let releaseSave;
+    context.showToast = text => toasts.push(text);
+    context.request = async (url, options) => {
+        requests.push({ url, body: options && JSON.parse(options.body) });
+        if (options) {
+            await new Promise(resolve => { releaseSave = resolve; });
+            feature = { ...feature, ...JSON.parse(options.body), reconcile_required: true, version: feature.version + 1 };
+            return { feature };
+        }
+        return {
+            list, feature, count_mode: feature.count_mode, count_window: '每日06:00切日',
+            window_start: '2026-10-15T22:00:00Z', window_end: '2026-10-16T06:00:00Z'
+        };
+    };
+    const saving = context.updatePricingCountMode('business_day');
+    assert.strictEqual(select.disabled, true);
+    assert.strictEqual(toggle.disabled, true);
+    assert.strictEqual(select.value, 'business_day');
+    assert.strictEqual(status.textContent, '保存中...');
+    await context.updatePricingCountMode('rolling_24h');
+    assert.strictEqual(requests.length, 1);
+    releaseSave();
+    await saving;
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(requests[0].body)), { enabled: false, count_mode: 'business_day', expected_version: 3 });
+    assert(requests[1].url.startsWith('/api/pricing/ladder?'));
+    assert.strictEqual(context.state.pricing.count_mode, 'business_day');
+    assert.strictEqual(select.disabled, false);
+    assert.strictEqual(toggle.checked, false);
+    assert.strictEqual(windowText.textContent, '10/16 06:00—10/16 14:00（北京时间）');
+    assert.strictEqual(windowText.hidden, false);
+    assert.strictEqual(helpSummary.textContent, '档位按每日06:00切日有效订单数计算：');
+    assert(helpDescription.textContent.includes('凌晨6点前从前一天06:00算起'));
+    assert(listContainer.innerHTML.includes('本周期 2单'));
+    assert(toasts.at(-1).includes('开启自动调价后生效'));
+    await context.updatePricingCountMode('business_day');
+    assert.strictEqual(requests.length, 2);
+
+    context.request = async () => { throw new Error('配置已更新，请刷新后重试'); };
+    await context.updatePricingCountMode('rolling_24h');
+    assert.strictEqual(select.value, 'business_day');
+    assert.strictEqual(select.disabled, false);
+    assert.strictEqual(context.state.pricing.feature.version, 4);
+    assert.strictEqual(toasts.at(-1), '配置已更新，请刷新后重试');
+    context.window.confirm = () => false;
+    await context.updatePricingFeature(true);
+    assert.strictEqual(toggle.checked, false);
+
+    context.window.confirm = () => true;
+    context.request = async (url, options) => {
+        if (options) {
+            const body = JSON.parse(options.body);
+            assert.strictEqual(body.count_mode, 'business_day');
+            assert.strictEqual(body.expected_version, 4);
+            feature = { ...feature, enabled: true, reconcile_required: true, version: 5 };
+            return { feature };
+        }
+        return { list, feature, count_mode: 'business_day' };
+    };
+    await context.updatePricingFeature(true);
+    assert.strictEqual(status.textContent, '待重算');
+    assert.strictEqual(select.value, 'business_day');
+    assert.strictEqual(toggle.checked, true);
+    assert(toasts.at(-1).includes('已开启'));
+    context.request = async (url, options) => {
+        if (options) {
+            feature = { ...feature, count_mode: 'rolling_24h', version: 6 };
+            return { feature };
+        }
+        return { list, feature };
+    };
+    await context.updatePricingCountMode('rolling_24h');
+    assert.strictEqual(select.value, 'rolling_24h');
+    assert(listContainer.innerHTML.includes('近24h 2单'));
+    assert(helpDescription.textContent.includes('订单移出窗口'));
+    assert(toasts.at(-1).includes('下一轮订单同步成功后重新计算'));
+}
+
+testSavedRuntimeDisplay().then(testCountModeSettings).then(() => console.log('[OK] pricing_ladder_frontend_helpers_smoke_test passed')).catch(error => {
     console.error(error);
     process.exitCode = 1;
 });

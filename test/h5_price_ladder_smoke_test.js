@@ -68,6 +68,8 @@ async function main() {
         assert.strictEqual(getRes.status, 200);
         assert.strictEqual(getJson.ok, true);
         assert.strictEqual(getJson.count_window, '近24小时');
+        assert.strictEqual(getJson.count_mode, 'rolling_24h');
+        assert.strictEqual(getJson.feature.count_mode, 'rolling_24h');
         assert.strictEqual(getJson.list.length, 1);
         assert.strictEqual(getJson.feature.enabled, false);
         assert.deepStrictEqual(getJson.list[0].prices, ['', '', '', '']);
@@ -192,6 +194,34 @@ async function main() {
         const clearedGetJson = await clearedGetRes.json();
         assert.strictEqual(clearedGetJson.list[0].configured, false);
         assert.deepStrictEqual(clearedGetJson.list[0].prices, ['', '', '', '']);
+
+        const invalidModeRes = await fetch(`${baseUrl}/api/pricing/ladder/feature`, {
+            method: 'POST', headers,
+            body: JSON.stringify({ enabled: true, count_mode: 'unknown', expected_version: featureJson.feature.version })
+        });
+        assert.strictEqual(invalidModeRes.status, 400);
+        const modeRes = await fetch(`${baseUrl}/api/pricing/ladder/feature`, {
+            method: 'POST', headers,
+            body: JSON.stringify({ enabled: true, count_mode: 'business_day', expected_version: featureJson.feature.version })
+        });
+        const modeJson = await modeRes.json();
+        assert.strictEqual(modeRes.status, 200);
+        assert.strictEqual(modeJson.feature.count_mode, 'business_day');
+        const modeGetRes = await fetch(`${baseUrl}/api/pricing/ladder?game_name=${encodeURIComponent('和平精英')}`, { headers });
+        const modeGetJson = await modeGetRes.json();
+        assert.strictEqual(modeGetJson.count_mode, 'business_day');
+        assert.strictEqual(modeGetJson.count_window, '每日06:00切日');
+        assert.strictEqual(new Date(modeGetJson.window_start).getUTCHours(), 22);
+        const modeDetailRes = await fetch(`${baseUrl}/api/pricing/ladder/channel-result?game_name=${encodeURIComponent('和平精英')}&game_account=ladder-a`, { headers });
+        assert.strictEqual((await modeDetailRes.json()).count_mode, 'business_day');
+        const oldClientRes = await fetch(`${baseUrl}/api/pricing/ladder/feature`, {
+            method: 'POST', headers,
+            body: JSON.stringify({ enabled: false, expected_version: modeJson.feature.version })
+        });
+        const oldClientJson = await oldClientRes.json();
+        assert.strictEqual(oldClientRes.status, 200);
+        assert.strictEqual(oldClientJson.feature.count_mode, 'business_day');
+        assert.strictEqual(oldClientJson.feature.enabled, false);
 
         const staticRes = await fetch(`${baseUrl}/?menu=pricing_uhaozu`);
         const staticHtml = await staticRes.text();

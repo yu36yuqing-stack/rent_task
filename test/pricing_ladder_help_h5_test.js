@@ -55,7 +55,8 @@ async function main() {
                 await page.waitForSelector(`[data-pricing-game="${game}"]`, { visible: true });
                 await page.click(`[data-pricing-game="${game}"]`);
                 await page.waitForSelector(`[data-pricing-account-card="help-${id}"]`, { visible: true });
-                assert.strictEqual(await page.$eval('#pricingWindowText', node => node.textContent), '订单周期：近24小时');
+                assert.strictEqual(await page.$eval('#pricingCountMode', node => node.value), 'rolling_24h');
+                assert.match(await page.$eval('#pricingWindowText', node => node.textContent), /北京时间/);
                 assert.strictEqual(await page.$('.pricing-channel-note'), null);
                 const labels = await page.$$eval('.pricing-tier-field > span', nodes => nodes.map(node => node.textContent));
                 assert.deepStrictEqual(labels, ['1档时租价', '2档时租价', '3档时租价', '4档时租价']);
