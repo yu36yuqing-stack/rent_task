@@ -788,6 +788,17 @@
       white-space: nowrap;
     }
 
+    #listView .product-income-brief {
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    #listView .product-income-brief .purchase-brief-line {
+      min-width: 0;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
     #listView .auth-revoke-row {
       display: flex;
       align-items: center;
@@ -1786,6 +1797,32 @@
       font-size: 12px;
       font-weight: 600;
       line-height: 16px;
+    }
+
+    #pricingView .pricing-count-field label {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      white-space: nowrap;
+    }
+
+    #pricingView .pricing-count-field .head-summary-text {
+      flex: 0 0 auto;
+      margin: 0;
+      font-size: 11px;
+      line-height: 16px;
+    }
+
+    #pricingView .pricing-count-field [data-state="pending"] {
+      color: var(--warn);
+    }
+
+    #pricingView .pricing-count-field [data-state="effective"] {
+      color: var(--ok);
+    }
+
+    #pricingView .pricing-count-field [data-state="failed"] {
+      color: var(--danger);
     }
 
     #pricingView .pricing-count-control {

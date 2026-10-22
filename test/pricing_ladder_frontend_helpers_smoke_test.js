@@ -10,10 +10,16 @@ const source = fs.readFileSync(path.join(__dirname, '../h5/public/js/menu_price.
 const context = {
     window: {},
     URLSearchParams,
+    AbortController,
+    setTimeout,
+    clearTimeout,
     console,
     state: { pricing: { channel_sheet: { view: 'result' } } }
 };
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../h5/public/js/ui/pricing_feature_state.js'), 'utf8'), context, {
+    filename: path.join(__dirname, '../h5/public/js/ui/pricing_feature_state.js')
+});
 vm.runInContext(source, context, { filename: path.join(__dirname, '../h5/public/js/menu_price.js') });
 const helpers = context.window.__pricingLadderTest;
 
@@ -256,8 +262,9 @@ async function testCountModeSettings() {
     const helpSummary = { textContent: '' };
     const helpDescription = { textContent: '' };
     const status = { textContent: '' };
+    const countStatus = { textContent: '', dataset: {} };
     const toggle = { checked: false, disabled: false };
-    const nodes = { pricingCountMode: select, pricingWindowText: windowText, pricingWindowHelpSummary: helpSummary, pricingWindowHelpDescription: helpDescription };
+    const nodes = { pricingCountMode: select, pricingCountStatus: countStatus, pricingWindowText: windowText, pricingWindowHelpSummary: helpSummary, pricingWindowHelpDescription: helpDescription };
     context.document.getElementById = id => nodes[id] || null;
     context.els.pricingFeatureStatus = status;
     context.els.pricingFeatureToggle = toggle;
@@ -270,8 +277,8 @@ async function testCountModeSettings() {
     let releaseSave;
     context.showToast = text => toasts.push(text);
     context.request = async (url, options) => {
-        requests.push({ url, body: options && JSON.parse(options.body) });
-        if (options) {
+        requests.push({ url, body: options && options.method === 'POST' ? JSON.parse(options.body) : undefined });
+        if (options && options.method === 'POST') {
             await new Promise(resolve => { releaseSave = resolve; });
             feature = { ...feature, ...JSON.parse(options.body), reconcile_required: true, version: feature.version + 1 };
             return { feature };
@@ -285,7 +292,8 @@ async function testCountModeSettings() {
     assert.strictEqual(select.disabled, true);
     assert.strictEqual(toggle.disabled, true);
     assert.strictEqual(select.value, 'business_day');
-    assert.strictEqual(status.textContent, '保存中...');
+    assert.strictEqual(status.textContent, '已关闭');
+    assert.strictEqual(countStatus.textContent, '待生效');
     await context.updatePricingCountMode('rolling_24h');
     assert.strictEqual(requests.length, 1);
     releaseSave();
@@ -295,6 +303,7 @@ async function testCountModeSettings() {
     assert.strictEqual(context.state.pricing.count_mode, 'business_day');
     assert.strictEqual(select.disabled, false);
     assert.strictEqual(toggle.checked, false);
+    assert.strictEqual(countStatus.textContent, '待生效');
     assert.strictEqual(windowText.textContent, '10/16 06:00—10/16 14:00（北京时间）');
     assert.strictEqual(windowText.hidden, false);
     assert.strictEqual(helpSummary.textContent, '档位按每日06:00切日有效订单数计算：');
@@ -304,19 +313,20 @@ async function testCountModeSettings() {
     await context.updatePricingCountMode('business_day');
     assert.strictEqual(requests.length, 2);
 
-    context.request = async () => { throw new Error('配置已更新，请刷新后重试'); };
+    context.request = async () => { throw Object.assign(new Error('配置已更新，请刷新后重试'), { status: 409, responseReceived: true }); };
     await context.updatePricingCountMode('rolling_24h');
     assert.strictEqual(select.value, 'business_day');
     assert.strictEqual(select.disabled, false);
     assert.strictEqual(context.state.pricing.feature.version, 4);
     assert.strictEqual(toasts.at(-1), '配置已更新，请刷新后重试');
+    assert.strictEqual(countStatus.textContent, '保存失败');
     context.window.confirm = () => false;
     await context.updatePricingFeature(true);
     assert.strictEqual(toggle.checked, false);
 
     context.window.confirm = () => true;
     context.request = async (url, options) => {
-        if (options) {
+        if (options && options.method === 'POST') {
             const body = JSON.parse(options.body);
             assert.strictEqual(body.count_mode, 'business_day');
             assert.strictEqual(body.expected_version, 4);
@@ -326,12 +336,13 @@ async function testCountModeSettings() {
         return { list, feature, count_mode: 'business_day' };
     };
     await context.updatePricingFeature(true);
-    assert.strictEqual(status.textContent, '待重算');
+    assert.strictEqual(status.textContent, '已开启');
+    assert.strictEqual(countStatus.textContent, '待生效');
     assert.strictEqual(select.value, 'business_day');
     assert.strictEqual(toggle.checked, true);
     assert(toasts.at(-1).includes('已开启'));
     context.request = async (url, options) => {
-        if (options) {
+        if (options && options.method === 'POST') {
             feature = { ...feature, count_mode: 'rolling_24h', version: 6 };
             return { feature };
         }

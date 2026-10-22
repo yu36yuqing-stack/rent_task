@@ -21,6 +21,8 @@ const tests = [
     'price_publish_service_smoke_test.js',
     'h5_price_ladder_smoke_test.js',
     'pricing_ladder_frontend_helpers_smoke_test.js',
+    'pricing_count_mode_settings_smoke_test.js',
+    'pricing_request_error_metadata_smoke_test.js',
     'schema_migration_smoke_test.js',
     'order_command_service_smoke_test.js',
     'order_query_service_smoke_test.js',

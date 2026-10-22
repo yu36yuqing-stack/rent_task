@@ -624,24 +624,8 @@
       return `<span class="chip ${cls}"${title}>${txt}</span>`;
     }
 
-    function buildPurchaseBriefHtml(item) {
-      const p = Number(item && item.purchase_price);
-      const d = String(item && item.purchase_date || '').slice(0, 10);
-      const totalCost = Number(item && item.total_cost_amount || 0);
-      if ((!Number.isFinite(p) || p <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(d)) && (!Number.isFinite(totalCost) || totalCost <= 0)) return '';
-      const parts = [];
-      if (Number.isFinite(p) && p > 0 && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
-        parts.push(`<span class="purchase-brief-line">采购价 ¥${p.toFixed(2)}</span>`);
-        parts.push(`<span class="purchase-brief-line">采购日期 ${d}</span>`);
-      }
-      if (Number.isFinite(totalCost) && totalCost > 0 && (!Number.isFinite(p) || p <= 0 || Math.abs(totalCost - p) >= 0.01)) {
-        parts.push(`<span class="purchase-brief-line">总成本 ¥${totalCost.toFixed(2)}</span>`);
-      }
-      return `
-        <div class="purchase-brief">
-          ${parts.join('')}
-        </div>
-      `;
+    function buildPurchaseBriefHtml(item, soldView) {
+      return window.ProductIncomeSummary.render(item, { soldView });
     }
 
     function parseDateTimeText(v) {
@@ -1958,7 +1942,7 @@
                   <div class="account">账号：${item.game_account}</div>
                   ${soldView ? '' : `<button class="copy-btn" data-copy="${item.game_account}">复制</button>`}
                 </div>
-                ${buildPurchaseBriefHtml(item)}
+                ${buildPurchaseBriefHtml(item, soldView)}
                 ${soldView ? `<p class="square-line">售出价：¥${Number(item.sold_price || 0).toFixed(2)}</p><p class="square-line">生命周期总收益：¥${Number(item.lifecycle_profit_amount || 0).toFixed(2)}</p>` : `<p class="square-line">${orderCountLabelByMode()}：${item.today_paid_count}</p>`}
                 ${soldView ? '' : buildRentCountdownHtml(item)}
               </div>

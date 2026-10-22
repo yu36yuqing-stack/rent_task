@@ -37,6 +37,7 @@ const {
     listOrdersForUser
 } = require('../order/service/order_query_service');
 const { listOpenProductSyncAnomaliesByUser } = require('../database/product_sync_anomaly_db');
+const { getProductIncomeSummaries } = require('../stats/product_income_service');
 const {
     initUserSessionDb,
     createRefreshSession,
@@ -934,11 +935,18 @@ async function handleProducts(req, res, urlObj) {
     const total = sourceList.length;
     const offset = (page - 1) * pageSize;
     const pageList = sourceList.slice(offset, offset + pageSize);
-    const priceSummaries = await getProductChannelPriceSummaries(user.id, pageList.map((item) =>
-        accountRowMap.get(keyOfGameAccount(item.game_id, item.game_account))
-    ));
+    const [priceSummaries, incomeSummaries] = await Promise.all([
+        getProductChannelPriceSummaries(user.id, pageList.map((item) =>
+            accountRowMap.get(keyOfGameAccount(item.game_id, item.game_account))
+        )),
+        assetStatus === 'sold' ? Promise.resolve({}) : getProductIncomeSummaries(user.id, pageList)
+    ]);
     for (const item of pageList) {
         item.price_ladder = priceSummaries[keyOfGameAccount(item.game_id, item.game_account)] || {};
+        if (assetStatus !== 'sold') {
+            item.rental_income = incomeSummaries[keyOfGameAccount(item.game_id, item.game_account)]
+                || { amount: null, status: 'unavailable' };
+        }
     }
     const list = pageList;
 

@@ -1064,12 +1064,14 @@
     }
 
     async function request(path, options = {}, triedRefresh = false) {
-      beginGlobalRequestLoading();
+      const foreground = options.background !== true;
+      if (foreground) beginGlobalRequestLoading();
       try {
         const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
         if (state.token) headers.Authorization = `Bearer ${state.token}`;
         const fullPath = `${API_BASE}${path}`;
         const fetchOptions = Object.assign({}, options, { headers });
+        delete fetchOptions.background;
         const contentType = String(headers['Content-Type'] || headers['content-type'] || '').toLowerCase();
         if (contentType.includes('application/json')
           && fetchOptions.body
@@ -1092,6 +1094,7 @@
           const retryHeaders = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
           if (state.token) retryHeaders.Authorization = `Bearer ${state.token}`;
           const retryOptions = Object.assign({}, options, { headers: retryHeaders });
+          delete retryOptions.background;
           const retryContentType = String(retryHeaders['Content-Type'] || retryHeaders['content-type'] || '').toLowerCase();
           if (retryContentType.includes('application/json')
             && retryOptions.body
@@ -1106,11 +1109,13 @@
         }
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.ok === false) {
-          throw new Error(data.message || `请求失败(${res.status})`);
+          const error = new Error(data.message || `请求失败(${res.status})`);
+          error.status = res.status;
+          throw error;
         }
         return data;
       } finally {
-        await endGlobalRequestLoading();
+        if (foreground) await endGlobalRequestLoading();
       }
     }
 

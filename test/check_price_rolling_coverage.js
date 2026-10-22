@@ -19,13 +19,16 @@ const files = [
     'price/price_ladder_reconcile_service.js',
     'price/price_ladder_service.js',
     'price/price_ladder_count_service.js',
+    'h5/public/js/ui/pricing_feature_state.js',
     'h5/public/js/menu_price.js',
+    'h5/public/js/app_core.js',
     'h5/local_h5_server.js'
 ];
 const core = new Set([
     'common/price_ladder_count_mode.js', 'database/price_ladder_feature_config_db.js',
     'database/migrations/20261016_020_price_ladder_count_mode.js', 'price/price_ladder_count_service.js',
-    'price/price_ladder_reconcile_service.js', 'price/price_ladder_service.js'
+    'price/price_ladder_reconcile_service.js', 'price/price_ladder_service.js',
+    'h5/public/js/ui/pricing_feature_state.js'
 ]);
 const results = files.map(file => {
     const diff = spawnSync('git', ['diff', 'HEAD', '--unified=0', '--', file], { cwd: root, encoding: 'utf8' });
@@ -47,6 +50,7 @@ const results = files.map(file => {
     const result = {
         file, changed_total: executable.length, changed_covered: executable.length - missed.length,
         changed_percent: executable.length ? (executable.length - missed.length) * 100 / executable.length : 100,
+        coverage_scope: file === 'h5/public/js/app_core.js' ? 'request function only' : 'whole file',
         missed, lines: summary.lines.pct, branches: summary.branches.pct, functions: summary.functions.pct
     };
     if (result.changed_percent < 90 || (core.has(file) && result.lines < 90)) process.exitCode = 1;
@@ -56,5 +60,5 @@ const total = results.reduce((sum, row) => sum + row.changed_total, 0);
 const covered = results.reduce((sum, row) => sum + row.changed_covered, 0);
 const report = { baseline: 'HEAD', thresholds: { each_changed_lines: 90, each_core_file_lines: 90 }, changed_total: total, changed_covered: covered, changed_percent: total ? covered * 100 / total : 100, files: results };
 fs.writeFileSync(path.join(directory, 'changed-lines.json'), JSON.stringify(report, null, 2) + '\n');
-console.table(results.map(row => ({ file: row.file, changed: `${row.changed_covered}/${row.changed_total}`, lines: row.lines, branches: row.branches, functions: row.functions, missed: row.missed.join(',') })));
+console.table(results.map(row => ({ file: row.file, scope: row.coverage_scope, changed: `${row.changed_covered}/${row.changed_total}`, lines: row.lines, branches: row.branches, functions: row.functions, missed: row.missed.join(',') })));
 console.log(`Changed executable lines: ${covered}/${total} = ${report.changed_percent.toFixed(2)}%`);

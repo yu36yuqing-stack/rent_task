@@ -42,6 +42,10 @@ async function assertPricingHeaderLayout(page) {
         const select = rect('#pricingCountMode');
         const track = rect('.pricing-settings-row .feature-switch-track');
         const label = rect('label[for="pricingCountMode"]');
+        const labelText = rect('label[for="pricingCountMode"] > span');
+        const countStatusNode = document.getElementById('pricingCountStatus');
+        const countStatus = countStatusNode.getBoundingClientRect();
+        const countField = rect('.pricing-count-field');
         const title = rect('.pricing-settings-row .feature-switch-copy strong');
         const status = rect('#pricingFeatureStatus');
         const settings = rect('.pricing-settings-row');
@@ -55,6 +59,17 @@ async function assertPricingHeaderLayout(page) {
             selectRight: select.right,
             trackRight: track.right,
             statusHeight: status.height,
+            countStatus: countStatusNode.textContent.trim(),
+            countStatusState: countStatusNode.dataset.state,
+            countStatusHidden: countStatusNode.hidden,
+            countStatusRight: countStatus.right,
+            countFieldRight: countField.right,
+            countStatusOffset: Math.abs(countStatus.top - labelText.top),
+            countStatusGap: countStatus.left - labelText.right,
+            countStatusRole: countStatusNode.getAttribute('role'),
+            countStatusLive: countStatusNode.getAttribute('aria-live'),
+            countStatusAtomic: countStatusNode.getAttribute('aria-atomic'),
+            countStatusDescription: document.getElementById('pricingCountMode').getAttribute('aria-describedby'),
             settingsWidth: settings.width,
             headWidth: head.width,
             appearance: getComputedStyle(document.getElementById('pricingCountMode')).appearance,
@@ -67,8 +82,46 @@ async function assertPricingHeaderLayout(page) {
         || layout.selectWidth > 192 || layout.selectRight > layout.width || layout.trackRight > layout.width
         || layout.statusHeight > 36 || Math.abs(layout.settingsWidth - layout.headWidth) > 5
         || layout.appearance !== 'none' || layout.arrowInset !== '14px'
+        || layout.countStatusRole !== 'status' || layout.countStatusLive !== 'polite'
+        || layout.countStatusAtomic !== 'true' || layout.countStatusDescription !== 'pricingCountStatus'
+        || (!layout.countStatusHidden && (!['待生效', '已生效', '保存失败'].includes(layout.countStatus)
+            || layout.countStatusRight > layout.countFieldRight + 1 || layout.countStatusOffset > 3
+            || layout.countStatusGap < 4))
         || layout.duplicateWindow || !layout.rangeInHelp) {
         throw new Error(`阶梯配置头部未对齐或溢出: ${JSON.stringify(layout)}`);
+    }
+}
+
+async function assertPricingHeaderStatusVariants(page) {
+    // Exercise the visual contract independently of save/reconcile behavior, covered by state tests.
+    const previous = await page.$eval('#pricingCountStatus', node => ({
+        text: node.textContent, state: node.dataset.state, hidden: node.hidden
+    }));
+    try {
+        for (const [state, text, token] of [
+            ['pending', '待生效', '--warn'],
+            ['effective', '已生效', '--ok'],
+            ['failed', '保存失败', '--danger']
+        ]) {
+            const colorMatches = await page.$eval('#pricingCountStatus', (node, variant) => {
+                node.textContent = variant.text;
+                node.dataset.state = variant.state;
+                node.hidden = false;
+                const style = getComputedStyle(node);
+                const reference = document.createElement('span').style;
+                reference.color = style.getPropertyValue(variant.token).trim();
+                return style.color === reference.color;
+            }, { state, text, token });
+            if (!colorMatches) throw new Error(`周期状态未复用语义颜色: ${state}`);
+            await assertPricingHeaderLayout(page);
+        }
+    } finally {
+        await page.$eval('#pricingCountStatus', (node, saved) => {
+            node.textContent = saved.text;
+            node.hidden = saved.hidden;
+            if (saved.state === undefined) delete node.dataset.state;
+            else node.dataset.state = saved.state;
+        }, previous);
     }
 }
 
@@ -208,6 +261,15 @@ async function main() {
         await page.waitForFunction(() => document.getElementById('pricingListContainer').textContent.includes('暂无可配置账号'));
         await assertPricingHeaderLayout(page);
         await page.screenshot({ path: path.join(outputDir, 'pricing-header-empty-desktop.png'), fullPage: true });
+        for (const game of ['WZRY', '和平精英', 'CFM', 'CSGO']) {
+            await page.click(`[data-pricing-game="${game}"]`);
+            if (game === '和平精英') await page.waitForSelector(targetCard);
+            else await page.waitForFunction(() => document.getElementById('pricingListContainer').textContent.includes('暂无可配置账号'));
+            for (const width of [320, 360, 390, 1365]) {
+                await page.setViewport({ width, height: 900, deviceScaleFactor: 1 });
+                await assertPricingHeaderStatusVariants(page);
+            }
+        }
         await page.click('[data-pricing-game="和平精英"]');
         await page.waitForSelector(targetCard);
         if (!(await page.$eval(targetCard, node => node.textContent)).includes('近24h 0单')) {
@@ -216,6 +278,7 @@ async function main() {
         await page.select('#pricingCountMode', 'business_day');
         await page.waitForFunction(() => document.getElementById('pricingCountMode').value === 'business_day'
             && !document.getElementById('pricingCountMode').disabled
+            && document.getElementById('pricingCountStatus').textContent === '待生效'
             && document.querySelector('[data-pricing-account-card="hpjy-target"]').textContent.includes('本周期 0单'));
         await page.click('#pricingWindowHelpBtn');
         await page.waitForSelector('#pricingWindowHelpSheet:not(.hidden)');
@@ -553,9 +616,21 @@ async function main() {
         });
         console.log(JSON.stringify({ ok: true, savedState, desktopChannelState, uuzuhaoDesktop, ratioDesktop, layout, channelLayout, uuzuhaoMobile, ratioMobile, outputDir }));
     } finally {
-        if (browser) await browser.close();
-        await new Promise((resolve) => server.close(resolve));
-        stopProdRiskTaskWorker();
+        const chromeProcess = browser && browser.process();
+        try {
+            if (browser) await browser.close();
+        } finally {
+            // Crashpad may inherit Chrome's stderr after the main process exits.
+            // Release our test-owned pipes so it cannot keep this test alive.
+            for (const stream of chromeProcess && chromeProcess.stdio || []) {
+                if (stream && typeof stream.destroy === 'function') stream.destroy();
+            }
+            try {
+                await new Promise((resolve) => server.close(resolve));
+            } finally {
+                stopProdRiskTaskWorker();
+            }
+        }
     }
 }
 

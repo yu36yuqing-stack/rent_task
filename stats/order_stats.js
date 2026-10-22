@@ -28,6 +28,7 @@ const {
 const { resolveDisplayNameByRow } = require('../product/display_name');
 const { listAccountCostRecordsByUserAndAccount } = require('../database/account_cost_record_db');
 const { canonicalGameId } = require('../common/game_profile');
+const { buildHistoricalIncomeTotals } = require('./historical_income');
 
 const STATS_JOB_KEY_ALL_USERS = 'order_stats_daily_all_users';
 const DEFAULT_TARGET_HOUR = 2;
@@ -500,28 +501,8 @@ async function buildHistoricalTotalMapByUser(userId, gameName, targetDate, confi
     if (accountSet.size === 0) return new Map();
 
     const snapshotRows = await listWeeklySnapshotsByUser(uid, g, target);
-    const latestSnapshotByAccount = new Map();
-    for (const row of snapshotRows) {
-        const account = String(row.game_account || '').trim();
-        if (!accountSet.has(account)) continue;
-        if (!latestSnapshotByAccount.has(account)) latestSnapshotByAccount.set(account, row);
-    }
     const dailyRows = await listDailyIncomeRowsForAccountByGame(uid, g, target);
-    const totalMap = new Map();
-    for (const account of accountSet) {
-        const base = latestSnapshotByAccount.get(account);
-        totalMap.set(account, toMoney2(base ? base.total_rec_amount : 0));
-    }
-    for (const row of dailyRows) {
-        const account = String(row.game_account || '').trim();
-        if (!accountSet.has(account)) continue;
-        const statDate = String(row.stat_date || '').slice(0, 10);
-        const base = latestSnapshotByAccount.get(account);
-        const snapshotDate = String(base && base.snapshot_date || '').slice(0, 10);
-        if (snapshotDate && compareDateText(statDate, snapshotDate) <= 0) continue;
-        totalMap.set(account, toMoney2(Number(totalMap.get(account) || 0) + Number(row.amount_rec_sum || 0)));
-    }
-    return totalMap;
+    return buildHistoricalIncomeTotals(accountSet, snapshotRows, dailyRows);
 }
 
 async function refreshOrderStatsDailyByUser(userId, options = {}) {

@@ -75,7 +75,13 @@ function pricingCountWindowRange(start, end) {
 }
 
 function ensurePricingLadderState() {
-  const pricing = state.pricing || (state.pricing = {});
+  let pricing = state.pricing || (state.pricing = {});
+  const ownerId = String(state.user && state.user.id || '');
+  if (pricing.feature_owner_id !== undefined && pricing.feature_owner_id !== ownerId) {
+    if (pricing.feature_poll_timer) clearTimeout(pricing.feature_poll_timer);
+    pricing = state.pricing = {};
+  }
+  pricing.feature_owner_id = ownerId;
   if (!pricing.game_name) pricing.game_name = 'WZRY';
   if (!Array.isArray(pricing.list)) pricing.list = [];
   if (typeof pricing.query !== 'string') pricing.query = '';
@@ -88,6 +94,9 @@ function ensurePricingLadderState() {
   pricing.count_mode = normalizePricingCountMode(pricing.count_mode || pricing.feature.count_mode);
   pricing.feature.count_mode = normalizePricingCountMode(pricing.feature.count_mode || pricing.count_mode);
   if (typeof pricing.feature_saving !== 'boolean') pricing.feature_saving = false;
+  if (typeof pricing.feature_confirmed !== 'boolean') pricing.feature_confirmed = false;
+  if (typeof pricing.feature_save_error !== 'boolean') pricing.feature_save_error = false;
+  if (typeof pricing.data_stale !== 'boolean') pricing.data_stale = false;
   if (!pricing.channel_sheet || typeof pricing.channel_sheet !== 'object') {
     pricing.channel_sheet = {
       account: '',
@@ -633,24 +642,45 @@ function buildPricingRequestQuery() {
   return params.toString();
 }
 
-function applyPricingPayload(out) {
+function applyPricingPayload(out, options = {}) {
   const pricing = ensurePricingLadderState();
-  pricing.game_name = normalizePricingGameName(out && out.game_name || pricing.game_name || 'WZRY');
+  const game = normalizePricingGameName(out && out.game_name || pricing.game_name);
+  if (options.game_name && game !== options.game_name) return false;
+  const incoming = window.PricingFeatureState.read(out && out.feature);
+  const previous = pricing.feature_confirmed ? pricing.feature : null;
+  if (incoming) {
+    const merged = window.PricingFeatureState.merge(previous, incoming);
+    if (!merged.accepted || (out.count_mode && out.count_mode !== incoming.count_mode)) return false;
+    const intent = pricing.feature_uncertain;
+    if (pricing.feature_intent && incoming.version <= pricing.feature_intent.expected_version) return false;
+    if (intent && incoming.version <= intent.expected_version) return false;
+    pricing.feature = merged.feature;
+    pricing.feature_confirmed = true;
+    if (intent) {
+      pricing.feature_save_error = intent.mode_changed && !window.PricingFeatureState.confirms(incoming, intent);
+      pricing.feature_uncertain = null;
+      delete pricing.pending_count_mode;
+    }
+    if (previous && incoming.version > previous.version && !intent) pricing.feature_save_error = false;
+    if (previous && merged.changed && !options.from_save && !intent) {
+      showToast('设置已在其他页面更新，已同步最新配置');
+    }
+  } else if (pricing.feature_confirmed || pricing.feature_uncertain) {
+    return false;
+  } else if (out && out.feature && typeof out.feature.enabled === 'boolean') {
+    // An older service can still tell us the switch state, but cannot confirm the period setting.
+    pricing.feature.enabled = out.feature.enabled;
+  }
+  pricing.game_name = game;
   pricing.list = Array.isArray(out && out.list) ? out.list : [];
-  pricing.count_mode = normalizePricingCountMode(out && (out.count_mode || out.feature && out.feature.count_mode));
+  pricing.count_mode = incoming ? incoming.count_mode : normalizePricingCountMode(out && out.count_mode);
   pricing.count_window = String(out && out.count_window || pricingCountWindowLabel(pricing.count_mode));
   pricing.window_start = String(out && out.window_start || '');
   pricing.window_end = String(out && out.window_end || '');
-  pricing.feature = out && out.feature && typeof out.feature === 'object'
-    ? {
-        enabled: out.feature.enabled === true,
-        count_mode: normalizePricingCountMode(out.feature.count_mode || pricing.count_mode),
-        reconcile_required: out.feature.reconcile_required === true,
-        version: Number(out.feature.version || 0)
-      }
-    : { enabled: false, count_mode: pricing.count_mode, reconcile_required: false, version: 0 };
+  pricing.data_stale = false;
   pricing.error = '';
   pricing.loaded_once = true;
+  return true;
 }
 
 function renderPricingGameTabs() {
@@ -673,6 +703,7 @@ function renderPricingGameTabs() {
       pricing.drafts = {};
       pricing.query = '';
       pricing.loaded_once = false;
+      pricing.list = [];
       void loadPricingView();
     };
   });
@@ -693,6 +724,7 @@ function enterPricingEdit(account) {
   const pricing = ensurePricingLadderState();
   const item = pricingItemByAccount(account);
   if (!item) return;
+  pricing.edit_revision = Number(pricing.edit_revision || 0) + 1;
   pricing.editing[account] = true;
   pricing.drafts[account] = normalizePricingDraft(item);
   renderPricingView();
@@ -738,6 +770,7 @@ async function savePricingAccount(account, card) {
     return;
   }
   if (clearing && !window.confirm('确认清空该账号的阶梯价格配置？渠道当前价格不会改变。')) return;
+  pricing.edit_revision = Number(pricing.edit_revision || 0) + 1;
   pricing.saving[account] = true;
   renderPricingView();
   try {
@@ -823,6 +856,10 @@ function renderPricingList() {
     els.pricingListContainer.innerHTML = `<div class="panel pricing-empty-card pricing-error">${escapePricingHtml(pricing.error)}</div>`;
     return;
   }
+  if (pricing.data_stale) {
+    els.pricingListContainer.innerHTML = '<div class="panel pricing-empty-card">订单数据待更新，请稍后刷新。</div>';
+    return;
+  }
   if (pricing.list.length === 0) {
     els.pricingListContainer.innerHTML = '<div class="panel pricing-empty-card">当前游戏暂无可配置账号。</div>';
     return;
@@ -892,73 +929,155 @@ function renderPricingList() {
 
 async function updatePricingFeature(enabled) {
   const pricing = ensurePricingLadderState();
-  if (pricing.feature_saving || pricing.feature.enabled === enabled) return;
+  if (pricing.feature_saving || (pricing.feature.enabled === enabled && !pricing.feature_uncertain)) return;
   if (enabled && !window.confirm('开启后，下一个订单同步周期会校准所有已配置账号。确认开启？')) {
     renderPricingFeatureState();
     return;
   }
-  await savePricingFeatureSettings(enabled, pricing.feature.count_mode, false);
+  await savePricingFeatureSettings(enabled, pricing.pending_count_mode || pricing.feature.count_mode, false);
 }
 
 async function updatePricingCountMode(value) {
   const pricing = ensurePricingLadderState();
   const mode = normalizePricingCountMode(value);
-  if (pricing.feature_saving || pricing.feature.count_mode === mode) return;
+  if (pricing.feature_saving || (pricing.feature.count_mode === mode && !pricing.feature_uncertain)) return;
   await savePricingFeatureSettings(pricing.feature.enabled, mode, true);
+}
+
+function isCurrentPricingOwner(pricing, userId) {
+  return state.pricing === pricing && String(state.user && state.user.id || '') === userId;
+}
+
+function pricingHasActiveEdits(pricing) {
+  return Object.values(pricing.editing).some(Boolean) || Object.values(pricing.saving).some(Boolean);
+}
+
+function schedulePricingFeatureRefresh() {
+  const pricing = ensurePricingLadderState();
+  if (pricing.feature_poll_timer) clearTimeout(pricing.feature_poll_timer);
+  pricing.feature_poll_timer = null;
+  const userId = String(state.user && state.user.id || '');
+  const needsCheck = () => isCurrentPricingOwner(pricing, userId) && userId
+    && ['pricing_uhaozu', 'pricing_uuzuhao', 'pricing_zuhaowang'].includes(state.currentMenu)
+    && document.visibilityState !== 'hidden'
+    && !pricing.feature_saving && !pricing.feature_save_error
+    && !pricingHasActiveEdits(pricing)
+    && (pricing.feature_uncertain || (pricing.feature.enabled && pricing.feature.reconcile_required));
+  // Only revisit pending settings on the active page, for at most twenty checks.
+  if (!needsCheck() || Number(pricing.feature_poll_attempts || 0) >= 20) return;
+  pricing.feature_poll_timer = setTimeout(() => {
+    pricing.feature_poll_timer = null;
+    if (!needsCheck()) return;
+    if (pricing.loading) return schedulePricingFeatureRefresh();
+    pricing.feature_poll_attempts = Number(pricing.feature_poll_attempts || 0) + 1;
+    void loadPricingView({ poll: true });
+  }, 15000);
+  if (pricing.feature_poll_timer && typeof pricing.feature_poll_timer.unref === 'function') pricing.feature_poll_timer.unref();
+}
+
+function pricingFeatureSaveMessage(intent) {
+  return intent.mode_changed
+    ? (intent.enabled ? '计数周期已保存，下一轮订单同步成功后重新计算档位' : '计数周期已保存，开启自动调价后生效')
+    : (intent.enabled ? '自动阶梯调价已开启' : '自动阶梯调价已关闭');
 }
 
 async function savePricingFeatureSettings(enabled, countMode, modeChanged) {
   const pricing = ensurePricingLadderState();
+  const userId = String(state.user && state.user.id || '');
+  const intent = {
+    enabled, count_mode: countMode, expected_version: Number(pricing.feature.version || 0), mode_changed: modeChanged
+  };
+  pricing.feature_request_revision = Number(pricing.feature_request_revision || 0) + 1;
+  pricing.feature_poll_attempts = 0;
   pricing.feature_saving = true;
+  pricing.feature_save_error = false;
+  pricing.feature_intent = intent;
+  pricing.feature_uncertain = null;
   pricing.pending_count_mode = countMode;
+  pricing.pending_enabled = enabled;
+  pricing.data_stale = countMode !== pricing.count_mode;
   renderPricingFeatureState();
   try {
-    const out = await request('/api/pricing/ladder/feature', {
+    const out = await window.PricingFeatureState.withTimeout(request, '/api/pricing/ladder/feature', {
       method: 'POST',
-      body: JSON.stringify({
-        enabled,
-        count_mode: countMode,
-        expected_version: Number(pricing.feature.version || 0)
-      })
+      body: JSON.stringify({ enabled, count_mode: countMode, expected_version: intent.expected_version })
     });
-    const saved = out && out.feature ? out.feature : {};
-    pricing.feature = {
-      enabled: saved.enabled === true,
-      count_mode: normalizePricingCountMode(saved.count_mode),
-      reconcile_required: saved.reconcile_required === true,
-      version: Number(saved.version || 0)
-    };
-    pricing.count_mode = pricing.feature.count_mode;
-    pricing.count_window = pricingCountWindowLabel(pricing.count_mode);
-    await loadPricingView();
-    showToast(modeChanged
-      ? (pricing.feature.enabled ? '计数周期已保存，下一轮订单同步成功后重新计算档位' : '计数周期已保存，开启自动调价后生效')
-      : (pricing.feature.enabled ? '自动阶梯调价已开启' : '自动阶梯调价已关闭'));
+    if (!isCurrentPricingOwner(pricing, userId)) return;
+    if (!window.PricingFeatureState.confirms(out && out.feature, intent)) {
+      throw new Error('服务端未确认本次设置，请刷新后重试');
+    }
+    const merged = window.PricingFeatureState.merge(pricing.feature_confirmed ? pricing.feature : null, out.feature);
+    if (merged.accepted) pricing.feature = merged.feature;
+    pricing.feature_confirmed = true;
+    pricing.feature_intent = null;
+    delete pricing.pending_count_mode;
+    pricing.data_stale = pricing.count_mode !== pricing.feature.count_mode;
+    const refreshed = await loadPricingView({ from_save: true });
+    if (!isCurrentPricingOwner(pricing, userId)) return;
+    if (!window.PricingFeatureState.confirms(pricing.feature, intent)) {
+      showToast('设置已在其他页面更新，已同步最新配置');
+    } else if (refreshed.ok) showToast(pricingFeatureSaveMessage(intent));
+    else if (refreshed.reason !== 'superseded') showToast('设置已保存，数据刷新失败');
   } catch (e) {
-    showToast(e.message || (modeChanged ? '计数周期保存失败' : '自动阶梯调价开关保存失败'));
+    if (!isCurrentPricingOwner(pricing, userId)) return;
+    if (window.PricingFeatureState.isRejected(e) && Number(e.status) !== 409) {
+      pricing.feature_save_error = modeChanged;
+      pricing.feature_intent = null;
+      pricing.data_stale = pricing.count_mode !== pricing.feature.count_mode;
+      showToast(e.message || '设置保存失败，请重试');
+    } else {
+      // A lost response does not tell us whether the write committed. Confirm by reading it back.
+      pricing.feature_uncertain = intent;
+      pricing.feature_intent = null;
+      const checked = await loadPricingView({ from_save: true });
+      if (!isCurrentPricingOwner(pricing, userId)) return;
+      if (checked.ok && window.PricingFeatureState.confirms(pricing.feature, intent)) {
+        showToast(pricingFeatureSaveMessage(intent));
+      } else if (checked.ok || window.PricingFeatureState.isRejected(e)) {
+        pricing.feature_save_error = modeChanged;
+        pricing.feature_uncertain = null;
+        pricing.data_stale = pricing.count_mode !== pricing.feature.count_mode;
+        showToast(e.message || '设置保存失败，请重试');
+      } else {
+        showToast('暂未确认保存结果，请稍后刷新或重试');
+      }
+    }
   } finally {
     pricing.feature_saving = false;
-    delete pricing.pending_count_mode;
-    renderPricingView();
+    pricing.feature_intent = null;
+    delete pricing.pending_enabled;
+    if (!pricing.feature_uncertain) delete pricing.pending_count_mode;
+    if (isCurrentPricingOwner(pricing, userId)) {
+      renderPricingView();
+      schedulePricingFeatureRefresh();
+    }
   }
 }
 
 function renderPricingFeatureState() {
   const pricing = ensurePricingLadderState();
   if (els.pricingFeatureToggle) {
-    els.pricingFeatureToggle.checked = pricing.feature.enabled === true;
-    els.pricingFeatureToggle.disabled = pricing.feature_saving === true;
+    els.pricingFeatureToggle.checked = pricing.feature_saving ? pricing.pending_enabled : pricing.feature.enabled === true;
+    els.pricingFeatureToggle.disabled = pricing.feature_saving === true || !pricing.feature_confirmed;
     els.pricingFeatureToggle.onchange = () => void updatePricingFeature(Boolean(els.pricingFeatureToggle.checked));
   }
   if (els.pricingFeatureStatus) {
-    els.pricingFeatureStatus.textContent = pricing.feature_saving
-      ? '保存中...'
-      : (pricing.feature.enabled ? (pricing.feature.reconcile_required ? '待重算' : '已开启') : '已关闭');
+    els.pricingFeatureStatus.textContent = pricing.feature.enabled ? '已开启' : '已关闭';
+  }
+  const countStatus = document.getElementById('pricingCountStatus');
+  if (countStatus) {
+    const status = window.PricingFeatureState.status(pricing.feature, {
+      saving: pricing.feature_saving, uncertain: Boolean(pricing.feature_uncertain),
+      failed: pricing.feature_save_error, confirmed: pricing.feature_confirmed
+    });
+    countStatus.textContent = status.text;
+    countStatus.dataset.state = status.key;
+    countStatus.hidden = !pricing.feature_confirmed && !pricing.feature_saving && !pricing.feature_uncertain && !pricing.feature_save_error;
   }
   const countSelect = document.getElementById('pricingCountMode');
   if (countSelect) {
     countSelect.value = pricing.pending_count_mode || pricing.feature.count_mode;
-    countSelect.disabled = pricing.feature_saving === true;
+    countSelect.disabled = pricing.feature_saving === true || !pricing.feature_confirmed;
     countSelect.onchange = () => void updatePricingCountMode(countSelect.value);
   }
 }
@@ -979,7 +1098,7 @@ function renderPricingView() {
   renderPricingFeatureState();
   const windowText = document.getElementById('pricingWindowText');
   if (windowText) {
-    windowText.textContent = pricingCountWindowRange(pricing.window_start, pricing.window_end);
+    windowText.textContent = pricing.data_stale ? '' : pricingCountWindowRange(pricing.window_start, pricing.window_end);
     windowText.hidden = !windowText.textContent;
   }
   const helpSummary = document.getElementById('pricingWindowHelpSummary');
@@ -1007,25 +1126,49 @@ function renderPricingView() {
       : `共 ${pricing.list.length} 个账号`;
   }
   renderPricingList();
+  schedulePricingFeatureRefresh();
 }
 
-async function loadPricingView() {
+async function loadPricingView(options = {}) {
   const pricing = ensurePricingLadderState();
   if (state.currentMenu === 'pricing_ratios') {
     await loadPricingRatioSettings();
-    return;
+    return { ok: false, reason: 'superseded' };
   }
-  pricing.loading = true;
-  pricing.error = '';
-  renderPricingView();
-  try {
-    const out = await request(`/api/pricing/ladder?${buildPricingRequestQuery()}`);
-    applyPricingPayload(out);
-  } catch (e) {
-    pricing.error = String(e && e.message || '阶梯定价加载失败');
-  } finally {
-    pricing.loading = false;
+  const userId = String(state.user && state.user.id || '');
+  const game = pricing.game_name;
+  const revision = Number(pricing.feature_request_revision || 0);
+  const editRevision = Number(pricing.edit_revision || 0);
+  const requestId = pricing.list_request_id = Number(pricing.list_request_id || 0) + 1;
+  const active = () => isCurrentPricingOwner(pricing, userId)
+    && requestId === pricing.list_request_id && game === pricing.game_name;
+  if (!options.poll) {
+    pricing.feature_poll_attempts = 0;
+    pricing.loading = true;
+    pricing.error = '';
     renderPricingView();
+  }
+  try {
+    const out = await window.PricingFeatureState.withTimeout(request, `/api/pricing/ladder?${buildPricingRequestQuery()}`, { background: options.poll === true });
+    if (!active() || revision !== Number(pricing.feature_request_revision || 0)) return { ok: false, reason: 'superseded' };
+    if (options.poll && (pricingHasActiveEdits(pricing) || editRevision !== Number(pricing.edit_revision || 0))) {
+      return { ok: false, reason: 'superseded' };
+    }
+    if (!applyPricingPayload(out, { game_name: game, from_save: options.from_save })) {
+      if (!options.poll) pricing.error = '暂未获取到对应配置的订单数据，请稍后刷新';
+      return { ok: false, reason: 'stale' };
+    }
+    return { ok: true };
+  } catch (e) {
+    if (!active()) return { ok: false, reason: 'superseded' };
+    if (!options.poll) pricing.error = String(e && e.message || '阶梯定价加载失败');
+    return { ok: false, reason: 'error' };
+  } finally {
+    if (active()) {
+      pricing.loading = false;
+      if (!options.poll || (!pricingHasActiveEdits(pricing) && editRevision === Number(pricing.edit_revision || 0))) renderPricingView();
+      schedulePricingFeatureRefresh();
+    }
   }
 }
 
