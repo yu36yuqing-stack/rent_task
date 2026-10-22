@@ -2725,6 +2725,22 @@
       max-width: 154px;
     }
 
+    #listView .product-card[data-auth-required="true"] .product-card-role {
+      min-width: 0;
+      flex: 1;
+    }
+
+    #listView .product-card[data-auth-required="true"] .card-top-chips {
+      flex: 0 0 auto;
+      flex-wrap: wrap;
+      max-width: 60%;
+    }
+
+    #listView .product-card[data-auth-required="true"] .card-top-chips .chip {
+      flex-shrink: 0;
+      max-width: 100%;
+    }
+
     #listView .info-squares {
       margin-top: 6px;
       gap: 6px;

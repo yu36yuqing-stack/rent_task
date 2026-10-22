@@ -12,11 +12,14 @@
         const label = one && String(one.label || '').trim()
           ? String(one.label || '').trim()
           : (String(legacy[d.key] || '').trim() || (d.key === '5e' ? '未发布' : '未'));
-        const reason = one && String(one.reason || '').trim() ? String(one.reason || '').trim() : '';
-        const code = one && String(one.code || '').trim() ? String(one.code || '').trim() : '';
+        const authRequired = d.key === 'uuzuhao' && window.UuzuhaoAuthStatus?.isRequired(item);
+        const reason = authRequired ? window.UuzuhaoAuthStatus.message
+          : (one && String(one.reason || '').trim() ? String(one.reason || '').trim() : '');
+        const code = authRequired ? 'auth_abnormal'
+          : (one && String(one.code || '').trim() ? String(one.code || '').trim() : '');
         const shortReason = isDangerStatusCode(code) ? shortenDangerReason(reason) : '';
         const suffix = shortReason && shortReason !== label ? `·${shortReason}` : '';
-        const display = (code === 'auth_abnormal' && shortReason)
+        const display = authRequired ? '授权异常' : (code === 'auth_abnormal' && shortReason)
           ? shortReason
           : `${label}${suffix}`;
         const pricing = window.ChannelPriceSummary.formatSuffix(item && item.price_ladder && item.price_ladder[d.key]);
@@ -24,7 +27,8 @@
           key: d.key,
           text: `${d.name}: ${display}${pricing}`,
           code,
-          reason
+          reason,
+          auth_required: Boolean(authRequired)
         };
       });
     }
@@ -471,6 +475,9 @@
       const gameName = String(item && item.game_name || 'WZRY').trim() || 'WZRY';
       const identityKey = productIdentityKey(item);
       const prodGuardEnabled = item && item.prod_guard_enabled === undefined ? true : Boolean(item && item.prod_guard_enabled);
+      const needsAuth = window.UuzuhaoAuthStatus?.isRequired(item);
+      const queryUserId = Number(state.user && state.user.id || 0);
+      let authStateUpdated = false;
       if (!account) return;
       state.forbiddenLoadingMap[identityKey] = true;
       if (prodGuardEnabled) state.onlineLoadingMap[identityKey] = true;
@@ -478,23 +485,25 @@
       renderForbiddenPart(identityKey);
       try {
         const [onlineRet, forbiddenRet] = await Promise.allSettled([
-          prodGuardEnabled
+          (prodGuardEnabled || needsAuth)
             ? request('/api/products/online', {
               method: 'POST',
-              body: JSON.stringify({ game_account: account, game_name: gameName })
+              body: JSON.stringify({ game_account: account, game_id: gameId, game_name: gameName })
             })
             : Promise.resolve(null),
           request('/api/products/forbidden/query', {
             method: 'POST',
-            body: JSON.stringify({ game_account: account, game_name: gameName })
+            body: JSON.stringify({ game_account: account, game_id: gameId, game_name: gameName })
           })
         ]);
         const onlineRes = onlineRet.status === 'fulfilled' ? onlineRet.value : null;
         const forbiddenRes = forbiddenRet.status === 'fulfilled' ? forbiddenRet.value : null;
         const onlineErr = onlineRet.status === 'rejected' ? onlineRet.reason : null;
         const forbiddenErr = forbiddenRet.status === 'rejected' ? forbiddenRet.reason : null;
+        if (Number(state.user && state.user.id || 0) !== queryUserId) return;
         const hit = findProductItemByIdentity(gameId, account);
         if (hit) {
+          authStateUpdated = window.UuzuhaoAuthStatus?.applyState(hit, onlineRes || onlineErr) || false;
           if (prodGuardEnabled) {
             if (onlineErr) {
               state.onlineStatusMap[identityKey] = '查询失败';
@@ -533,12 +542,16 @@
           alert(failed.join('\n'));
         } else if (failed.length === 1) {
           showToast(failed[0]);
+        } else if (needsAuth && authStateUpdated && !window.UuzuhaoAuthStatus.isRequired(hit)) {
+          showToast('授权验证成功，已清除待授权标记');
         }
       } catch (e) {
         alert(e.message || '状态查询失败');
       } finally {
+        if (Number(state.user && state.user.id || 0) !== queryUserId) return;
         state.onlineLoadingMap[identityKey] = false;
         state.forbiddenLoadingMap[identityKey] = false;
+        if (authStateUpdated) renderList();
         renderOnlinePart(identityKey);
         renderForbiddenPart(identityKey);
         renderMoreOpsSheet();
@@ -596,6 +609,7 @@
       const [gid, acc] = key.split('::');
       const hit = findProductItemByIdentity(gid, acc);
       if (isCs2Product(hit)) return buildSteamGuardChipHtml(key);
+      if (window.UuzuhaoAuthStatus?.isRequired(hit)) return '';
       const mapText = String(state.onlineStatusMap[key] || '').trim();
       const rowText = String((hit && hit.online_tag) || '').trim();
       const onlineText = mapText || rowText;
@@ -1887,6 +1901,7 @@
           const soldView = state.currentMenu === 'products_sold';
           const node = document.createElement('div');
           node.className = 'order-card product-card';
+          node.dataset.authRequired = String(!soldView && Boolean(window.UuzuhaoAuthStatus?.isRequired(item)));
           const plat = platformBadges(item).map((x) => {
             const text = String((x && x.text) || '').trim();
             const code = String((x && x.code) || '').trim();
@@ -1898,6 +1913,9 @@
             const detailAttrs = x && x.key === '5e' && item.five_e_info
               ? ` data-op="five-e-detail" role="button" tabindex="0" title="点击查看5E渠道详情"`
               : title;
+            if (x.auth_required) {
+              return `<button type="button" class="plat plat-abnormal" data-op="uuzuhao-auth-detail">${escapeAttr(text)}</button>`;
+            }
             return `<span class="plat ${cls}"${detailAttrs}>${text}</span>`;
           }).join('');
           const account = String(item.game_account || '').trim();
@@ -1914,7 +1932,7 @@
             : {};
           const overallLabel = String(overall.label || '').trim();
           const anyNormalChannel = hasAnyNormalChannel(item);
-          const statusText = soldView
+          const originalStatusText = soldView
             ? `已售${item.sold_at ? ` · ${String(item.sold_at).slice(5, 10)}` : ''}`
             : item.blacklisted
             ? `${compactMainStatusReason(item.blacklist_reason || '无原因')}${blacklistTime ? ` · ${blacklistTime}` : ''}`
@@ -1923,7 +1941,12 @@
               : (overallLabel && overallLabel !== '上架' && overallLabel !== '下架' && overallLabel !== '租赁中' && overallLabel !== '未知'
               ? `${overallLabel}`
               : (item.mode_restricted ? '渠道受限' : '状态正常')));
-          const statusClass = statusText === '状态正常' ? '' : 'chip-black';
+          const authRequired = !soldView && window.UuzuhaoAuthStatus?.isRequired(item);
+          const extraAuthTag = authRequired && originalStatusText !== '状态正常';
+          const statusText = window.UuzuhaoAuthStatus
+            ? window.UuzuhaoAuthStatus.mainLabel(item, originalStatusText, soldView)
+            : originalStatusText;
+          const statusClass = authRequired && !extraAuthTag ? 'plat-abnormal' : (statusText === '状态正常' ? '' : 'chip-black');
           node.style.animationDelay = `${Math.min(idx * 35, 220)}ms`;
           node.innerHTML = `
             <div class="order-card-top product-card-top">
@@ -1934,6 +1957,7 @@
                 <span class="chip ${statusClass} status-main-chip" title="${escapeAttr(statusText)}">
                   ${statusText}
                 </span>
+                ${extraAuthTag ? '<span class="chip plat-abnormal">需重新授权</span>' : ''}
               </div>
             </div>
             <div class="info-squares">
@@ -1982,11 +2006,15 @@
           }
           node.addEventListener('click', (e) => {
             const target = e.target && typeof e.target.closest === 'function'
-              ? e.target.closest('[data-op="auth-revoke-detail"], [data-op="five-e-detail"]')
+              ? e.target.closest('[data-op="auth-revoke-detail"], [data-op="five-e-detail"], [data-op="uuzuhao-auth-detail"]')
               : null;
             if (!target || !node.contains(target)) return;
             e.stopPropagation();
             const op = String(target.getAttribute('data-op') || '').trim();
+            if (op === 'uuzuhao-auth-detail') {
+              showToast(window.UuzuhaoAuthStatus.message, 0, 'detail');
+              return;
+            }
             if (op === 'five-e-detail') {
               showToast(buildFiveEDetailText(item), 4000, 'detail');
               return;

@@ -1111,6 +1111,7 @@
         if (!res.ok || data.ok === false) {
           const error = new Error(data.message || `请求失败(${res.status})`);
           error.status = res.status;
+          error.data = data.data;
           throw error;
         }
         return data;

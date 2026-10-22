@@ -1,4 +1,5 @@
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
+const { canonicalGameId, canonicalGameNameById } = require('../common/game_profile');
 const {
     getLatestUserGameAccountByUserAndAccount,
     getUserGameAccountProbeSnapshotsByUserAndAccount,
@@ -13,6 +14,12 @@ const {
 const {
     resolveUuzuhaoReauthorizeState
 } = require('./prod_channel_status');
+const {
+    onlineRequestStartedAt,
+    assertOnlineAuthAllowed,
+    recordOnlineAuthFailure,
+    recordManualOnlineSuccess
+} = require('./uuzuhao_online_auth_service');
 
 const DEFAULT_PROBE_CACHE_TTL_SEC = Math.max(1, Number(process.env.PROBE_CACHE_TTL_SEC || 60));
 const ONLINE_SUPPORTED_GAME_IDS = new Set(['1', '2']);
@@ -60,16 +67,18 @@ async function resolveUuzuhaoAuthByUser(userId) {
 async function resolveAccountGameProfile(userId, gameAccount, fallbackGameName = 'WZRY', options = {}) {
     const uid = Number(userId || 0);
     const acc = String(gameAccount || '').trim();
-    if (!uid || !acc) return { game_id: '1', game_name: fallbackGameName };
+    const gameId = canonicalGameId(options.game_id, fallbackGameName);
+    const fallback = { game_id: gameId, game_name: canonicalGameNameById(gameId, fallbackGameName) };
+    if (!uid || !acc) return fallback;
     try {
         const row = await getLatestUserGameAccountByUserAndAccount(uid, acc, options.game_id || '', fallbackGameName);
-        if (!row) return { game_id: '1', game_name: fallbackGameName };
+        if (!row) return fallback;
         return {
             game_id: String(row.game_id || '1').trim() || '1',
             game_name: String(row.game_name || fallbackGameName).trim() || fallbackGameName
         };
     } catch {
-        return { game_id: '1', game_name: fallbackGameName };
+        return fallback;
     }
 }
 
@@ -100,6 +109,8 @@ async function queryOnlineStatusCached(userId, gameAccount, options = {}) {
     await assertUuzuhaoBackgroundOperationAllowed(uid, acc, options);
     const profile = await resolveAccountGameProfile(uid, acc, gameName, options);
     const finalGameName = String(profile.game_name || gameName).trim() || gameName;
+    const identity = { game_account: acc, game_id: profile.game_id, game_name: finalGameName };
+    await assertOnlineAuthAllowed(uid, identity, options);
     if (!ONLINE_SUPPORTED_GAME_IDS.has(String(profile.game_id || '').trim())) {
         const queryTime = nowText();
         await updateUserGameAccountOnlineProbeSnapshot(uid, acc, {
@@ -145,20 +156,31 @@ async function queryOnlineStatusCached(userId, gameAccount, options = {}) {
     const auth = options.auth && typeof options.auth === 'object'
         ? options.auth
         : await resolveUuzuhaoAuthByUser(uid);
-    const result = await queryAccountOnlineStatus(acc, finalGameName, { auth });
+    const requestStartedAt = onlineRequestStartedAt();
+    let result;
+    try {
+        result = await queryAccountOnlineStatus(acc, finalGameName, { auth });
+    } catch (error) {
+        await recordOnlineAuthFailure(uid, identity, error, requestStartedAt);
+        throw error;
+    }
     const queryTime = nowText();
-        await updateUserGameAccountOnlineProbeSnapshot(uid, acc, {
-            online: Boolean(result && result.online),
-            game_id: String(profile.game_id || '').trim() || '1',
-            game_name: finalGameName,
-            query_time: queryTime
-        }, String(options.desc || 'update by probe cache service').trim());
+    await updateUserGameAccountOnlineProbeSnapshot(uid, acc, {
+        online: Boolean(result && result.online),
+        game_id: String(profile.game_id || '').trim() || '1',
+        game_name: finalGameName,
+        query_time: queryTime
+    }, String(options.desc || 'update by probe cache service').trim());
+    const authState = options.manual === true
+        ? await recordManualOnlineSuccess(uid, identity, requestStartedAt)
+        : undefined;
     return {
         game_account: acc,
         game_name: String((result && result.game_name) || finalGameName).trim() || finalGameName,
         online: Boolean(result && result.online),
         query_time: queryTime,
-        cached: false
+        cached: false,
+        uuzuhao_auth_state: authState
     };
 }
 

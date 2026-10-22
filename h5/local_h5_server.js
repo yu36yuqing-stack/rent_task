@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
 const { fetch } = require('undici');
+const { normalizeUuzuhaoAuthState } = require('../common/uuzuhao_auth_state');
 const { initUserDb, verifyUserLogin, getActiveUserById, updateUserNotifyConfigByUserId, USER_TYPE_ADMIN } = require('../database/user_db');
 const {
     initUserGameAccountDb,
@@ -868,6 +869,7 @@ async function handleProducts(req, res, urlObj) {
             ? x.forbidden_probe_snapshot
             : {};
         const accountSwitch = normalizeAccountSwitch(x.switch);
+        const uuzuhaoAuthState = normalizeUuzuhaoAuthState(x.uuzuhao_auth_state);
         const prodGuardSwitch = resolveProdGuardSwitch(accountSwitch);
         const accountOrderOff = resolveAccountOrderOffConfig(accountSwitch, orderOffRule);
         const accountCooldown = resolveAccountCooldownConfig(accountSwitch, cooldownRule);
@@ -878,7 +880,7 @@ async function handleProducts(req, res, urlObj) {
             ? Number(accountCooldown.release_delay_min)
             : globalCooldownDelayMin;
         const onlineLabelRaw = String(onlineSnapshot.label || '').trim();
-        const onlineTag = prodGuardSwitch.enabled && (onlineLabelRaw === '在线' || onlineLabelRaw === '离线')
+        const onlineTag = prodGuardSwitch.enabled && !uuzuhaoAuthState.required && (onlineLabelRaw === '在线' || onlineLabelRaw === '离线')
             ? onlineLabelRaw
             : '';
         const forbiddenLabelRaw = String(forbiddenSnapshot.label || '').trim();
@@ -898,6 +900,7 @@ async function handleProducts(req, res, urlObj) {
             lifecycle_income_amount: Number(x.lifecycle_income_amount || 0),
             lifecycle_profit_amount: Number(x.lifecycle_profit_amount || 0),
             channel_status: channelStatus,
+            uuzuhao_auth_state: uuzuhaoAuthState,
             platform_status_norm: platformStatusNorm,
             overall_status_norm: overallStatusNorm,
             five_e_info: buildFiveECardInfo(channelPrdInfo),
@@ -2001,12 +2004,20 @@ async function handleProductOnlineQuery(req, res) {
         result = await queryOnlineStatusCached(user.id, gameAccount, {
             manual: true,
             force_refresh: true,
+            game_id: body.game_id,
             game_name: gameName,
             ttl_sec: PROBE_CACHE_TTL_SEC,
             desc: 'update by h5 online query'
         });
     } catch (e) {
         const msg = String(e && e.message ? e.message : e || '').trim();
+        if (e.uuzuhao_auth_state) {
+            return json(res, 502, {
+                ok: false,
+                message: `在线查询失败: ${msg}`,
+                data: { uuzuhao_auth_state: e.uuzuhao_auth_state }
+            });
+        }
         if (/uuzuhao .*未配置|不支持的 game_name|accountId 不能为空/i.test(msg)) {
             throw httpError(422, msg);
         }
@@ -2024,6 +2035,7 @@ async function handleProductOnlineQuery(req, res) {
             game_account: gameAccount,
             game_name: result.game_name,
             online: Boolean(result.online),
+            uuzuhao_auth_state: result.uuzuhao_auth_state,
             query_time: queryTime
         }
     });
@@ -2162,6 +2174,7 @@ async function handleProductForbiddenQuery(req, res) {
         result = await queryForbiddenStatusCached(user.id, gameAccount, {
             manual: true,
             force_refresh: true,
+            game_id: body.game_id,
             game_name: gameName,
             ttl_sec: PROBE_CACHE_TTL_SEC,
             desc: 'update by h5 forbidden query'

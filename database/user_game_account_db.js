@@ -142,6 +142,7 @@ function rowToAccount(row = {}) {
         switch: accountSwitch,
         online_probe_snapshot: onlineProbeSnapshot,
         forbidden_probe_snapshot: forbiddenProbeSnapshot,
+        uuzuhao_auth_state: parseJsonObject(row.uuzuhao_auth_state),
         purchase_price: Number(row.purchase_price || 0),
         purchase_date: String(row.purchase_date || '').slice(0, 10),
         total_cost_amount: Number(row.total_cost_amount || 0),
@@ -171,6 +172,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
         'switch',
         'online_probe_snapshot',
         'forbidden_probe_snapshot',
+        'uuzuhao_auth_state',
         'purchase_price',
         'purchase_date',
         'total_cost_amount',
@@ -205,6 +207,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
             switch TEXT NOT NULL DEFAULT '{}',
             online_probe_snapshot TEXT NOT NULL DEFAULT '{}',
             forbidden_probe_snapshot TEXT NOT NULL DEFAULT '{}',
+            uuzuhao_auth_state TEXT NOT NULL DEFAULT '{}',
             purchase_price REAL NOT NULL DEFAULT 0,
             purchase_date TEXT NOT NULL DEFAULT '',
             total_cost_amount REAL NOT NULL DEFAULT 0,
@@ -222,7 +225,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
     `);
     await run(db, `
         INSERT INTO user_game_account
-        (id, user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, switch, online_probe_snapshot, forbidden_probe_snapshot, purchase_price, purchase_date, total_cost_amount, asset_status, sold_at, sold_price, lifecycle_income_amount, lifecycle_profit_amount, modify_date, manual_deleted, manual_deleted_at, is_deleted, desc)
+        (id, user_id, game_account, account_remark, game_id, game_name, channel_status, channel_prd_info, switch, online_probe_snapshot, forbidden_probe_snapshot, uuzuhao_auth_state, purchase_price, purchase_date, total_cost_amount, asset_status, sold_at, sold_price, lifecycle_income_amount, lifecycle_profit_amount, modify_date, manual_deleted, manual_deleted_at, is_deleted, desc)
         SELECT
             id,
             user_id,
@@ -240,6 +243,7 @@ async function reorderUserGameAccountColumnsIfNeeded(db) {
             COALESCE("switch", '{}'),
             COALESCE(online_probe_snapshot, '{}'),
             COALESCE(forbidden_probe_snapshot, '{}'),
+            COALESCE(uuzuhao_auth_state, '{}'),
             COALESCE(purchase_price, 0),
             COALESCE(purchase_date, ''),
             COALESCE(total_cost_amount, 0),
@@ -272,6 +276,7 @@ async function ensureUserGameAccountTableBase(db) {
             switch TEXT NOT NULL DEFAULT '{}',
             online_probe_snapshot TEXT NOT NULL DEFAULT '{}',
             forbidden_probe_snapshot TEXT NOT NULL DEFAULT '{}',
+            uuzuhao_auth_state TEXT NOT NULL DEFAULT '{}',
             purchase_price REAL NOT NULL DEFAULT 0,
             purchase_date TEXT NOT NULL DEFAULT '',
             total_cost_amount REAL NOT NULL DEFAULT 0,
@@ -297,6 +302,7 @@ async function ensureColumn(db, tableName, columnName, ddl) {
 }
 
 async function ensureUserGameAccountSoldColumns(db) {
+    await ensureColumn(db, 'user_game_account', 'uuzuhao_auth_state', `uuzuhao_auth_state TEXT NOT NULL DEFAULT '{}'`);
     await ensureColumn(db, 'user_game_account', 'asset_status', `asset_status TEXT NOT NULL DEFAULT 'active'`);
     await ensureColumn(db, 'user_game_account', 'sold_at', `sold_at TEXT NOT NULL DEFAULT ''`);
     await ensureColumn(db, 'user_game_account', 'sold_price', `sold_price REAL NOT NULL DEFAULT 0`);

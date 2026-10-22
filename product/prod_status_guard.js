@@ -1,5 +1,6 @@
 const { openDatabase } = require('../database/sqlite_client');
 const { initUserGameAccountDb } = require('../database/user_game_account_db');
+const { getUuzuhaoAuthState } = require('../database/uuzuhao_auth_state_db');
 const { getActiveUserById } = require('../database/user_db');
 const {
     initProdRiskEventDb,
@@ -294,6 +295,10 @@ async function probeProdOnlineStatus(user, accounts = [], options = {}) {
     const list = [];
     for (const one of inputList) {
         if (resolveUuzuhaoReauthorizeState(one).hit) continue;
+        const state = await getUuzuhaoAuthState(user && user.id, {
+            game_account: one.account || one.game_account, game_id: one.game_id, game_name: one.game_name
+        });
+        if (state.required) continue;
         list.push(one);
     }
     if (list.length === 0) return { ok: true, skipped: true, reason: 'empty_accounts' };
@@ -404,7 +409,10 @@ async function enqueueOnlineNonRentingRisk(user, badAccounts = [], options = {})
             game_id: one && one.game_id,
             game_name: one && one.game_name
         });
-        if (abnormal.hit) {
+        const authState = await getUuzuhaoAuthState(uid, {
+            game_account: one.account || one.game_account, game_id: one.game_id, game_name: one.game_name
+        });
+        if (abnormal.hit || authState.required) {
             skippedAuthAbnormalCount += 1;
             continue;
         }
@@ -638,8 +646,9 @@ async function processOneSheepFixTask(task, authCache, userSwitchCache, logger) 
     const gname = String(task.game_name || 'WZRY').trim() || 'WZRY';
     const identity = { account: acc, game_id: gid, game_name: gname };
     const abnormal = await resolveUuzuhaoAuthAbnormalByUserAndAccount(uid, acc, { game_id: gid, game_name: gname });
-    if (abnormal.hit) {
-        await pauseGuardTaskForAuthorization(task, abnormal.reason);
+    const authState = await getUuzuhaoAuthState(uid, { game_account: acc, game_id: gid, game_name: gname });
+    if (abnormal.hit || authState.required) {
+        await pauseGuardTaskForAuthorization(task, abnormal.reason || authState.reason);
         return;
     }
     const activeOrders = await listActiveOrderSnapshotByUser(uid, [identity]);
@@ -720,7 +729,10 @@ async function processOneSheepFixTask(task, authCache, userSwitchCache, logger) 
         });
         online = Boolean(probe && probe.online);
     } catch (e) {
-        if (e.code === 'UUZUHAO_AUTHORIZATION_PAUSED') throw e;
+        if (e.code === 'UUZUHAO_AUTHORIZATION_PAUSED' || e.uuzuhao_auth_state?.required) {
+            await pauseGuardTaskForAuthorization(task, e.message);
+            return;
+        }
         const failed = shouldMarkTaskFailed(task, 1);
         await updateGuardTaskStatus(task.id, {
             status: failed ? TASK_STATUS_FAILED : TASK_STATUS_WATCHING,
