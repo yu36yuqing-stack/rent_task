@@ -21,7 +21,7 @@ assert.strictEqual(ui.messageFor({}), common.REAUTHORIZE_MESSAGE);
 assert.strictEqual(ui.messageFor({ uuzuhao_auth_state: {} }), common.REAUTHORIZE_MESSAGE);
 assert.strictEqual(ui.messageFor({ uuzuhao_auth_state: { error_code: 12101001 } }), common.PRODUCT_NOT_FOUND_MESSAGE);
 for (const game_id of ['1', '2', '3', '4']) {
-  for (const error_code of ['201010027', ' 12101001 ']) {
+  for (const error_code of ['201010027', ' 12101001 ', '12115014', '12115012']) {
     const item = { game_id, game_name: game_id === '4' ? 'CSGO' : 'WZRY',
         uuzuhao_auth_state: { required: true, version: 2, error_code },
         channel_status: { uuzuhao: '上架', uhaozu: '上架', zuhaowang: '租赁中' },
@@ -42,6 +42,10 @@ for (const game_id of ['1', '2', '3', '4']) {
         assert.ok(badges[0].reason.includes('悠悠商品不存在'));
         assert.ok(badges[0].reason.includes('恢复商品'));
         assert.ok(!badges[0].reason.includes('QQ鉴权失败'));
+    } else if (common.SHELF_AUTH_ERROR_CODES.includes(error_code)) {
+        assert.strictEqual(badges[0].reason, common.SHELF_REAUTHORIZE_MESSAGES[error_code]);
+        assert.ok(!badges[0].reason.includes('QQ鉴权失败'));
+        assert.ok(!badges[0].reason.includes('点击“状态查询”恢复'));
     } else {
         assert.ok(badges[0].reason.includes('号主前往悠悠租号重新授权'));
     }

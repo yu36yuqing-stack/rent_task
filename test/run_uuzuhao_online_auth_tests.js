@@ -3,6 +3,8 @@
 const { spawnSync } = require('child_process');
 const path = require('path');
 const tests = [
+    'uuzuhao_shelf_auth_test.js',
+    'uuzuhao_shelf_auth_integration_test.js',
     'uuzuhao_online_auth_state_test.js',
     'uuzuhao_online_auth_probe_test.js',
     'uuzuhao_online_auth_frontend_test.js',

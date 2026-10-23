@@ -1,4 +1,5 @@
 const { getGoodsList } = require('../zuhaowang/zuhaowang_api');
+const { recoverShelfAuthByProduct } = require('./uuzuhao_shelf_auth_service');
 const { collectUhaozuData } = require('../uhaozu/uhaozu_api');
 const { collectYoupinData } = require('../uuzuhao/uuzuhao_api');
 const { FiveEApiError, listAllRentAccounts } = require('../5e_platfrom/5e_api');
@@ -491,6 +492,7 @@ async function syncUserAccountsByAuth(userId) {
             return {
                 platform,
                 ok: true,
+                request_started_at: startedAt,
                 rows: pulledRows,
                 duration_ms: elapsedMs(startedAt)
             };
@@ -597,6 +599,13 @@ async function syncUserAccountsByAuth(userId) {
             channel_prd_info: item.channel_prd_info,
             desc: 'sync by accounts/sync'
         });
+        if (item.channel_prd_info[PLATFORM_YYZ]) {
+            const pull = platformResults.find((result) => result.status === 'fulfilled'
+                && result.value.platform === PLATFORM_YYZ && result.value.ok);
+            await recoverShelfAuthByProduct(uid, {
+                ...item, status: item.channel_status[PLATFORM_YYZ], prd_info: item.channel_prd_info[PLATFORM_YYZ]
+            }, pull.value.request_started_at);
+        }
         upserted += 1;
     }
     timing.upsert_ms = elapsedMs(upsertStartedAt);

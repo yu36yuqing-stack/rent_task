@@ -3,6 +3,11 @@
 const AUTHORIZATION_PAUSED = 'UUZUHAO_AUTHORIZATION_PAUSED';
 const REAUTHORIZE_MESSAGE = 'QQ鉴权失败，请号主前往悠悠租号重新授权。后台在线检测已暂停，授权后点击“状态查询”恢复。';
 const PRODUCT_NOT_FOUND_MESSAGE = '悠悠商品不存在，请号主前往悠悠租号检查并恢复商品，必要时重新授权。后台在线检测已暂停，处理后点击“状态查询”恢复。';
+const SHELF_AUTH_ERROR_CODES = Object.freeze(['12115014', '12115012']);
+const SHELF_REAUTHORIZE_MESSAGES = Object.freeze({
+    '12115014': '悠悠上架授权信息与账号密码不符，请号主前往悠悠租号核对账号密码并重新授权。后台在线检测及自动补上架已暂停，渠道商品恢复正常上架或出租后自动解除标记。',
+    '12115012': '悠悠上架授权失效，请号主前往悠悠租号重新发布授权。后台在线检测及自动补上架已暂停，渠道商品恢复正常上架或出租后自动解除标记。'
+});
 
 function normalizeUuzuhaoAuthState(input) {
     let state = input;
@@ -26,11 +31,17 @@ function classifyOnlineAuthFailure(error = {}) {
     return null;
 }
 
+function classifyShelfAuthFailure(error = {}) {
+    const code = String(error.code || error.uuzuhao_response?.code || '').trim();
+    if (!SHELF_AUTH_ERROR_CODES.includes(code)) return null;
+    return { error_code: code, reason: code === '12115014' ? '上架授权信息与账号密码不符' : '上架授权失效' };
+}
+
 function pausedOnlineError(state) {
     const normalized = normalizeUuzuhaoAuthState(state);
     const message = String(normalized.error_code || '').trim() === '12101001'
         ? PRODUCT_NOT_FOUND_MESSAGE
-        : REAUTHORIZE_MESSAGE;
+        : SHELF_REAUTHORIZE_MESSAGES[String(normalized.error_code || '').trim()] || REAUTHORIZE_MESSAGE;
     const error = new Error(message);
     error.code = AUTHORIZATION_PAUSED;
     error.uuzuhao_auth_state = normalized;
@@ -41,7 +52,10 @@ module.exports = {
     AUTHORIZATION_PAUSED,
     REAUTHORIZE_MESSAGE,
     PRODUCT_NOT_FOUND_MESSAGE,
+    SHELF_AUTH_ERROR_CODES,
+    SHELF_REAUTHORIZE_MESSAGES,
     normalizeUuzuhaoAuthState,
     classifyOnlineAuthFailure,
+    classifyShelfAuthFailure,
     pausedOnlineError
 };

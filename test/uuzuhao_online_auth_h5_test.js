@@ -87,6 +87,21 @@ async function main() {
             assert.strictEqual((await query('/api/products/forbidden/query')).status, 502);
             assert.strictEqual((await getUuzuhaoAuthState(user.id, identity)).required, false, 'forbidden failures must not mark online authorization');
         }
+        for (const code of ['12115014', '12115012']) {
+            await recordUuzuhaoAuthObservation(user.id, identity, {
+                required: true, error_code: code, reason: 'shelf authorization failure', request_started_at: Date.now()
+            });
+            response = { code: 0, data: { gameOnline: false, enabled: false } };
+            const successWithShelfFailure = await query();
+            assert.strictEqual(successWithShelfFailure.status, 200);
+            assert.strictEqual(successWithShelfFailure.body.data.uuzuhao_auth_state.required, true);
+            assert.strictEqual(successWithShelfFailure.body.data.uuzuhao_auth_state.error_code, code);
+            assert.strictEqual((await list()).find(r => r.game_id === '1').online_tag, '', 'manual online success must not present a shelf failure as recovered');
+            await require('../product/uuzuhao_shelf_auth_service').recoverShelfAuthByProduct(user.id, {
+                ...identity, status: '上架', prd_info: { prd_id: 'fixture-product' }
+            }, Date.now());
+            assert.strictEqual((await getUuzuhaoAuthState(user.id, identity)).required, false);
+        }
         await recordUuzuhaoAuthObservation(user.id, identity, { required: true, request_started_at: Date.now() + 10000 });
         response = { code: 0, data: { gameOnline: true } };
         assert.strictEqual((await query()).body.data.uuzuhao_auth_state.required, true, 'older response cannot clear newer marker');

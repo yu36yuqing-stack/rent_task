@@ -4,6 +4,8 @@ const { youpinOffShelf, youpinOnShelf } = require('../uuzuhao/uuzuhao_api');
 const { uhaozuOffShelf, uhaozuOnShelf, uhaozuReshelfByModify } = require('../uhaozu/uhaozu_api');
 const { changeStatus: changeZhwStatus } = require('../zuhaowang/zuhaowang_api');
 const { updateRentAccountShelf } = require('../5e_platfrom/5e_api');
+const { normalizeUuzuhaoAuthState } = require('../common/uuzuhao_auth_state');
+const { executeUuzuhaoOnShelf } = require('../product/uuzuhao_shelf_auth_service');
 const {
     buildPlatformStatusNorm,
     isOnAllowedByCode,
@@ -216,7 +218,8 @@ function detectConflictsAndBuildSnapshot({
         const uNorm = normByAcc.uhaozu && typeof normByAcc.uhaozu === 'object' ? normByAcc.uhaozu : {};
         const ignoreUhaozuOnlineDetect = isUhaozuOnlineDetectSoftBlock(uNorm);
         const yNorm = normByAcc.uuzuhao || {};
-        const canAutoOnY = isOnAllowedByCode(String(yNorm.code || '')) || resolveUuzuhaoReauthorizeState(yNorm).hit;
+        const canAutoOnY = !normalizeUuzuhaoAuthState(y && y.uuzuhao_auth_state).required
+            && (isOnAllowedByCode(String(yNorm.code || '')) || resolveUuzuhaoReauthorizeState(yNorm).hit);
         const canAutoOnU = isOnAllowedByCode(String((uNorm && uNorm.code) || '')) || ignoreUhaozuOnlineDetect;
         const canAutoOnZ = isOnAllowedByCode(String((normByAcc.zuhaowang && normByAcc.zuhaowang.code) || ''));
         const canAutoOnFiveE = isOnAllowedByCode(String((normByAcc['5e'] && normByAcc['5e'].code) || ''));
@@ -421,10 +424,19 @@ async function executeActions({
             // 悠悠租号
             else if (action.type === 'off_y') success = await youpinOffShelf(youpinPage, action.item.account, action.item);
             else if (action.type === 'on_y') {
-                const out = await youpinOnShelf(youpinPage, action.item.account, {
-                    ...action.item,
-                    with_detail: true
-                });
+                const out = await executeUuzuhaoOnShelf(user.id, {
+                    ...action.item, game_account: action.item.account
+                }, () => youpinOnShelf(youpinPage, action.item.account, {
+                    ...action.item, with_detail: true
+                }));
+                if (out && out.skipped) {
+                    const durationMs = elapsedMs(actionStartedAt);
+                    runRecord.actions.push({ ...action, plan_index: planIndex, time: Date.now(),
+                        success: false, skipped: true, mode: 'waiting_authorization', duration_ms: durationMs, platform });
+                    recordActionTiming(action, { plan_index: planIndex, duration_ms: durationMs, success: false, skipped: true });
+                    console.log(`[Result] 已跳过(等待重新授权): ${action.type} -> ${action.item.account}`);
+                    return { success: false, skipped: true };
+                }
                 success = Boolean(out && out.ok);
                 detail = out && typeof out === 'object' ? { code: Number(out.code || 0), msg: String(out.msg || '') } : { code: 0, msg: '' };
             }
@@ -602,6 +614,7 @@ function buildPlatformRowsFromUserAccounts(rows = []) {
                 game_id: String((row && row.game_id) || '1').trim() || '1',
                 game_name: String((row && row.game_name) || 'WZRY').trim() || 'WZRY',
                 status: y,
+                uuzuhao_auth_state: row.uuzuhao_auth_state,
                 remark: String(row.account_remark || account),
                 prd_id: String(youpinPrd.prd_id || youpinPrd.id || '').trim(),
                 platform_game_id: String(youpinPrd.game_id || youpinPrd.gameId || '').trim()

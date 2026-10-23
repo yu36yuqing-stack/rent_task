@@ -52,8 +52,12 @@ async function recordUuzuhaoAuthObservation(userId, identity, observation) {
         const row = await get(db, ACCOUNT_SQL, params);
         if (!row) throw new Error('找不到账号');
         const previous = normalizeUuzuhaoAuthState(row.uuzuhao_auth_state);
+        const previousCode = String(previous.error_code || '').trim();
+        const preserved = previous.required && (observation.preserve_error_codes || []).includes(previousCode);
+        const unexpected = Array.isArray(observation.if_error_codes)
+            && (!previous.required || !observation.if_error_codes.includes(previousCode));
         // Keep a success watermark so an older in-flight failure cannot re-block recovery.
-        if (Number(previous.request_started_at || 0) > requestedAt) {
+        if (Number(previous.request_started_at || 0) > requestedAt || preserved || unexpected) {
             await run(db, 'COMMIT');
             return previous;
         }

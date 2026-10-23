@@ -78,7 +78,9 @@ async function main() {
             for (const [gameId, gameName] of [['1', 'WZRY'], ['2', 'HPJY'], ['3', 'CFM'], ['4', 'CSGO']]) {
                 for (const scenario of [
                     { blacklisted: false, errorCode: '201010027' }, { blacklisted: true, errorCode: '201010027' },
-                    { blacklisted: false, errorCode: '12101001' }, { blacklisted: true, errorCode: '12101001' }
+                    { blacklisted: false, errorCode: '12101001' }, { blacklisted: true, errorCode: '12101001' },
+                    { blacklisted: false, errorCode: '12115014' }, { blacklisted: true, errorCode: '12115014' },
+                    { blacklisted: false, errorCode: '12115012' }, { blacklisted: true, errorCode: '12115012' }
                 ]) {
                     const { blacklisted, errorCode } = scenario;
                     await fixture(gameId, gameName, true, blacklisted, true, errorCode);
@@ -112,6 +114,23 @@ async function main() {
             }
         }
         assert.deepStrictEqual(requests, [], 'rendering marked accounts must not automatically call an API');
+        for (const width of [390, 1280]) {
+            await page.setViewport({ width, height: 1000, deviceScaleFactor: 1 });
+            for (const code of ['12115014', '12115012']) {
+                await fixture('1', 'WZRY', true, false, true, code);
+                await page.click('[data-op="uuzuhao-auth-detail"]');
+                await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.toast')).opacity) === 1);
+                const toast = await page.evaluate(() => {
+                    const el = document.querySelector('.toast'), rect = el.getBoundingClientRect();
+                    return { message: el.textContent, left: rect.left, right: rect.right, clipped: el.scrollWidth > el.clientWidth + 1 };
+                });
+                assert.ok(toast.message.includes('自动补上架已暂停') && toast.message.includes('渠道商品恢复正常'));
+                assert.ok(!toast.message.includes('QQ鉴权失败') && !toast.message.includes('点击“状态查询”恢复'));
+                assert.ok(toast.left >= 0 && toast.right <= width && !toast.clipped);
+                toastLayouts.push({ width, code, ...toast });
+                await page.screenshot({ path: path.join(outputDir, `auth-shelf-${code}-${width}.png`), fullPage: true });
+            }
+        }
         for (const width of [390, 1280]) {
             await page.setViewport({ width, height: 1000, deviceScaleFactor: 1 });
             await fixture('1', 'WZRY', true, false, true, '12101001');
