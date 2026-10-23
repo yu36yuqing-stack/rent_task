@@ -19,7 +19,9 @@ const { stopProdRiskTaskWorker } = require('../product/prod_status_guard');
 const identity = { game_account: '2256481878', game_id: '1', game_name: 'WZRY' };
 const auth = { app_key: 'fixture', app_secret: 'fixture', api_base: 'https://fixture.invalid' };
 const realFetch = global.fetch;
-let response = { code: 201010027, msg: '查询失败，请稍后重试' };
+const failureCode = Number(process.env.ONLINE_AUTH_FAILURE_CODE || 201010027);
+const failureReason = failureCode === 12101001 ? '悠悠商品不存在' : 'QQ鉴权失败';
+let response = { code: failureCode, msg: failureCode === 12101001 ? '商品不存在' : '查询失败，请稍后重试' };
 const calls = [];
 global.fetch = async (url, options) => {
     if (String(url).startsWith('http://127.0.0.1:')) return realFetch(url, options);
@@ -52,8 +54,10 @@ async function main() {
         }
         const failure = await query();
         assert.strictEqual(failure.status, 502);
-        assert.ok(failure.body.message.includes('201010027'));
+        assert.ok(failure.body.message.includes(String(failureCode)));
         assert.strictEqual(failure.body.data.uuzuhao_auth_state.required, true);
+        assert.strictEqual(failure.body.data.uuzuhao_auth_state.error_code, String(failureCode));
+        assert.strictEqual(failure.body.data.uuzuhao_auth_state.reason, failureReason);
         const rows = await list();
         const marked = rows.find(r => r.game_id === '1');
         assert.strictEqual(marked.uuzuhao_auth_state.required, true);
@@ -75,16 +79,19 @@ async function main() {
         assert.strictEqual(success.body.data.online, false);
         assert.strictEqual(success.body.data.uuzuhao_auth_state.required, false);
         assert.strictEqual((await list()).find(r => r.game_id === '1').online_tag, '离线');
-        for (const code of ['12101001', '85004']) {
-            response = { code: Number(code), msg: 'ordinary failure' };
-            assert.strictEqual((await query()).status, 502);
-            assert.strictEqual((await getUuzuhaoAuthState(user.id, identity)).required, false);
+        response = { code: 85004, msg: '访问超时' };
+        assert.strictEqual((await query()).status, 502);
+        assert.strictEqual((await getUuzuhaoAuthState(user.id, identity)).required, false);
+        for (const code of [201010027, 12101001]) {
+            response = { code, msg: '禁玩查询失败' };
+            assert.strictEqual((await query('/api/products/forbidden/query')).status, 502);
+            assert.strictEqual((await getUuzuhaoAuthState(user.id, identity)).required, false, 'forbidden failures must not mark online authorization');
         }
         await recordUuzuhaoAuthObservation(user.id, identity, { required: true, request_started_at: Date.now() + 10000 });
         response = { code: 0, data: { gameOnline: true } };
         assert.strictEqual((await query()).body.data.uuzuhao_auth_state.required, true, 'older response cannot clear newer marker');
         assert.ok(calls.every(c => c.body.accountId === identity.game_account && [1].includes(c.body.gameId)));
-        console.log('[PASS] online auth H5: structured failure, manual-only recovery, stale snapshot hiding, correct game identity and user isolation');
+        console.log(`[PASS] online auth H5 (${failureCode}): structured failure, manual-only recovery, stale snapshot hiding, correct game identity and user isolation`);
     } finally {
         if (server) await new Promise(resolve => server.close(resolve));
         stopProdRiskTaskWorker();

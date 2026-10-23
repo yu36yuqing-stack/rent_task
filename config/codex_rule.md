@@ -54,8 +54,9 @@
 
 - 执行 `scripts/merge_code.sh`（若用户口语提到 `merge_code.js`，按本项目实际脚本 `merge_code.sh` 执行）。
 - 完成发布后，必须把宿主机的数据库与日志同步回本机：
-  - `database/*.db`
+  - `database/*.db` 中的业务库，排除 `rent_robot_runtime.db*`
   - `log/`
+- 后续所有生产 DB 回拉均排除 Runtime 库及其 WAL、SHM、Journal、备份等附属文件；不得在发布后另行补拉 Runtime。其他业务库与日志正常同步。
 
 ## Rule 5 - 本地 H5 自动重启规则
 

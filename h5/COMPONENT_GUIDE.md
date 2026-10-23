@@ -86,12 +86,12 @@
 ### 悠悠在线授权状态（试用）
 
 - 实现：`window.UuzuhaoAuthStatus`，`h5/public/js/ui/uuzuhao_auth_status.js`；四游戏商品卡片共用，不新建卡片或状态标签组件。
-- 数据契约：`uuzuhao_auth_state.required === true` 时显示待授权；缺省或非布尔值不解释为待授权。手工响应通过 `applyState` 合并，低版本响应不得覆盖高版本状态。
+- 数据契约：`uuzuhao_auth_state.required === true` 时显示待授权；缺省或非布尔值不解释为待授权。手工响应通过 `applyState` 合并，低版本响应不得覆盖高版本状态。`messageFor(item)` 按标记的 `error_code` 选择提示：`12101001` 显示“悠悠商品不存在”，指导检查并恢复商品、必要时重新授权；其他值兼容原 QQ 鉴权失败提示。旧 `message` 常量保留兼容，不用于商品缺失提示。
 - 顶部复用 `.chip`、`.status-main-chip`、`.plat-abnormal`：“状态正常”替换为“需重新授权”；已有黑名单/维护等原因保留原标签，旁边增加授权标签。已售主状态不变。
 - 渠道标签复用 `.plat.plat-abnormal`，只将悠悠状态部分替换为“授权异常”；原 `ChannelPriceSummary` 的最后成功档位、渠道价格和缺值回退全部保留，其他渠道不变。不重写实际渠道上下架状态。
-- 点击授权异常标签通过现有持久 Toast 说明号主前往悠悠重新授权并点击“状态查询”恢复；手工恢复不修改在线风控开关。带标记时不展示旧在线快照。
+- 点击授权异常标签通过现有持久 Toast 展示 `messageFor(item)` 对应原因和恢复建议，并说明点击“状态查询”恢复；手工恢复不修改在线风控开关。带标记时不展示旧在线快照。
 - 页面布局仅用 `#listView .product-card[data-auth-required="true"]` 变体允许顶部标签换行、禁止挤窄状态标签，不改变其他卡片布局。
-- 验证：`test/uuzuhao_online_auth_frontend_test.js`、`test/uuzuhao_online_auth_visual_test.js`；覆盖四游戏、320/375/390/430/768/1280px、维护状态、价格保留、请求失败及手工恢复。
+- 验证：`test/uuzuhao_online_auth_frontend_test.js`、`test/uuzuhao_online_auth_visual_test.js`；覆盖四游戏、320/375/390/430/768/1280px、维护状态、QQ 鉴权失败/商品不存在两种原因、价格保留、请求失败及手工恢复；商品缺失持久 Toast 单独验证手机/桌面完整显示。
 
 ## 6. 多游戏组件契约
 

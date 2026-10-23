@@ -38,13 +38,23 @@ async function main() {
         assert.strictEqual(common.classifyOnlineAuthFailure(error).reason, 'QQ鉴权失败');
     }
     for (const error of [undefined, {}, { code: '85004', message: '访问超时' },
-        { code: -50000, message: '其他错误' }, { message: 'code=201010027' }, { code: '12101001' }]) {
+        { code: -50000, message: '其他错误' }, { message: 'code=201010027' }, { message: '商品不存在' }]) {
         assert.strictEqual(common.classifyOnlineAuthFailure(error), null);
+    }
+    for (const error of [{ code: 12101001 }, { code: ' 12101001 ', message: '商品不存在' },
+        { uuzuhao_response: { code: '12101001', msg: '商品不存在' } }]) {
+        assert.deepStrictEqual(common.classifyOnlineAuthFailure(error), { error_code: '12101001', reason: '悠悠商品不存在' });
     }
     const paused = common.pausedOnlineError({ required: true });
     assert.strictEqual(paused.code, common.AUTHORIZATION_PAUSED);
     assert.ok(paused.message.includes('重新授权'));
     assert.strictEqual(paused.uuzuhao_auth_state.required, true);
+    assert.strictEqual(common.pausedOnlineError().message, common.REAUTHORIZE_MESSAGE);
+    const missingProduct = common.pausedOnlineError('{"required":true,"error_code":12101001}');
+    assert.strictEqual(missingProduct.message, common.PRODUCT_NOT_FOUND_MESSAGE);
+    assert.ok(missingProduct.message.includes('恢复商品'));
+    assert.ok(!missingProduct.message.includes('QQ鉴权失败'));
+    assert.strictEqual(missingProduct.uuzuhao_auth_state.required, true);
     assert.ok(service.onlineRequestStartedAt() > 0);
 
     await seed();

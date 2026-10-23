@@ -13,7 +13,7 @@
           ? String(one.label || '').trim()
           : (String(legacy[d.key] || '').trim() || (d.key === '5e' ? '未发布' : '未'));
         const authRequired = d.key === 'uuzuhao' && window.UuzuhaoAuthStatus?.isRequired(item);
-        const reason = authRequired ? window.UuzuhaoAuthStatus.message
+        const reason = authRequired ? window.UuzuhaoAuthStatus.messageFor(item)
           : (one && String(one.reason || '').trim() ? String(one.reason || '').trim() : '');
         const code = authRequired ? 'auth_abnormal'
           : (one && String(one.code || '').trim() ? String(one.code || '').trim() : '');
@@ -2012,7 +2012,7 @@
             e.stopPropagation();
             const op = String(target.getAttribute('data-op') || '').trim();
             if (op === 'uuzuhao-auth-detail') {
-              showToast(window.UuzuhaoAuthStatus.message, 0, 'detail');
+              showToast(window.UuzuhaoAuthStatus.messageFor(item), 0, 'detail');
               return;
             }
             if (op === 'five-e-detail') {

@@ -14,6 +14,7 @@
 - 数据库迁移已检查，未发现未验证或不可逆的高风险操作。
 - 未把密码、令牌、数据库、日志或敏感配置加入待提交范围。
 - 同步排除所有SQLite临时文件 `*.db-wal`、`*.db-shm`、`*.db-journal`，确保 `rsync --delete` 不删除生产侧文件。
+- 回拉过滤规则在 `--include '*.db'` 前排除 `rent_robot_runtime.db*`；业务库和日志继续回拉，Runtime 及其附属文件不回拉。可用 `node test/merge_code_sqlite_exclusion_test.js` 验证真实 rsync 过滤行为。
 
 ## 脚本阶段
 
@@ -23,7 +24,7 @@
 2. 在宿主机提交全部允许提交的变化并推送目标分支。
 3. 执行数据库迁移，重启常驻服务并检查 `/api/ping`。
 4. 将本机代码与远程目标分支对齐。
-5. 将生产环境 `database/*.db` 和 `log/` 回拉到本机。
+5. 将生产环境 `database/*.db` 中的业务库（不含 `rent_robot_runtime.db*`）和 `log/` 回拉到本机。
 
 只有五个阶段全部完成且健康检查通过，才能报告“发布成功”。
 

@@ -1,6 +1,13 @@
 (function (root) {
   'use strict';
   const message = 'QQ鉴权失败，请号主前往悠悠租号重新授权。后台在线检测已暂停，授权后点击“状态查询”恢复。';
+  const productNotFoundMessage = '悠悠商品不存在，请号主前往悠悠租号检查并恢复商品，必要时重新授权。后台在线检测已暂停，处理后点击“状态查询”恢复。';
+
+  function messageFor(item) {
+    return String(item?.uuzuhao_auth_state?.error_code || '').trim() === '12101001'
+      ? productNotFoundMessage
+      : message;
+  }
 
   function isRequired(item) {
     return Boolean(item && item.uuzuhao_auth_state && item.uuzuhao_auth_state.required === true);
@@ -22,5 +29,5 @@
     return true;
   }
 
-  root.UuzuhaoAuthStatus = Object.freeze({ isRequired, mainLabel, applyState, message });
+  root.UuzuhaoAuthStatus = Object.freeze({ isRequired, mainLabel, applyState, message, messageFor });
 })(window);

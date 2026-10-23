@@ -84,8 +84,8 @@ git fetch origin
 git reset --hard "origin/${REMOTE_BRANCH}"
 git clean -fd
 
-echo "[Step 5/5] 从宿主机回拉DB和运行日志到本机..."
-PULL_DB_CMD="rsync -az -e 'ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new' '${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}database/' '${REPO_DIR}/database/' --include '*/' --include '*.db' --exclude '*'"
+echo "[Step 5/5] 从宿主机回拉业务DB（不含Runtime）和运行日志到本机..."
+PULL_DB_CMD="rsync -az -e 'ssh -p ${REMOTE_PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new' '${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}database/' '${REPO_DIR}/database/' --exclude 'rent_robot_runtime.db*' --include '*/' --include '*.db' --exclude '*'"
 /usr/bin/expect <<EOF
 set timeout -1
 spawn bash -lc "$PULL_DB_CMD"
@@ -117,4 +117,4 @@ set code [lindex \$result 3]
 exit \$code
 EOF
 
-echo "[OK] 本机已对齐 origin/${REMOTE_BRANCH}，并同步宿主机DB+日志"
+echo "[OK] 本机已对齐 origin/${REMOTE_BRANCH}，并同步宿主机业务DB（不含Runtime）+日志"

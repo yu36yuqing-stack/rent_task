@@ -19,7 +19,9 @@ const { queryOnlineStatusCached } = require('../product/prod_probe_cache_service
 const guard = require('../product/prod_status_guard');
 const auth = { app_key: 'fixture', app_secret: 'fixture', api_base: 'https://fixture.invalid' };
 const key = { game_account: '2256481878', game_id: '1', game_name: 'WZRY' };
-let response = { code: 201010027, msg: '查询失败，请稍后重试' };
+const failureCode = Number(process.env.ONLINE_AUTH_FAILURE_CODE || 201010027);
+const failureReason = failureCode === 12101001 ? '悠悠商品不存在' : 'QQ鉴权失败';
+let response = { code: failureCode, msg: failureCode === 12101001 ? '商品不存在' : '查询失败，请稍后重试' };
 let calls = 0;
 const originalFetch = global.fetch;
 global.fetch = async url => {
@@ -45,7 +47,10 @@ async function main() {
             risk_type: guard.RISK_TYPE_ONLINE_NON_RENTING, event_id: event.id, status: 'watching', next_check_at: 1 });
         await guard.runSheepFixWorkerOnce({ logger });
         assert.strictEqual(calls, 1);
-        assert.strictEqual((await getUuzuhaoAuthState(user.id, key)).required, true);
+        const state = await getUuzuhaoAuthState(user.id, key);
+        assert.strictEqual(state.required, true);
+        assert.strictEqual(state.error_code, String(failureCode));
+        assert.strictEqual(state.reason, failureReason);
         const getTask = async () => (await sql('SELECT * FROM prod_guard_task WHERE id=?', [task.id]))[0];
         let row = await getTask();
         assert.strictEqual(row.status, 'watching');
@@ -58,6 +63,7 @@ async function main() {
             await guard.runSheepFixWorkerOnce({ logger });
         }
         assert.strictEqual(calls, 1, 'waiting tasks must not send more requests');
+        assert.ok((await getTask()).desc.includes(failureReason), 'waiting must retain the actual reason');
         const account = { account: key.game_account, game_id: '1', game_name: 'WZRY', online_tag: 'ON' };
         const probe = await guard.probeProdOnlineStatus(user, [account], { logger, include_rows: true });
         assert.strictEqual(probe.skipped, true);
@@ -71,7 +77,7 @@ async function main() {
         row = await getTask();
         assert.strictEqual(row.last_error, '');
         assert.strictEqual(row.status, 'watching');
-        console.log('[PASS] online auth guard: first failure pauses without retry increments, zero follow-up requests, no false risk resolution and manual recovery');
+        console.log(`[PASS] online auth guard (${failureCode}): first failure pauses without retry increments, zero follow-up requests, no false risk resolution and manual recovery`);
     } finally { global.fetch = originalFetch; guard.stopProdRiskTaskWorker(); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
