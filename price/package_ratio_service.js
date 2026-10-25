@@ -13,16 +13,25 @@ const {
 } = require('./channel_adapters/channel_price_registry');
 
 function validateDailyPolicyForRules(adapter, ratios, dailyPolicy, rules, accounts) {
-    if (dailyPolicy.mode === 'follow') return;
     const live = new Map(accounts.filter((row) => !Number(row.is_deleted || 0) && row.asset_status !== 'sold'
         && adapter.isAvailable(row)).map((row) => [`${row.game_id}::${row.game_account}`, row]));
     for (const rule of rules) {
-        if (!live.has(`${rule.game_id}::${rule.game_account}`)) continue;
-        const tiers = adapter.buildTierPricesByRatios
-            ? adapter.buildTierPricesByRatios(rule.prices, ratios) : adapter.buildTierPrices(rule.prices, ratios);
+        const account = live.get(`${rule.game_id}::${rule.game_account}`);
+        if (!account) continue;
+        const options = { rent_mode: account.channel_prd_info?.[adapter.channel]?.rent_mode };
+        const keys = adapter.capability.package_keys.filter((key) => adapter.channel !== 'zuhaowang'
+            || (options.rent_mode === 'day_only' ? key !== 'hour'
+                : options.rent_mode !== 'hour_only' || key === 'hour'));
         try {
+            const build = adapter.buildTierPricesByRatios || adapter.buildTierPrices;
+            const tiers = build(rule.prices, ratios, options);
+            if (tiers.some((tier) => keys.some((key) => !Number.isFinite(tier.prices[key]) || tier.prices[key] <= 0))) {
+                const error = new Error('套餐价格按渠道精度处理后必须大于0');
+                error.code = 'PRICE_PACKAGE_RATIO_INVALID';
+                throw error;
+            }
             applyDailyPolicy(tiers, adapter.capability, dailyPolicy,
-                adapter.normalizePackagePrice || ((key, value) => Number(value.toFixed(2))));
+                adapter.normalizePackagePrice || ((key, value) => Number(value.toFixed(2))), options);
         } catch (error) {
             const wrapped = new Error(`${rule.game_name} / ${rule.game_account}：${error.message}`);
             wrapped.code = error.code;
@@ -62,14 +71,18 @@ async function savePackageRatioSettingsByUser(userId, input = {}) {
     if (!adapter || !adapter.capability || adapter.capability.enabled !== true) {
         throw new Error(`不支持的调价渠道: ${channel || '-'}`);
     }
-    const ratios = normalizeRatios(adapter.capability, input.ratios, { strict: true });
     const current = await getUserChannelPackageRatio(uid, channel);
+    const incoming = input.ratios && typeof input.ratios === 'object' && !Array.isArray(input.ratios) ? input.ratios : {};
+    // Older pages always submit hour=1 even when only another package was edited.
+    const ratios = normalizeRatios(adapter.capability, {
+        ...incoming,
+        hour: input.hour_ratio_editable === true && incoming.hour !== undefined
+            ? incoming.hour : (current?.ratios?.hour ?? 1)
+    }, { strict: true });
     const dailyPolicy = normalizeDailyPolicy(input.daily_policy === undefined ? current && current.daily_policy : input.daily_policy);
-    if (dailyPolicy.mode !== 'follow') {
-        const { _internal: { listAllAccountsByUser } } = require('./price_ladder_service');
-        validateDailyPolicyForRules(adapter, ratios, dailyPolicy,
-            await listAccountPriceLadderRulesByUser(uid), await listAllAccountsByUser(uid));
-    }
+    const { _internal: { listAllAccountsByUser } } = require('./price_ladder_service');
+    validateDailyPolicyForRules(adapter, ratios, dailyPolicy,
+        await listAccountPriceLadderRulesByUser(uid), await listAllAccountsByUser(uid));
     const saved = await saveUserChannelPackageRatio(uid, {
         channel,
         ratios,

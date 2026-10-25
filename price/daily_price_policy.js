@@ -28,15 +28,19 @@ function normalizeDailyPolicy(value) {
     return { mode, factors: normalized };
 }
 
-function applyDailyPolicy(tiers, capability, input, normalizePrice) {
+function applyDailyPolicy(tiers, capability, input, normalizePrice, options = {}) {
     const policy = normalizeDailyPolicy(input);
-    if (policy.mode === 'follow') return tiers;
+    const rentMode = capability.channel === 'zuhaowang' ? String(options.rent_mode || '').trim() : '';
+    if (policy.mode === 'follow' || rentMode === 'hour_only') return tiers;
     const key = capability.channel === 'uhaozu' ? 'day' : 'p24';
     if (tiers.length !== 4 || !Number.isFinite(tiers[0].prices[key]) || tiers[0].prices[key] <= 0) {
         throw policyError('日租基准价或四档数据不完整');
     }
     const base = tiers[0].prices[key];
-    const dayIndex = capability.package_keys.indexOf(key);
+    const packageKeys = rentMode === 'day_only'
+        ? capability.package_keys.filter((packageKey) => packageKey !== 'hour')
+        : capability.package_keys;
+    const dayIndex = packageKeys.indexOf(key);
     return tiers.map((item, i) => {
         const daily = normalizePrice(key, base * policy.factors[i]);
         if (!Number.isFinite(daily) || daily <= 0) throw policyError('日租价按渠道精度处理后必须大于0');
@@ -50,7 +54,7 @@ function applyDailyPolicy(tiers, capability, input, normalizePrice) {
             }
         }
         // Keep the existing daily-package ordering check after applying all related discounts.
-        for (const [index, other] of capability.package_keys.entries()) {
+        for (const [index, other] of packageKeys.entries()) {
             if (index === dayIndex) continue;
             const price = prices[other];
             if (!Number.isFinite(price) || price <= 0) throw policyError('套餐价格必须大于0');

@@ -1,6 +1,7 @@
 'use strict';
 
 const { listUserGameAccounts, upsertUserGameAccount } = require('../database/user_game_account_db');
+const { updateZuhaowangRentMode } = require('../database/zuhaowang_product_mode_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const {
     modifyUhaozuGoods,
@@ -17,7 +18,8 @@ const {
 } = require('../zuhaowang/zuhaowang_price_api');
 const { _internals: { resolveDataIdByAccountAndGame } } = require('../zuhaowang/zuhaowang_api');
 const { normalizePackagePrice: normalizeZuhaowangPackagePrice } = require('./channel_adapters/zuhaowang_price_adapter');
-const { buildConfirmedZuhaowangPriceSnapshot } = require('./zuhaowang_price_snapshot_service');
+const { buildConfirmedZuhaowangPriceSnapshot,
+    normalizeZuhaowangBaseHourPrice } = require('./zuhaowang_price_snapshot_service');
 const { normalizeZuhaowangAuthPayload } = require('../user/user');
 const { getUhaozuPricingDashboardByUser } = require('./price_h5_service');
 const {
@@ -803,6 +805,8 @@ async function publishZuhaowangAccountPriceSetByUser(userId, input = {}, options
     const gameAccount = String(input.game_account || '').trim();
     if (!gameId || !gameName || !gameAccount) throw new Error('调价账号信息不完整');
     const targetPrices = normalizeZuhaowangTargetPriceSet(input.prices || {});
+    const baseHourPrice = normalizeZuhaowangBaseHourPrice(targetPrices, input.base_hour_price);
+    const computedRentMode = String(input.computed_rent_mode || '').trim();
     const accountRows = await listAllAccountsByUser(uid);
     const row = accountRows.find((item) => (
         String(item.game_id || '').trim() === gameId
@@ -834,10 +838,11 @@ async function publishZuhaowangAccountPriceSetByUser(userId, input = {}, options
         await upsertUserGameAccount({
             user_id: uid, game_account: gameAccount, game_id: gameId, game_name: gameName,
             account_remark: String(row.account_remark || '').trim(),
-            channel_prd_info: { zuhaowang: buildConfirmedZuhaowangPriceSnapshot(info, goodsId, normalized, targetPrices) },
+            channel_prd_info: { zuhaowang: buildConfirmedZuhaowangPriceSnapshot(info, goodsId,
+                normalized, targetPrices, baseHourPrice) },
             desc: 'confirmed zuhaowang price snapshot'
         });
-        console.log(`[ZHWPriceSnapshot] user_id=${uid} account=${gameAccount} goods_id=${goodsId} source=${source} mode=${normalized.rent_mode} hour_basis=${targetPrices.hour}`);
+        console.log(`[ZHWPriceSnapshot] user_id=${uid} account=${gameAccount} goods_id=${goodsId} source=${source} mode=${normalized.rent_mode} hour_basis=${baseHourPrice}`);
     };
     const ensureBatch = async () => {
         if (batchCreated) return;
@@ -852,6 +857,8 @@ async function publishZuhaowangAccountPriceSetByUser(userId, input = {}, options
                 game_account: gameAccount,
                 tier: Number(input.tier || 0),
                 prices: targetPrices,
+                base_hour_price: baseHourPrice,
+                computed_rent_mode: computedRentMode,
                 force_publish: forcePublish
             },
             total_count: 1,
@@ -885,6 +892,15 @@ async function publishZuhaowangAccountPriceSetByUser(userId, input = {}, options
             beforeTemplate = await getTemplate(goodsId, auth, { user_id: uid });
         }
         beforeNormalized = normalizeZuhaowangTemplate(beforeTemplate);
+        if (['day_only', 'hour_only', 'hour_and_day'].includes(computedRentMode)
+            && computedRentMode !== beforeNormalized.rent_mode) {
+            failureStage = 'rent_mode_changed';
+            await updateZuhaowangRentMode(uid, { game_id: gameId, game_account: gameAccount },
+                String(info.prd_id || info.data_id || '').trim(), beforeNormalized.rent_mode, computedRentMode);
+            const error = new Error('租赁方式已变化，等待重新计算');
+            error.code = 'ZUHAOWANG_RENT_MODE_CHANGED';
+            throw error;
+        }
         if (!forcePublish && sameZuhaowangActivePriceSet(targetPrices, beforeNormalized.prices, beforeNormalized.rent_mode)) {
             await saveConfirmedSnapshot(beforeNormalized, 'already_matches');
             return {
@@ -933,6 +949,8 @@ async function publishZuhaowangAccountPriceSetByUser(userId, input = {}, options
             request_data: sanitizePriceLogPayload({
                 biz_params: requestParams,
                 target_prices: targetPrices,
+                base_hour_price: baseHourPrice,
+                computed_rent_mode: computedRentMode,
                 rent_mode: beforeNormalized.rent_mode
             }),
             response_data: sanitizePriceLogPayload({
@@ -945,7 +963,7 @@ async function publishZuhaowangAccountPriceSetByUser(userId, input = {}, options
                 template: afterTemplate,
                 prices: afterNormalized.prices,
                 rent_mode: afterNormalized.rent_mode,
-                hour_basis: targetPrices.hour
+                hour_basis: baseHourPrice
             }),
             price_before_hour: beforeNormalized.prices.hour,
             price_before_day: beforeNormalized.prices.p24,
@@ -997,7 +1015,10 @@ async function publishZuhaowangAccountPriceSetByUser(userId, input = {}, options
                 prices: beforeNormalized.prices,
                 rent_mode: beforeNormalized.rent_mode
             } : beforeTemplate),
-            request_data: sanitizePriceLogPayload({ biz_params: requestParams, target_prices: targetPrices }),
+            request_data: sanitizePriceLogPayload({
+                biz_params: requestParams, target_prices: targetPrices, base_hour_price: baseHourPrice,
+                computed_rent_mode: computedRentMode
+            }),
             response_data: errorDetail,
             after_data: sanitizePriceLogPayload(afterNormalized ? {
                 template: afterTemplate,

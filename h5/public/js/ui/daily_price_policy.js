@@ -22,15 +22,17 @@
       <p class="head-summary-text" data-daily-preview></p>`;
   }
   function preview(value, channel, hourly, normalize) {
-    if (value.mode === 'follow') return '日租按各档时租价 × 本渠道日租倍率计算。';
     try {
+      const hourlyBasis = normalize(Number(hourly), (channel.price_rules || {}).hour);
+      if (!Number.isFinite(hourlyBasis) || hourlyBasis <= 0) return '请输入有效的首档示例基础时租价和日租倍率。';
+      if (value.mode === 'follow') return '日租按各档原始基础时租价 × 本渠道日租倍率计算，不乘时租倍率。';
       const policy = parse(value);
       const key = channel.channel === 'uhaozu' ? 'day' : 'p24';
-      const base = normalize(Number(hourly) * Number(channel.ratios[key]), (channel.price_rules || {})[key]);
-      if (!(base > 0)) return '请输入有效的首档示例时租价和日租倍率。';
+      const base = normalize(hourlyBasis * Number(channel.ratios[key]), (channel.price_rules || {})[key]);
+      if (!(base > 0)) return '请输入有效的首档示例基础时租价和日租倍率。';
       let night = '';
       if (channel.channel === 'uhaozu' && policy.mode === 'decrease') {
-        const nightBase = normalize(Number(hourly) * Number(channel.ratios.night), (channel.price_rules || {}).night);
+        const nightBase = normalize(hourlyBasis * Number(channel.ratios.night), (channel.price_rules || {}).night);
         if (!Number.isFinite(nightBase) || nightBase <= 0) return '请输入有效的包夜倍率。';
         night = `；四档包夜示例：${policy.factors.map(factor => `¥${normalize(nightBase * factor, (channel.price_rules || {}).night).toFixed(2)}`).join(' / ')}`;
       }
@@ -40,7 +42,7 @@
         for (const hours of [2, 3, 5, 7, 9, 10]) {
           const shortKey = `p${hours}`;
           const priceRule = (channel.price_rules || {})[shortKey];
-          const shortBase = normalize(Number(hourly) * Number(channel.ratios[shortKey]), priceRule);
+          const shortBase = normalize(hourlyBasis * Number(channel.ratios[shortKey]), priceRule);
           if (!Number.isFinite(shortBase) || shortBase <= 0) return `请输入有效的${hours}小时倍率。`;
           samples.push(`${hours}h ${policy.factors.map(factor => `¥${normalize(shortBase * factor, priceRule).toFixed(2)}`).join(' / ')}`);
         }

@@ -1486,12 +1486,13 @@ async function handleSetPricingPackageRatios(req, res) {
         const setting = await savePackageRatioSettingsByUser(user.id, {
             channel: body.channel,
             ratios: body.ratios,
+            hour_ratio_editable: body.hour_ratio_editable,
             daily_policy: body.daily_policy,
             expected_version: body.expected_version
         });
         return json(res, 200, { ok: true, setting });
     } catch (err) {
-        if (err && err.code === 'DAILY_PRICE_POLICY_INVALID') {
+        if (err && ['DAILY_PRICE_POLICY_INVALID', 'PRICE_PACKAGE_RATIO_INVALID'].includes(err.code)) {
             return json(res, 400, { ok: false, message: err.message });
         }
         if (err && err.code === 'PRICE_LADDER_VERSION_CONFLICT') {

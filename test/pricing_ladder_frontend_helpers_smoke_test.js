@@ -212,8 +212,8 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(helpers.normalizePricingRatioDr
 });
 assert.deepStrictEqual(JSON.parse(JSON.stringify(helpers.validatePricingRatioDraft(ratioChannel, {
     hour: '8', p24: '5.25', p72: '14'
-}))), { hour: 1, p24: 5.25, p72: 14 });
-assert.throws(() => helpers.validatePricingRatioDraft(ratioChannel, { p24: '0', p72: '14' }), /24小时倍率/);
+}))), { hour: 8, p24: 5.25, p72: 14 });
+assert.throws(() => helpers.validatePricingRatioDraft(ratioChannel, { hour: '1', p24: '0', p72: '14' }), /24小时倍率/);
 assert.deepStrictEqual(JSON.parse(JSON.stringify(helpers.calculatePricingRatioPreview(
     ratioChannel,
     { hour: '1', p24: '4.5', p72: '13.5' },

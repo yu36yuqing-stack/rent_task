@@ -148,7 +148,7 @@ for (const hours of [2,3,5,7,9,10]) {
 }
 assert(!ui.preview(ui.draft({mode:'flat'}),youyouChannel,1.6,normalize).includes('短租示例'));
 assert(ui.preview(draft,channel,2,normalize).includes('¥12.00 / ¥12.00 / ¥11.40 / ¥10.80'));
-assert(ui.preview(ui.draft(),channel,2,normalize).includes('各档时租'));
+assert(ui.preview(ui.draft(),channel,2,normalize).includes('各档原始基础时租'));
 assert(ui.preview(draft,channel,0,normalize).includes('请输入'));
 assert(ui.preview({mode:'bad'},channel,2,normalize).includes('有效'));
 assert(ui.preview(draft,{channel:'zuhaowang',ratios:{p24:4.5},price_rules:{p24:{rounding:'truncate'}}},2.31,normalize).includes('¥10.30 / ¥10.30 / ¥9.70 / ¥9.20'));

@@ -17,14 +17,13 @@ function normalizeRatios(capability = {}, input = {}, options = {}) {
     const strict = options.strict === true;
     const out = {};
     for (const key of keys) {
-        if (key === 'hour') {
-            out.hour = 1;
-            continue;
-        }
-        const raw = source[key] === undefined ? defaults[key] : source[key];
+        const fallback = key === 'hour' && defaults[key] === undefined ? 1 : defaults[key];
+        const raw = source[key] === undefined ? fallback : source[key];
         const value = roundRatio(raw);
         if (strict && (!Number.isFinite(value) || value <= 0)) {
-            throw new Error(`${capability.package_labels && capability.package_labels[key] || key}倍率必须大于 0`);
+            const error = new Error(`${capability.package_labels && capability.package_labels[key] || key}倍率必须大于 0`);
+            error.code = 'PRICE_PACKAGE_RATIO_INVALID';
+            throw error;
         }
         out[key] = value;
     }

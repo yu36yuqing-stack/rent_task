@@ -181,18 +181,21 @@ function formatPricingRatio(value) {
 function normalizePricingRatioDraft(channel = {}) {
   const ratios = channel.ratios && typeof channel.ratios === 'object' ? channel.ratios : {};
   const keys = Array.isArray(channel.package_keys) ? channel.package_keys : [];
-  return Object.fromEntries(keys.map((key) => [key, key === 'hour' ? '1' : formatPricingRatio(ratios[key])]));
+  return Object.fromEntries(keys.map((key) => [key, formatPricingRatio(
+    key === 'hour' && ratios[key] === undefined ? 1 : ratios[key]
+  )]));
 }
 
 function validatePricingRatioDraft(channel = {}, draft = {}) {
-  const keys = (Array.isArray(channel.package_keys) ? channel.package_keys : []).filter((key) => key !== 'hour');
-  const out = { hour: 1 };
+  const keys = Array.isArray(channel.package_keys) ? channel.package_keys : [];
+  const out = {};
   for (const key of keys) {
     const value = Number(String(draft[key] == null ? '' : draft[key]).trim());
-    if (!Number.isFinite(value) || value <= 0) {
+    const rounded = Number(value.toFixed(4));
+    if (!Number.isFinite(rounded) || rounded <= 0) {
       throw new Error(`${channel.package_labels && channel.package_labels[key] || key}倍率必须大于 0`);
     }
-    out[key] = Number(value.toFixed(4));
+    out[key] = rounded;
   }
   return out;
 }
@@ -212,16 +215,16 @@ function normalizePricingPreviewPrice(value, rule = {}) {
 function calculatePricingRatioPreview(channel = {}, draft = {}, hourPrice = '') {
   const keys = Array.isArray(channel.package_keys) ? channel.package_keys : [];
   const labels = channel.package_labels && typeof channel.package_labels === 'object' ? channel.package_labels : {};
-  const hour = Number(String(hourPrice == null ? '' : hourPrice).trim());
-  const validHour = Number.isFinite(hour) && hour > 0;
   const priceRules = channel.price_rules && typeof channel.price_rules === 'object' ? channel.price_rules : {};
+  const hour = normalizePricingPreviewPrice(Number(String(hourPrice == null ? '' : hourPrice).trim()), priceRules.hour);
+  const validHour = Number.isFinite(hour) && hour > 0;
   return keys.map((key) => {
-    const ratio = key === 'hour' ? 1 : Number(String(draft[key] == null ? '' : draft[key]).trim());
+    const ratio = Number(Number(String(draft[key] == null ? '' : draft[key]).trim()).toFixed(4));
     const validRatio = Number.isFinite(ratio) && ratio > 0;
     return {
       key,
       label: labels[key] || key,
-      hour_price: validHour ? Number(hour.toFixed(2)) : 0,
+      hour_price: validHour ? hour : 0,
       ratio: validRatio ? Number(ratio.toFixed(4)) : 0,
       price: validHour && validRatio ? normalizePricingPreviewPrice(hour * ratio, priceRules[key]) : 0
     };
@@ -288,7 +291,7 @@ function renderPricingRatioSettings() {
       <div class="pricing-ratio-field-line">
         <div class="pricing-price-input">
           <input data-pricing-ratio-key="${escapePricingHtml(key)}" type="number" min="0.0001" step="0.0001" inputmode="decimal"
-            value="${escapePricingHtml(draft[key] || '')}" ${key === 'hour' || ratioState.saving ? 'disabled' : ''}>
+            value="${escapePricingHtml(draft[key] || '')}" ${ratioState.saving ? 'disabled' : ''}>
           <span>倍</span>
         </div>
         <span class="pricing-ratio-result" data-pricing-ratio-result-key="${escapePricingHtml(key)}">= -</span>
@@ -303,7 +306,7 @@ function renderPricingRatioSettings() {
     <div class="pricing-ratio-grid">${fields}</div>
     <div id="pricingDailyPolicyPanel" class="pricing-ratio-panel">${window.DailyPricePolicy.render(dailyDraft, ratioState.saving, escapePricingHtml)}</div>
     <div class="pricing-ratio-actions">
-      <span class="head-summary-text">时租固定为1倍；保存前检查全部关联未售账号的四档套餐，冲突时不保存。</span>
+      <span class="head-summary-text">各套餐独立乘原始基础时租价，时租倍率不影响其他套餐；保存后下次同步生效。</span>
       <button class="btn btn-ghost btn-page-action" id="pricingRatioSaveBtn" type="button" ${ratioState.saving ? 'disabled' : ''}>${ratioState.saving ? '保存中...' : '保存设置'}</button>
     </div>
   `;
@@ -353,6 +356,7 @@ async function savePricingRatioSettings(channel) {
       body: JSON.stringify({
         channel: channel.channel,
         ratios,
+        hour_ratio_editable: true,
         daily_policy: dailyPolicy,
         expected_version: Number(channel.version || 0)
       })
@@ -885,7 +889,7 @@ function renderPricingList() {
         <span>${escapePricingHtml(pricingTierLabel(tier))}</span>
         <div class="pricing-price-input">
           <input data-pricing-tier="${tier}" type="number" min="0.01" step="0.01" inputmode="decimal"
-            aria-label="${tier}档时租价" value="${escapePricingHtml(draft.prices[index] || '')}" ${editing && !saving ? '' : 'disabled'}>
+            aria-label="${tier}档时租价" title="原始基础时租价，实际渠道时租另乘时租倍率" value="${escapePricingHtml(draft.prices[index] || '')}" ${editing && !saving ? '' : 'disabled'}>
           <span>元</span>
         </div>
       </label>

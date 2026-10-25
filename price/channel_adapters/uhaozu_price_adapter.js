@@ -79,12 +79,13 @@ function buildTierPrices(hourPrices = [], baselinePrices = {}) {
 
 function buildTierPricesByRatios(hourPrices = [], ratios = {}) {
     return hourPrices.slice(0, 4).map((value, index) => {
-        const hour = roundMoney(value);
-        const derive = (key) => Number(ratios[key] || 0) > 0 ? roundMoney(hour * Number(ratios[key])) : 0;
+        const baseHour = roundMoney(value);
+        const hourRatio = ratios.hour === undefined ? 1 : Number(ratios.hour);
+        const derive = (key) => Number(ratios[key] || 0) > 0 ? roundMoney(baseHour * Number(ratios[key])) : 0;
         return {
             tier: index + 1,
             prices: {
-                hour,
+                hour: hourRatio > 0 ? roundMoney(baseHour * hourRatio) : 0,
                 night: derive('night'),
                 day: derive('day'),
                 week: derive('week')

@@ -20,7 +20,9 @@ for (const channel of ['uhaozu', 'zuhaowang', 'uuzuhao']) {
                 baseline: { ratios: adapter.default_ratios, daily_policy: policy }
             }, desired), {
                 mode, daily_price_key: key, first_tier_hour_price: 2,
-                target_tier_hour_price: desired.prices.hour, daily_ratio: adapter.default_ratios[key],
+                target_tier_hour_price: rule.prices[desired.tier - 1],
+                hour_ratio: adapter.default_ratios.hour, target_channel_hour_price: desired.prices.hour,
+                daily_ratio: adapter.default_ratios[key],
                 base_daily_price: original[0].prices[key],
                 calculation_base: mode === 'follow' ? 'target_tier_hour' : 'first_tier_daily',
                 factor: mode === 'decrease' ? policy.factors[desired.tier - 1] : 1,

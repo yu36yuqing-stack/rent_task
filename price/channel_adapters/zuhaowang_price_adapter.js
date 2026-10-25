@@ -79,20 +79,22 @@ function pickCurrentPriceSet(accountRow = {}) {
     };
 }
 
-function buildPriceSet(hourPrice, ratios = capability.default_ratios) {
-    const hour = normalizePackagePrice('hour', hourPrice);
+function buildPriceSet(hourPrice, ratios = capability.default_ratios, options = {}) {
+    const baseHour = normalizePackagePrice('hour', hourPrice);
+    const hourRatio = ratios.hour === undefined ? 1 : Number(ratios.hour);
+    const dayOnly = String(options.rent_mode || '').trim() === 'day_only';
     return {
-        hour,
-        p24: normalizePackagePrice('p24', hour * Number(ratios.p24 || 0)),
-        p72: normalizePackagePrice('p72', hour * Number(ratios.p72 || 0)),
-        p168: normalizePackagePrice('p168', hour * Number(ratios.p168 || 0))
+        hour: dayOnly ? baseHour : (hourRatio > 0 ? normalizePackagePrice('hour', baseHour * hourRatio) : 0),
+        p24: normalizePackagePrice('p24', baseHour * Number(ratios.p24 || 0)),
+        p72: normalizePackagePrice('p72', baseHour * Number(ratios.p72 || 0)),
+        p168: normalizePackagePrice('p168', baseHour * Number(ratios.p168 || 0))
     };
 }
 
-function buildTierPrices(hourPrices = [], ratios = capability.default_ratios) {
+function buildTierPrices(hourPrices = [], ratios = capability.default_ratios, options = {}) {
     return hourPrices.slice(0, 4).map((value, index) => ({
         tier: index + 1,
-        prices: buildPriceSet(value, ratios)
+        prices: buildPriceSet(value, ratios, options)
     }));
 }
 
@@ -104,8 +106,9 @@ function samePriceSet(left = {}, right = {}) {
 
 async function resolveTierPrices(context = {}) {
     const ratioConfig = await resolvePackageRatios(context.user_id, capability);
-    const tiers = applyDailyPolicy(buildTierPrices(context.rule && context.rule.prices || [], ratioConfig.ratios),
-        capability, ratioConfig.daily_policy, normalizePackagePrice);
+    const options = { rent_mode: String(channelInfo(context.account_row).rent_mode || '').trim() };
+    const tiers = applyDailyPolicy(buildTierPrices(context.rule && context.rule.prices || [], ratioConfig.ratios, options),
+        capability, ratioConfig.daily_policy, normalizePackagePrice, options);
     const ready = tiers.length === 4
         && tiers.every((item) => capability.package_keys.every((key) => Number(item.prices[key] || 0) > 0));
     return {

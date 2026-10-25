@@ -65,10 +65,11 @@ function isAvailable(accountRow = {}) {
 }
 
 function buildPriceSet(hourPrice, ratios = capability.default_ratios) {
-    const hour = roundMoney(hourPrice);
-    const prices = { hour };
+    const baseHour = roundMoney(hourPrice);
+    const hourRatio = ratios.hour === undefined ? 1 : Number(ratios.hour);
+    const prices = { hour: hourRatio > 0 ? roundMoney(baseHour * hourRatio) : 0 };
     for (const key of capability.package_keys.filter((item) => item !== 'hour')) {
-        prices[key] = Number(ratios[key] || 0) > 0 ? roundMoney(hour * Number(ratios[key])) : 0;
+        prices[key] = Number(ratios[key] || 0) > 0 ? roundMoney(baseHour * Number(ratios[key])) : 0;
     }
     return prices;
 }

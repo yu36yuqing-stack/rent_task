@@ -91,7 +91,7 @@ function mergePriceLadderCandidates(candidates = []) {
     return Array.from(map.values()).filter((item) => item.delta !== 0);
 }
 
-function priceSignature(tier, prices = {}, ruleVersion = 0, baselineVersion = 0) {
+function priceSignature(tier, prices = {}, ruleVersion = 0, baselineVersion = 0, baseHourPrice) {
     const normalizedPrices = Object.fromEntries(Object.keys(prices || {}).sort().map((key) => [
         key,
         Number(Number(prices[key] || 0).toFixed(2))
@@ -100,7 +100,8 @@ function priceSignature(tier, prices = {}, ruleVersion = 0, baselineVersion = 0)
         tier: Number(tier || 0),
         prices: normalizedPrices,
         rule_version: Number(ruleVersion || 0),
-        baseline_version: Number(baselineVersion || 0)
+        baseline_version: Number(baselineVersion || 0),
+        ...(baseHourPrice === undefined ? {} : { base_hour_price: Number(Number(baseHourPrice).toFixed(2)) })
     });
 }
 
@@ -288,7 +289,9 @@ function dailyCalculationLog(adapter, rule, resolved, desired) {
         const factor = policy.mode === 'decrease' ? policy.factors[desired.tier - 1] : 1;
         return {
             mode: policy.mode, daily_price_key: key,
-            first_tier_hour_price: base.hour, target_tier_hour_price: desired.prices.hour,
+            first_tier_hour_price: Number(rule.prices[0]),
+            target_tier_hour_price: Number(rule.prices[desired.tier - 1]),
+            hour_ratio: ratios.hour, target_channel_hour_price: desired.prices.hour,
             daily_ratio: ratios[key], base_daily_price: base[key],
             calculation_base: policy.mode === 'follow' ? 'target_tier_hour' : 'first_tier_daily',
             factor, target_daily_price: desired.prices[key],
@@ -533,7 +536,8 @@ async function executePriceLadderReconciliation(userId, options, observe) {
         const baselineVersion = Number(resolved.baseline_version || 0);
         const tiers = Array.isArray(resolved.tiers) ? resolved.tiers : [];
         const desired = tiers.find((item) => item.tier === desiredTier) || null;
-        const signature = desired ? priceSignature(desiredTier, desired.prices, rule.version, baselineVersion) : '';
+        const baseHourPrice = desired ? Number(rule.prices[desiredTier - 1]) : 0;
+        const signature = desired ? priceSignature(desiredTier, desired.prices, rule.version, baselineVersion, baseHourPrice) : '';
         // Recheck the owner's configuration before accepting or publishing a snapshot.
         const latestFeature = await featureGuard(uid);
         if (!latestFeature || latestFeature.enabled !== true) {
@@ -615,6 +619,7 @@ async function executePriceLadderReconciliation(userId, options, observe) {
                 status: 'applying', count_24h: count, order_count: count, from_tier: appliedTier, to_tier: desiredTier,
                 trigger_source: runtime.trigger_source, retry_count: runtime.retry_count,
                 target_prices: desired.prices,
+                base_hour_price: baseHourPrice,
                 daily_policy: resolved.baseline && resolved.baseline.daily_policy,
                 daily_calculation: dailyCalculationLog(adapter, rule, resolved, desired),
                 rule_version: Number(rule.version || 0), baseline_version: baselineVersion
@@ -626,6 +631,9 @@ async function executePriceLadderReconciliation(userId, options, observe) {
                 goods_id: adapter.productId(accountRow),
                 tier: desiredTier,
                 prices: desired.prices,
+                base_hour_price: baseHourPrice,
+                ...(runtime.channel === 'zuhaowang'
+                    ? { computed_rent_mode: accountRow.channel_prd_info?.zuhaowang?.rent_mode } : {}),
                 trigger_source: runtime.trigger_source || 'price_ladder',
                 force_publish: adapter.shouldForcePublish(runtimeTrigger)
             });

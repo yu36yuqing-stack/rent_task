@@ -1,5 +1,8 @@
 {
   "scripts": {
+    "test:hour-ratio": "node test/run_hour_ratio_tests.js",
+    "test:hour-ratio-visual": "node test/hour_ratio_visual_test.js",
+    "coverage:hour-ratio": "c8 --all --include=database/zuhaowang_product_mode_db.js --include=price/channel_package_ratio.js --include=price/package_ratio_service.js --include=price/channel_adapters/*_price_adapter.js --include=price/daily_price_policy.js --include=price/zuhaowang_price_snapshot_service.js --include=price/price_publish_service.js --include=price/price_ladder_reconcile_service.js --include=h5/public/js/ui/daily_price_policy.js --include=h5/public/js/menu_price.js --include=h5/local_h5_server.js --reporter=text --reporter=json --reporter=json-summary --reporter=html --report-dir=coverage/hour-ratio/code node test/run_hour_ratio_tests.js && node test/check_hour_ratio_coverage.js",
     "test:uuzuhao-shelf-auth": "node test/run_uuzuhao_shelf_auth_tests.js",
     "coverage:uuzuhao-shelf-auth": "c8 --all --include=common/uuzuhao_auth_state.js --include=database/uuzuhao_auth_state_db.js --include=product/uuzuhao_online_auth_service.js --include=product/uuzuhao_shelf_auth_service.js --include=action_engine/action_engine.js --include=product/product.js --include=h5/public/js/ui/uuzuhao_auth_status.js --reporter=text --reporter=json --reporter=json-summary --reporter=html --report-dir=coverage/uuzuhao-shelf-auth/code node test/run_uuzuhao_shelf_auth_tests.js && node test/check_uuzuhao_shelf_auth_coverage.js",
     "test:daily-price-policy": "node test/run_daily_price_tests.js",

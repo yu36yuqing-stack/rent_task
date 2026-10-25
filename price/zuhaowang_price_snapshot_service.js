@@ -20,11 +20,18 @@ function getZuhaowangDisplayHourPrice(info = {}) {
     return price ? normalizePackagePrice('hour', price) : 0;
 }
 
-function buildConfirmedZuhaowangPriceSnapshot(info, goodsId, normalized, targetPrices) {
+function normalizeZuhaowangBaseHourPrice(targetPrices = {}, baseHourPrice) {
+    const value = baseHourPrice === undefined ? targetPrices.hour : baseHourPrice;
+    const normalized = normalizePackagePrice('hour', positive(value));
+    if (normalized <= 0) throw new Error('租号王基础时租价不合法');
+    return normalized;
+}
+
+function buildConfirmedZuhaowangPriceSnapshot(info, goodsId, normalized, targetPrices, baseHourPrice) {
     const sameProduct = String(info.prd_id || info.data_id || '') === String(goodsId);
     const snapshot = { ...info, prd_id: String(goodsId), rent_mode: normalized.rent_mode,
         price_template_type: String(normalized.account_info.priceTemplateType),
-        hour_basis: normalizePackagePrice('hour', targetPrices.hour) };
+        hour_basis: normalizeZuhaowangBaseHourPrice(targetPrices, baseHourPrice) };
     delete snapshot.hour_price;
     delete snapshot.obtainPrice;
     for (const [key, field] of Object.entries(PRICE_KEYS)) snapshot[field] = normalizePackagePrice(key, normalized.prices[key]);
@@ -41,12 +48,21 @@ function recoverFromLog(account, log) {
         || String(log.goods_id) !== goodsId || Number(log.is_deleted || 0) || log.publish_status !== 'success'
         || !log.response_data || log.response_data.verification_status !== 'full') return null;
     const after = log.after_data || {};
-    const target = log.request_data && log.request_data.target_prices;
+    const request = log.request_data || {};
+    const target = request.target_prices;
     const prices = after.prices;
     const mode = after.rent_mode;
     if (!target || !prices || !['day_only', 'hour_only', 'hour_and_day'].includes(mode)
         || (info.rent_mode && info.rent_mode !== mode) || !positive(target.hour)
         || normalizePackagePrice('hour', target.hour) <= 0) return null;
+    let baseHourPrice;
+    try {
+        baseHourPrice = normalizeZuhaowangBaseHourPrice(target, request.base_hour_price);
+        if (after.hour_basis !== undefined
+            && normalizeZuhaowangBaseHourPrice(target, after.hour_basis) !== baseHourPrice) return null;
+    } catch (_) {
+        return null;
+    }
     const keys = mode === 'day_only' ? ['p24', 'p72', 'p168'] : (mode === 'hour_only' ? ['hour'] : Object.keys(PRICE_KEYS));
     for (const key of keys) {
         const stored = key === 'hour' ? actualHour(info) : positive(info[PRICE_KEYS[key]]);
@@ -58,7 +74,7 @@ function recoverFromLog(account, log) {
     }
     const restored = buildConfirmedZuhaowangPriceSnapshot(info, goodsId, {
         rent_mode: mode, prices, account_info: { priceTemplateType: '1' }
-    }, target);
+    }, target, baseHourPrice);
     if (actualHour(info)) restored.hourPrice = actualHour(info);
     return restored;
 }
@@ -111,7 +127,15 @@ async function recoverZuhaowangPriceSnapshotsFromTemplates(userId, accounts, run
         if (!signature || signature.tier !== runtime.applied_tier || !signature.prices
             || Object.keys(PRICE_KEYS).some((key) => !positive(signature.prices[key])
                 || normalizePackagePrice(key, signature.prices[key]) <= 0)) continue;
-        confirmed.set(`${runtime.game_id}::${runtime.game_account}`, signature.prices);
+        let baseHourPrice;
+        try {
+            baseHourPrice = normalizeZuhaowangBaseHourPrice(signature.prices, signature.base_hour_price);
+        } catch (_) {
+            continue;
+        }
+        confirmed.set(`${runtime.game_id}::${runtime.game_account}`, {
+            prices: signature.prices, base_hour_price: baseHourPrice
+        });
     }
     const pending = candidates.filter((row) => confirmed.has(`${row.game_id}::${row.game_account}`));
     if (!pending.length) return {};
@@ -132,8 +156,9 @@ async function recoverZuhaowangPriceSnapshotsFromTemplates(userId, accounts, run
         try {
             const normalized = internal.normalizeZuhaowangTemplate(await query(goodsId, auth, { user_id: uid }));
             const target = confirmed.get(key);
-            if (!internal.sameZuhaowangActivePriceSet(target, normalized.prices, normalized.rent_mode)) continue;
-            recovered[key] = buildConfirmedZuhaowangPriceSnapshot(info, goodsId, normalized, target);
+            if (!internal.sameZuhaowangActivePriceSet(target.prices, normalized.prices, normalized.rent_mode)) continue;
+            recovered[key] = buildConfirmedZuhaowangPriceSnapshot(info, goodsId, normalized,
+                target.prices, target.base_hour_price);
         } catch (error) {
             console.warn(`[ZHWPriceSnapshot] user_id=${uid} stage=query account=${row.game_account} error_code=${error.code || 'READ_FAILED'}`);
         }
@@ -141,5 +166,5 @@ async function recoverZuhaowangPriceSnapshotsFromTemplates(userId, accounts, run
     return recovered;
 }
 
-module.exports = { getZuhaowangDisplayHourPrice, buildConfirmedZuhaowangPriceSnapshot,
+module.exports = { getZuhaowangDisplayHourPrice, normalizeZuhaowangBaseHourPrice, buildConfirmedZuhaowangPriceSnapshot,
     recoverZuhaowangPriceSnapshotsByUser, recoverZuhaowangPriceSnapshotsFromTemplates, _internals: { recoverFromLog } };
