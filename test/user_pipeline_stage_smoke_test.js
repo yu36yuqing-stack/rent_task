@@ -10,6 +10,10 @@ async function main() {
     const userMod = require('../user/user');
     const actionMod = require('../action_engine/action_engine');
     const reportMod = require('../report/report_rent_status');
+    const policyMod = require('../product/uhaozu_auto_reshelf_policy');
+    const policy = Object.freeze({ key: 'uhaozu.auto_reshelf_reasons', id: 1, version: 7,
+        available: true, reasons: Object.freeze(['账号人脸识别']) });
+    let policyLoads = 0;
 
     const originals = {
         syncUserAccountsByAuth: productMod.syncUserAccountsByAuth,
@@ -26,7 +30,8 @@ async function main() {
         buildPayloadForOneUser: reportMod.buildPayloadForOneUser,
         notifyUserByPayload: reportMod.notifyUserByPayload,
         listUserSyncAnomaliesForReport: reportMod.listUserSyncAnomaliesForReport,
-        toReportAccountFromUserGameRow: reportMod.toReportAccountFromUserGameRow
+        toReportAccountFromUserGameRow: reportMod.toReportAccountFromUserGameRow,
+        loadUhaozuAutoReshelfPolicy: policyMod.loadUhaozuAutoReshelfPolicy
     };
 
     productMod.syncUserAccountsByAuth = async () => ({ ok: true, platforms: ['stub'], errors: [] });
@@ -37,7 +42,7 @@ async function main() {
             game_name: 'WZRY',
             asset_status: 'active',
             channel_status: { uhaozu: '上架中' },
-            channel_prd_info: {}
+            channel_prd_info: { uhaozu: { audit_reason: '账号人脸识别' } }
         },
         {
             game_account: 'sold_acc',
@@ -51,7 +56,9 @@ async function main() {
     orderRuleMod.reconcileOrderNOffByUser = async () => ({ ok: true });
     userMod.loadUserBlacklistSet = async () => new Set();
     userMod.loadUserBlacklistReasonMap = async () => ({});
+    policyMod.loadUhaozuAutoReshelfPolicy = async () => { policyLoads += 1; return policy; };
     actionMod.executeUserActionsIfNeeded = async (input = {}) => {
+        assert.strictEqual(input.uhaozuAutoReshelfPolicy, policy, '动作引擎必须收到同轮不可变配置快照');
         assert.deepStrictEqual(
             (input.rows || []).map((row) => row.game_account),
             ['acc_1'],
@@ -120,6 +127,7 @@ async function main() {
     );
 
     assert.strictEqual(out.ok, true, 'pipeline 应成功');
+    assert.strictEqual(policyLoads, 1, '人脸收敛和动作判断共享一次配置读取');
     assert.strictEqual(out.accounts_count, 1, 'pipeline 返回账号数应按在售账号计算');
     assert.ok(out.pipeline_timing && typeof out.pipeline_timing === 'object', '应返回 pipeline_timing');
     assert.ok(Number(out.pipeline_timing.total_ms) >= 0, 'pipeline_timing.total_ms 应为非负数');
@@ -152,6 +160,7 @@ async function main() {
         { logger: { log() {}, warn() {}, error() {} }, actionEnabled: false, readOnly: true }
     );
     assert.strictEqual(failedOut.ok, false, '通知失败时 pipeline 应失败');
+    assert.strictEqual(policyLoads, 2, '下一轮重新读取配置');
     assert.deepStrictEqual(failedOut.notify_result, notifyFailure, 'pipeline 失败结果应保留通知渠道明细');
 
     Object.assign(productMod, {
@@ -181,6 +190,7 @@ async function main() {
         listUserSyncAnomaliesForReport: originals.listUserSyncAnomaliesForReport,
         toReportAccountFromUserGameRow: originals.toReportAccountFromUserGameRow
     });
+    policyMod.loadUhaozuAutoReshelfPolicy = originals.loadUhaozuAutoReshelfPolicy;
     delete require.cache[require.resolve('../pipeline/user_pipeline')];
 
     console.log('[PASS] user_pipeline_stage_smoke_test');

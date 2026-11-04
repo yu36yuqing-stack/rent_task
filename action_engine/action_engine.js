@@ -7,9 +7,12 @@ const { updateRentAccountShelf } = require('../5e_platfrom/5e_api');
 const { normalizeUuzuhaoAuthState } = require('../common/uuzuhao_auth_state');
 const { executeUuzuhaoOnShelf } = require('../product/uuzuhao_shelf_auth_service');
 const {
+    loadUhaozuAutoReshelfPolicy,
+    matchUhaozuAutoReshelfReason
+} = require('../product/uhaozu_auto_reshelf_policy');
+const {
     buildPlatformStatusNorm,
     isOnAllowedByCode,
-    isUhaozuOnlineDetectReason,
     resolveUuzuhaoReauthorizeState
 } = require('../product/prod_channel_status');
 const { appendProductOnoffHistory } = require('../database/product_onoff_history_db');
@@ -41,11 +44,11 @@ function isActiveShelfStatus(status) {
     return s === '上架' || s === '租赁中' || s === '出租中';
 }
 
-function isUhaozuOnlineDetectSoftBlock(norm = {}) {
+function isUhaozuRecoverableSoftBlock(norm = {}, policy) {
     const code = String((norm && norm.code) || '').trim();
     const reason = String((norm && norm.reason) || '').trim();
     if (code !== 'auth_abnormal') return false;
-    return isUhaozuOnlineDetectReason(reason);
+    return matchUhaozuAutoReshelfReason(reason, policy);
 }
 
 function platformFromActionType(type = '') {
@@ -57,8 +60,8 @@ function platformFromActionType(type = '') {
     return '';
 }
 
-function shouldUseUhaozuModifyReshelf({ statY, statZ, ignoreUhaozuOnlineDetect }) {
-    if (!ignoreUhaozuOnlineDetect) return false;
+function shouldUseUhaozuModifyReshelf({ statY, statZ, recoverableUhaozuReason }) {
+    if (!recoverableUhaozuReason) return false;
     const peerStatuses = [statY, statZ].filter((status) => String(status || '').trim() !== '未找到');
     if (peerStatuses.length === 0) return false;
     return peerStatuses.every((status) => isActiveShelfStatus(status));
@@ -127,7 +130,8 @@ function detectConflictsAndBuildSnapshot({
     fiveEData = [],
     blacklistAccounts = new Set(),
     platformRestrictSet = new Set(),
-    platformStatusNormMap = {}
+    platformStatusNormMap = {},
+    uhaozuAutoReshelfPolicy
 }) {
     const snapshot = {
         timestamp: Date.now(),
@@ -216,11 +220,11 @@ function detectConflictsAndBuildSnapshot({
             ? (platformStatusNormMap[identityKey] || {})
             : {};
         const uNorm = normByAcc.uhaozu && typeof normByAcc.uhaozu === 'object' ? normByAcc.uhaozu : {};
-        const ignoreUhaozuOnlineDetect = isUhaozuOnlineDetectSoftBlock(uNorm);
+        const recoverableUhaozuReason = isUhaozuRecoverableSoftBlock(uNorm, uhaozuAutoReshelfPolicy);
         const yNorm = normByAcc.uuzuhao || {};
         const canAutoOnY = !normalizeUuzuhaoAuthState(y && y.uuzuhao_auth_state).required
             && (isOnAllowedByCode(String(yNorm.code || '')) || resolveUuzuhaoReauthorizeState(yNorm).hit);
-        const canAutoOnU = isOnAllowedByCode(String((uNorm && uNorm.code) || '')) || ignoreUhaozuOnlineDetect;
+        const canAutoOnU = isOnAllowedByCode(String((uNorm && uNorm.code) || '')) || recoverableUhaozuReason;
         const canAutoOnZ = isOnAllowedByCode(String((normByAcc.zuhaowang && normByAcc.zuhaowang.code) || ''));
         const canAutoOnFiveE = isOnAllowedByCode(String((normByAcc['5e'] && normByAcc['5e'].code) || ''));
 
@@ -255,10 +259,19 @@ function detectConflictsAndBuildSnapshot({
                     const useModifyReshelf = shouldUseUhaozuModifyReshelf({
                         statY,
                         statZ,
-                        ignoreUhaozuOnlineDetect
+                        recoverableUhaozuReason
                     });
+                    const recoveryReason = String(uNorm.reason || '').trim();
                     actions.push({
                         type: useModifyReshelf ? 'on_u_modify' : 'on_u',
+                        ...(recoverableUhaozuReason ? {
+                            uhaozu_recovery: {
+                                config_key: String(uhaozuAutoReshelfPolicy.key || ''),
+                                config_id: Number(uhaozuAutoReshelfPolicy.id || 0),
+                                config_version: Number(uhaozuAutoReshelfPolicy.version || 0),
+                                reason: recoveryReason
+                            }
+                        } : {}),
                         item: {
                             account: acc,
                             game_id: one.game_id,
@@ -268,9 +281,9 @@ function detectConflictsAndBuildSnapshot({
                             platform_game_id: u.platform_game_id || ''
                         },
                         reason: useModifyReshelf
-                            ? '无租赁，其他平台已上架，U号租检测在线时改用改价接口原价补上架'
-                            : ignoreUhaozuOnlineDetect
-                            ? '无租赁，忽略U号租检测在线并自动补上架'
+                            ? `无租赁，U号租命中恢复配置（${recoveryReason}），其他平台已上架，原价补上架`
+                            : recoverableUhaozuReason
+                            ? `无租赁，U号租命中恢复配置（${recoveryReason}），自动补上架`
                             : '无租赁，自动补上架U号租'
                     });
                 }
@@ -684,7 +697,8 @@ async function executeUserActionsIfNeeded({
     rows,
     blacklistSet = new Set(),
     actionEnabled = true,
-    readOnly = false
+    readOnly = false,
+    uhaozuAutoReshelfPolicy
 }) {
     const totalStartedAt = nowMs();
     const timing = {
@@ -714,6 +728,9 @@ async function executeUserActionsIfNeeded({
     };
     if (!actionEnabled) return { planned: 0, actions: [], timing: finishTiming(), errors: [] };
     if (!user || !user.id) throw new Error('user 缺失或不合法');
+    const recoveryPolicy = uhaozuAutoReshelfPolicy === undefined
+        ? await loadUhaozuAutoReshelfPolicy({ logger: console })
+        : uhaozuAutoReshelfPolicy;
 
     const authStartedAt = nowMs();
     const authRows = (await listUserPlatformAuth(user.id, { with_payload: true }))
@@ -841,7 +858,8 @@ async function executeUserActionsIfNeeded({
         fiveEData,
         blacklistAccounts: blacklistSet,
         platformRestrictSet,
-        platformStatusNormMap
+        platformStatusNormMap,
+        uhaozuAutoReshelfPolicy: recoveryPolicy
     });
 
     const requiredPlatforms = new Set();

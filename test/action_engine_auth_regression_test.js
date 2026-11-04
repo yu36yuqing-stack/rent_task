@@ -36,10 +36,16 @@ require('../zuhaowang/zuhaowang_api').changeStatus = async (_a, _g, type) => { c
 require('../5e_platfrom/5e_api').updateRentAccountShelf = async () => { calls.push('5e'); return { ok: true }; };
 const engine = require('../action_engine/action_engine');
 const key = { game_account: 'A', game_id: '1', game_name: 'WZRY' };
+const recoveryPolicy = {
+    available: true, key: 'uhaozu.auto_reshelf_reasons', id: 1, version: 1,
+    reasons: ['检测游戏在线，请确认游戏离线后手动上架']
+};
 const row = status => ({ ...key, channel_status: Object.fromEntries(platforms.map(p => [p, status])),
     channel_prd_info: { uuzuhao: { prd_id: 'y' }, uhaozu: { prd_id: 'u' },
         zuhaowang: { game_id: 1, prd_id: 'z' }, '5e': { account_no: '5e', steam_id: '765' } } });
-const run = (r, extra = {}) => engine.executeUserActionsIfNeeded({ user: { id: 8 }, rows: [r], ...extra });
+const run = (r, extra = {}) => engine.executeUserActionsIfNeeded({
+    user: { id: 8 }, rows: [r], uhaozuAutoReshelfPolicy: recoveryPolicy, ...extra
+});
 const types = ['on_y', 'off_y', 'on_u', 'off_u', 'on_u_modify', 'on_z', 'off_z', 'on_5e', 'off_5e'];
 const actions = types.map(type => ({ type, item: { account: 'A', game_id: '1', game_name: 'WZRY', gameId: 1 }, reason: type }));
 async function execute(override = {}, user = { id: 8 }) {

@@ -15,6 +15,10 @@ const { executeUserActionsIfNeeded } = require('../action_engine/action_engine')
 const { isFaceVerifyReason } = require('../product/prod_channel_status');
 const { upsertSourceAndReconcile, PLATFORM_FACE_VERIFY_SOURCE } = require('../blacklist/blacklist_source_gateway');
 const { listBlacklistSourcesByUserAndAccounts } = require('../database/user_blacklist_source_db');
+const {
+    loadUhaozuAutoReshelfPolicy,
+    matchUhaozuAutoReshelfReason
+} = require('../product/uhaozu_auto_reshelf_policy');
 
 function accountKeyOf(gameId, account) {
     return `${String(gameId || '1').trim() || '1'}::${String(account || '').trim()}`;
@@ -60,10 +64,37 @@ function detectFaceVerifyPlatforms(row = {}) {
     return checks.filter((item) => isFaceVerifyReason(item.reason));
 }
 
-async function reconcilePlatformFaceVerifyBlacklist(userId, rows = [], logger = console) {
+function filterPriorUhaozuFaceEvidence(detail, policy, currentHits) {
+    if ((detail.platforms !== undefined && !Array.isArray(detail.platforms))
+        || (detail.reasons !== undefined && !Array.isArray(detail.reasons))) return null;
+    const platforms = detail.platforms || [];
+    const reasons = detail.reasons || [];
+    const uhaozuReasons = reasons.filter((item) => item && item.platform === 'uhaozu');
+    const knownUhaozu = platforms.includes('uhaozu') || uhaozuReasons.length > 0;
+    const canRemove = uhaozuReasons.length > 0
+        ? uhaozuReasons.every((item) => matchUhaozuAutoReshelfReason(item.reason, policy))
+        : currentHits.some((item) => item.platform === 'uhaozu' && matchUhaozuAutoReshelfReason(item.reason, policy));
+    if (!knownUhaozu || !canRemove) return null;
+    const keptReasons = reasons.filter((item) => !item || item.platform !== 'uhaozu');
+    const keptPlatforms = Array.from(new Set([
+        ...platforms.filter((platform) => platform !== 'uhaozu'),
+        ...keptReasons.map((item) => item && item.platform).filter(Boolean)
+    ]));
+    return {
+        ...detail,
+        platforms: keptPlatforms,
+        reasons: keptReasons,
+        uhaozu_policy_filter: { config_id: policy.id, version: policy.version, at: toDateTimeText() }
+    };
+}
+
+async function reconcilePlatformFaceVerifyBlacklist(userId, rows = [], logger = console, options = {}) {
     const uid = Number(userId || 0);
     const list = Array.isArray(rows) ? rows : [];
     if (!uid || list.length === 0) return { touched: 0, activated: 0, released: 0 };
+    const policy = options.uhaozuAutoReshelfPolicy === undefined
+        ? await loadUhaozuAutoReshelfPolicy({ logger })
+        : options.uhaozuAutoReshelfPolicy;
 
     const accounts = list
         .map((row) => ({
@@ -89,8 +120,27 @@ async function reconcilePlatformFaceVerifyBlacklist(userId, rows = [], logger = 
         const existingDetail = existing && existing.detail && typeof existing.detail === 'object' ? existing.detail : {};
         const suppressedPlatforms = new Set(Array.isArray(existingDetail.manual_suppressed_platforms)
             ? existingDetail.manual_suppressed_platforms : []);
-        const hits = detectFaceVerifyPlatforms(row).filter((item) => !suppressedPlatforms.has(item.platform));
+        const currentHits = detectFaceVerifyPlatforms(row);
+        const hits = currentHits.filter((item) => !suppressedPlatforms.has(item.platform))
+            .filter((item) => item.platform !== 'uhaozu' || !matchUhaozuAutoReshelfReason(item.reason, policy));
+        const filteredDetail = filterPriorUhaozuFaceEvidence(existingDetail, policy, currentHits);
+        const expireAtText = String(existing && existing.expire_at || '').trim();
+        const expireTs = Date.parse(expireAtText.replace(' ', 'T'));
+        const holdPrior = existing && existing.active && (!Number.isFinite(expireTs) || expireTs > Date.now());
         if (hits.length > 0) {
+            // A configuration change can remove Uhaozu evidence, but cannot shorten
+            // another platform's existing face-verification hold.
+            const keptDetail = filteredDetail && holdPrior ? filteredDetail : null;
+            const reasons = [...hits];
+            if (keptDetail) {
+                for (const item of keptDetail.reasons) {
+                    if (!reasons.some((hit) => JSON.stringify(hit) === JSON.stringify(item))) reasons.push(item);
+                }
+            }
+            const platforms = Array.from(new Set([
+                ...hits.map((item) => item.platform),
+                ...(keptDetail ? keptDetail.platforms : [])
+            ]));
             const expireAt = toDateTimeText(Date.now() + FACE_VERIFY_HOLD_MS);
             await upsertSourceAndReconcile(uid, {
                 game_account: acc,
@@ -102,9 +152,9 @@ async function reconcilePlatformFaceVerifyBlacklist(userId, rows = [], logger = 
                 priority: 800,
                 expire_at: expireAt,
                 detail: {
-                    ...existingDetail,
-                    platforms: hits.map((item) => item.platform),
-                    reasons: hits.map((item) => ({ platform: item.platform, reason: item.reason })),
+                    ...(filteredDetail || existingDetail),
+                    platforms,
+                    reasons,
                     hold_hours: 12,
                     refreshed_at: toDateTimeText()
                 }
@@ -116,9 +166,25 @@ async function reconcilePlatformFaceVerifyBlacklist(userId, rows = [], logger = 
             continue;
         }
         if (!existing || !existing.active) continue;
-        const expireAtText = String(existing.expire_at || '').trim();
+        if (filteredDetail) {
+            const hasOtherEvidence = filteredDetail.platforms.length > 0 || filteredDetail.reasons.length > 0;
+            if (!hasOtherEvidence || holdPrior) {
+                await upsertSourceAndReconcile(uid, { game_account: acc, game_id: gid, game_name: gname }, PLATFORM_FACE_VERIFY_SOURCE, {
+                    active: Boolean(hasOtherEvidence),
+                    reason: '人脸识别',
+                    priority: 800,
+                    expire_at: expireAtText,
+                    detail: {
+                        ...filteredDetail,
+                        ...(!hasOtherEvidence ? { released_at: toDateTimeText(), release_by: 'uhaozu_auto_reshelf_config' } : {})
+                    }
+                }, { operator: 'system', desc: 'reconcile Uhaozu face source by auto-reshelf configuration' });
+                if (hasOtherEvidence) activated += 1;
+                else released += 1;
+                continue;
+            }
+        }
         if (!expireAtText) continue;
-        const expireTs = Date.parse(expireAtText.replace(' ', 'T'));
         if (!Number.isFinite(expireTs) || expireTs > Date.now()) continue;
         await upsertSourceAndReconcile(uid, {
             game_account: acc,
@@ -310,6 +376,9 @@ async function runUserPipelineAfterSync(user, syncOut = null, options = {}) {
     let accounts = [];
     const nonFatalErrors = [];
     try {
+        const uhaozuAutoReshelfPolicy = options.uhaozuAutoReshelfPolicy === undefined
+            ? await loadUhaozuAutoReshelfPolicy({ logger })
+            : options.uhaozuAutoReshelfPolicy;
         await reportPipelineStage(options, 'load_accounts', '加载账号快照');
         rows = await measure('load_accounts_ms', () => listAllUserGameAccountsByUser(uid));
         activeRows = rows.filter((row) => !isSoldAccountRow(row));
@@ -330,7 +399,7 @@ async function runUserPipelineAfterSync(user, syncOut = null, options = {}) {
         await measure('reconcile_face_verify_ms', async () => {
             try {
                 await reportPipelineStage(options, 'reconcile_face_verify', '收敛人脸识别规则');
-                const faceRet = await reconcilePlatformFaceVerifyBlacklist(uid, activeRows, logger);
+                const faceRet = await reconcilePlatformFaceVerifyBlacklist(uid, activeRows, logger, { uhaozuAutoReshelfPolicy });
                 if (faceRet && Number(faceRet.touched || 0) > 0) {
                     logger.log(`[FaceVerifyBL] user_id=${uid} result=${JSON.stringify(faceRet)}`);
                 }
@@ -354,7 +423,8 @@ async function runUserPipelineAfterSync(user, syncOut = null, options = {}) {
                 rows: activeRows,
                 blacklistSet,
                 actionEnabled,
-                readOnly
+                readOnly,
+                uhaozuAutoReshelfPolicy
             });
             actionResult.actions = Array.isArray(actionOut && actionOut.actions) ? actionOut.actions : [];
             actionResult.errors = Array.isArray(actionOut && actionOut.errors) ? actionOut.errors : [];

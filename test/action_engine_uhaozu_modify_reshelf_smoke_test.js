@@ -48,6 +48,13 @@ function main() {
         }],
         blacklistAccounts: new Set(),
         platformRestrictSet: new Set(),
+        uhaozuAutoReshelfPolicy: {
+            available: true,
+            key: 'uhaozu.auto_reshelf_reasons',
+            id: 1,
+            version: 1,
+            reasons: ['检测游戏在线，请确认游戏离线后手动上架']
+        },
         platformStatusNormMap: {
             [identityKey]: {
                 uuzuhao: { code: 'listed', reason: '' },

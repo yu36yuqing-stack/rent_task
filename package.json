@@ -1,5 +1,7 @@
 {
   "scripts": {
+    "test:uhaozu-auto-reshelf": "node test/run_uhaozu_auto_reshelf_tests.js",
+    "coverage:uhaozu-auto-reshelf": "c8 --all --include=database/system_config_db.js --include=database/migrations/20261104_022_system_config.js --include=product/uhaozu_auto_reshelf_policy.js --include=scripts/system_config.js --include=action_engine/action_engine.js --include=pipeline/user_pipeline.js --reporter=text --reporter=json --reporter=json-summary --reporter=html --report-dir=coverage/uhaozu-auto-reshelf node test/run_uhaozu_auto_reshelf_tests.js && node test/check_uhaozu_auto_reshelf_coverage.js",
     "test:hour-ratio": "node test/run_hour_ratio_tests.js",
     "test:hour-ratio-visual": "node test/hour_ratio_visual_test.js",
     "coverage:hour-ratio": "c8 --all --include=database/zuhaowang_product_mode_db.js --include=price/channel_package_ratio.js --include=price/package_ratio_service.js --include=price/channel_adapters/*_price_adapter.js --include=price/daily_price_policy.js --include=price/zuhaowang_price_snapshot_service.js --include=price/price_publish_service.js --include=price/price_ladder_reconcile_service.js --include=h5/public/js/ui/daily_price_policy.js --include=h5/public/js/menu_price.js --include=h5/local_h5_server.js --reporter=text --reporter=json --reporter=json-summary --reporter=html --report-dir=coverage/hour-ratio/code node test/run_hour_ratio_tests.js && node test/check_hour_ratio_coverage.js",
