@@ -8,6 +8,7 @@ const PATH_LIST = '/api/youpin/rent-connector/product/v1/list';
 const PATH_ON = '/api/youpin/rent-connector/product/v1/on';
 const PATH_OFF = '/api/youpin/rent-connector/product/v1/off';
 const PATH_MODIFY_PRICE = '/api/youpin/rent-connector/product/v1/modifyPrice';
+const PATH_UPDATE_GAME_INFO = '/api/youpin/rent-connector/product/v1/updateProductGameInfo';
 const PATH_GAME_ONLINE = '/api/youpin/rent-connector/product/v1/game/online';
 const PATH_FORBIDDEN_PLAY = '/api/youpin/rent-connector/product/v1/forbidden/play';
 const PATH_STEAM_GUARD_CODE = '/api/youpin/rent-connector/product/v1/steamGuardCode';
@@ -162,6 +163,17 @@ async function modifyProductPrice(productId, input = {}, options = {}) {
         min_rent_hour: payload.minRentHour == null ? null : payload.minRentHour,
         raw: json
     };
+}
+
+// 平台更新动作：由商品 ID 触发账号信息刷新；不自动重试，不写本地商品快照。
+async function updateProductGameInfo(productId, options = {}) {
+    if (typeof productId !== 'string' || !productId.trim()) {
+        throw new Error('productId 必须是非空字符串');
+    }
+    const id = productId.trim();
+    const json = await postSigned(PATH_UPDATE_GAME_INFO, { productId: id }, options.auth || {});
+    // 文档示例中的 productItemInfoList 是字符串，业务 data 保留平台原始类型。
+    return { product_id: id, data: json.data, raw: json };
 }
 
 function mapProductToRobotItem(p) {
@@ -616,6 +628,7 @@ module.exports = {
     youpinOffShelf,
     youpinOnShelf,
     modifyProductPrice,
+    updateProductGameInfo,
     queryAccountOnlineStatus,
     setForbiddenPlay,
     queryForbiddenPlay,

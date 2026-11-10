@@ -1,5 +1,7 @@
 {
   "scripts": {
+    "test:uuzuhao-update-game-info": "node test/run_uuzuhao_update_game_info_tests.js",
+    "coverage:uuzuhao-update-game-info": "c8 --all --include=uuzuhao/uuzuhao_api.js --reporter=text --reporter=json --reporter=json-summary --reporter=html --report-dir=coverage/uuzuhao-update-game-info --check-coverage --lines=90 node test/run_uuzuhao_update_game_info_tests.js",
     "test:uhaozu-auto-reshelf": "node test/run_uhaozu_auto_reshelf_tests.js",
     "coverage:uhaozu-auto-reshelf": "c8 --all --include=database/system_config_db.js --include=database/migrations/20261104_022_system_config.js --include=product/uhaozu_auto_reshelf_policy.js --include=scripts/system_config.js --include=action_engine/action_engine.js --include=pipeline/user_pipeline.js --reporter=text --reporter=json --reporter=json-summary --reporter=html --report-dir=coverage/uhaozu-auto-reshelf node test/run_uhaozu_auto_reshelf_tests.js && node test/check_uhaozu_auto_reshelf_coverage.js",
     "test:hour-ratio": "node test/run_hour_ratio_tests.js",

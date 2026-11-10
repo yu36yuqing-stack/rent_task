@@ -781,6 +781,53 @@ POST /api/youpin/rent-connector/order/v1/list
 }
 ```
 
+#### 3.2.4 更新账号信息
+
+根据 2026-11-09 提供的接口截图补充。
+
+```plaintext
+POST /api/youpin/rent-connector/product/v1/updateProductGameInfo
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| productId | String | 是 | 悠悠商品ID，对应本地 `channel_prd_info.uuzuhao.prd_id`；调用方须传字符串 |
+| appKey | String | 是 | 卖家应用标识，由统一签名客户端填入 |
+| sign | String | 是 | 按通用签名规则计算，包含 productId，无额外签名字段排除 |
+| timestamp | Long | 是 | 秒级时间戳，5分钟内有效，由客户端生成 |
+
+客户端调用：
+
+```javascript
+const { updateProductGameInfo } = require('./uuzuhao/uuzuhao_api');
+const result = await updateProductGameInfo('product-id-from-database', {
+    auth: { app_key: process.env.UUZUHAO_APP_KEY, app_secret: process.env.UUZUHAO_APP_SECRET }
+});
+// result = { product_id, data, raw }；成功以 raw.code === 0 为准。
+```
+
+截图中的响应示例：
+
+```json
+{
+  "code": 0,
+  "msg": "成功",
+  "timestamp": 1772692766258,
+  "data": {
+    "productItemInfoList": "product-id-from-database",
+    "productItemNum": 1,
+    "gameAccountInfoList": [{ "itemName": "", "itemValue": "" }]
+  }
+}
+```
+
+- `data` 与 `raw` 保留平台原始结构和字段类型；文档示例的 `productItemInfoList` 是字符串，不强制转换成列表。缺失、空值、未知字段也不补写或丢弃。
+- 此接口是平台更新动作。截图未说明具体刷新字段和幂等保证；客户端不自动重试。超时或网络中断不能据此判断平台未执行。
+- 新方法单独导出，未接入定时同步、不写本地商品快照；无需数据库迁移。
+- `gameAccountInfoList` 可能包含账号敏感值，业务方不得直接记录完整响应、签名或授权。联通测试仅汇报返回码、耗时与字段结构。
+- 离线回归及完整客户端覆盖率：`npm run test:uuzuhao-update-game-info`、`npm run coverage:uuzuhao-update-game-info`。真实平台调用单独执行，不加入自动测试。
+- 2026-11-09 单商品联通结果：正式域名 `https://acctrade-api.youpin898.com` 的商品列表查询 HTTP 200；本更新路径调用一次，返回 HTTP 404、`code=84004`、`msg=Not Found`。当前未验证成功更新，需平台确认该路径在正式环境的开放情况；未重试或试探其他更新路径。
+
 ## 4. 版本更新
 
 1.  新增修改备注接口

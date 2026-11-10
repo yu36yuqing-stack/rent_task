@@ -11,6 +11,7 @@ function shortState(s) {
 }
 
 const REPORT_VERSION = 'v1.0.6';
+const COOLDOWN_SUFFIX = ' 🔸已按冷却期下架规则下架';
 
 function nowDateTimeText() {
     const d = new Date();
@@ -32,6 +33,8 @@ function normalizeAuthorizedPlatforms(input) {
 }
 
 function pickIcon(acc, authorizedPlatforms = []) {
+    // The report gateway already supplies the reconciled blacklist reason in this suffix.
+    if (acc.is_blacklisted === true && String(acc.suffix || '').startsWith(COOLDOWN_SUFFIX)) return '⏳';
     const y = acc.youpin;
     const u = acc.uhaozu;
     const z = acc.zuhaowan;
@@ -174,6 +177,26 @@ function buildDingdingMessage(payload) {
     return lines.join('\n');
 }
 
+function buildDingdingCooldownPreview(options = {}) {
+    const sample = buildDingdingMessage({
+        ok: true,
+        report_owner: String(options.owner || 'UID=8'),
+        hhmm: String(options.hhmm || ''),
+        order_count_label: '近24h订单',
+        master_total: 3,
+        allNormal: true,
+        accounts: [
+            { account: 'sample-cooldown', remark: '呆萌萌（示例）', youpin: '下架', uhaozu: '审核失败', zuhaowan: '下架',
+                today_order_count: 1, online_tag: '离线', is_blacklisted: true, suffix: COOLDOWN_SUFFIX },
+            { account: 'sample-listed', remark: '呆熊宝（示例）', youpin: '上架', uhaozu: '上架', zuhaowan: '上架',
+                today_order_count: 2, online_tag: '离线' },
+            { account: 'sample-renting', remark: '呆瑶瑶（示例）', youpin: '下架', uhaozu: '租赁中', zuhaowan: '下架',
+                today_order_count: 1 }
+        ]
+    });
+    return `【样式测试】冷却期原生沙漏\n以下为模拟数据，仅验证通知样式，不代表账号实时状态。\n\n${sample}`;
+}
+
 function buildComplaintFirstHitText(payload = {}) {
     const userName = String(payload.user_name || payload.user_account || '').trim();
     const userText = userName ? `${String(payload.user_id || '')}(${userName})` : String(payload.user_id || '');
@@ -243,6 +266,7 @@ function buildBlacklistInspectorSummaryText(payload = {}) {
 
 module.exports = {
     buildDingdingMessage,
+    buildDingdingCooldownPreview,
     buildDingdingAccountLine,
     normalizeAuthorizedPlatforms,
     accountIdentityKey,
