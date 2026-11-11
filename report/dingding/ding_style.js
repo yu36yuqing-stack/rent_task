@@ -1,4 +1,4 @@
-const { resolveUuzuhaoReauthorizeState } = require('../../product/prod_channel_status');
+const { resolveUuzuhaoReauthorizeState, normalizedCodeFromChannelText } = require('../../product/prod_channel_status');
 
 function shortState(s) {
     if (!s) return '未';
@@ -21,40 +21,54 @@ function nowDateTimeText() {
 
 function normalizeAuthorizedPlatforms(input) {
     const all = ['uuzuhao', 'uhaozu', 'zuhaowang'];
-    const arr = Array.isArray(input) ? input : [];
+    // Missing authorization metadata is a legacy payload; an explicit empty list is not.
+    if (!Array.isArray(input)) return all;
     const out = [];
-    for (const p of arr) {
+    for (const p of input) {
         const v = String(p || '').trim().toLowerCase();
         if (v === 'uuzuhao' || v === 'uhaozu' || v === 'zuhaowang') {
             if (!out.includes(v)) out.push(v);
         }
     }
-    return out.length > 0 ? out : all;
+    return out;
 }
 
-function pickIcon(acc, authorizedPlatforms = []) {
+function reportPlatformCodes(acc, authorizedPlatforms) {
+    const stateByPlatform = {
+        uuzuhao: acc.youpin,
+        uhaozu: acc.uhaozu,
+        zuhaowang: acc.zuhaowan
+    };
+    const platforms = normalizeAuthorizedPlatforms(authorizedPlatforms);
+    const bindings = acc.channel_prd_info;
+    const hasBindings = bindings !== undefined;
+    if (hasBindings && (!bindings || typeof bindings !== 'object' || Array.isArray(bindings))) {
+        return platforms.map(() => 'unknown');
+    }
+    return platforms.flatMap((platform) => {
+        const status = String(stateByPlatform[platform] || '').trim();
+        if (hasBindings) {
+            const binding = bindings[platform];
+            if (!binding) return [];
+            if (typeof binding !== 'object' || Array.isArray(binding)) return ['unknown'];
+            if (!String(binding.prd_id || '').trim()) return [];
+        } else if (!status || status === '未找到' || status === '未关联') {
+            return [];
+        }
+        return [normalizedCodeFromChannelText(status)];
+    });
+}
+
+function pickIcon(acc = {}, authorizedPlatforms) {
+    if (!acc || typeof acc !== 'object' || Array.isArray(acc)) return '❔';
     // The report gateway already supplies the reconciled blacklist reason in this suffix.
     if (acc.is_blacklisted === true && String(acc.suffix || '').startsWith(COOLDOWN_SUFFIX)) return '⏳';
-    const y = acc.youpin;
-    const u = acc.uhaozu;
-    const z = acc.zuhaowan;
-    const stateByPlatform = {
-        uuzuhao: y,
-        uhaozu: u,
-        zuhaowang: z
-    };
-    const states = normalizeAuthorizedPlatforms(authorizedPlatforms)
-        .map((p) => stateByPlatform[p])
-        .filter((s) => s !== '');
-    const anyRent = states.includes('租赁中');
-    const allUp = states.length > 0 && states.every((s) => s === '上架');
-    const allDown = states.length > 0 && states.every((s) => s === '下架');
-    const hasRentingOrder = Boolean(acc && acc.has_renting_order);
-
-    if (hasRentingOrder) return '💰';
-    if (anyRent) return '💰';
-    if (allUp) return '✅';
-    if (allDown) return '⬇️';
+    const codes = reportPlatformCodes(acc, authorizedPlatforms);
+    if (acc.has_renting_order === true || codes.includes('renting')) return '💰';
+    if (acc.is_blacklisted !== undefined && typeof acc.is_blacklisted !== 'boolean') return '❔';
+    if (acc.is_blacklisted === true) return '⬇️';
+    if (codes.length === 0 || codes.includes('unknown')) return '❔';
+    if (codes.every((code) => code === 'listed')) return '✅';
     return '⚠️';
 }
 
@@ -64,7 +78,7 @@ function accountIdentityKey(acc = {}) {
     return `${gameId}::${account}`;
 }
 
-function buildDingdingAccountLine(acc = {}, authorizedPlatforms = []) {
+function buildDingdingAccountLine(acc = {}, authorizedPlatforms) {
     const y = shortState(acc.youpin);
     const u = shortState(acc.uhaozu);
     const z = shortState(acc.zuhaowan);

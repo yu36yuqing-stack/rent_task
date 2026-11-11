@@ -53,7 +53,7 @@ function normalizeDingdingReportPayload(payload = {}) {
             : [],
         authorized_platforms: Array.isArray(payload.authorized_platforms)
             ? [...new Set(payload.authorized_platforms.map(stableText).filter(Boolean))].sort()
-            : [],
+            : normalizeAuthorizedPlatforms().sort(),
         recentActions: Array.isArray(payload.recentActions)
             ? payload.recentActions.map(stableText).filter(Boolean).sort()
             : [],

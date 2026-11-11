@@ -36,15 +36,15 @@ async function main() {
         for (const reason of ['维护中', '禁玩中', '人工下架', '4单下架', '检测在线']) {
             assert.strictEqual(style.pickIcon({ ...cold, suffix: ` 🔸已按${reason}规则下架` }), '⬇️');
         }
-        assert.strictEqual(style.pickIcon({ ...cold, is_blacklisted: false }), '⬇️');
-        assert.strictEqual(style.pickIcon({ ...cold, is_blacklisted: 'true' }), '⬇️');
+        assert.strictEqual(style.pickIcon({ ...cold, is_blacklisted: false }), '⚠️');
+        assert.strictEqual(style.pickIcon({ ...cold, is_blacklisted: 'true' }), '❔');
         assert.strictEqual(style.pickIcon({ ...cold, suffix: '', remark: '冷却期下架' }), '⬇️');
         assert.strictEqual(style.pickIcon({ ...cold, is_blacklisted: false, has_renting_order: true }), '💰');
         assert.strictEqual(style.pickIcon({ ...down, youpin: '租赁中' }), '💰');
         assert.strictEqual(style.pickIcon({ youpin: '上架', uhaozu: '上架', zuhaowan: '上架' }), '✅');
         assert.strictEqual(style.pickIcon({ ...down, uhaozu: '审核失败' }), '⚠️');
-        assert.strictEqual(style.pickIcon({ youpin: '', uhaozu: '', zuhaowan: '' }), '⚠️');
-        assert.strictEqual(style.pickIcon(down, ['UHAOZU']), '⬇️');
+        assert.strictEqual(style.pickIcon({ youpin: '', uhaozu: '', zuhaowan: '' }), '❔');
+        assert.strictEqual(style.pickIcon(down, ['UHAOZU']), '⚠️');
     });
 
     await check('one native hourglass per cooldown row, with complete brackets and ordinary text preserved', () => {
@@ -53,7 +53,7 @@ async function main() {
         assert.ok(!text.includes('🧊'));
         assert.ok(!text.includes('!['));
         assert.ok(!text.includes('http'));
-        assert.ok(text.includes('⬇️[0单] normal Y下/U下/Z下'));
+        assert.ok(text.includes('⚠️[0单] normal Y下/U下/Z下'));
         assert.ok(text.includes('已按冷却期下架规则下架'));
         for (const count of [2, 25]) {
             const rows = Array.from({ length: count }, (_, i) => ({ ...cold, account: `a-${i}` }));

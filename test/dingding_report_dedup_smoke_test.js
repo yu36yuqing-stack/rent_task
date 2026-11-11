@@ -164,7 +164,7 @@ async function main() {
     );
     assert.deepStrictEqual(dedup.normalizeDingdingReportPayload({}), {
         accounts: [],
-        authorized_platforms: [],
+        authorized_platforms: ['uhaozu', 'uuzuhao', 'zuhaowang'],
         recentActions: [],
         sync_anomalies: []
     }, '空 payload 应安全归一化');
