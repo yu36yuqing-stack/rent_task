@@ -54,6 +54,7 @@ pkill -f 'h5/local_h5_server.js' || true; \
 pkill -f 'rent_robot_main.js' || true; \
 pkill -f 'order/order_worker.js' || true; \
 pkill -f 'order/auth_revoke_worker.js' || true; \
+pkill -f 'order/game_info_refresh_worker.js' || true; \
 pkill -f 'stats/order_stats_worker.js' || true; \
 lsof -tiTCP:8080 -sTCP:LISTEN | xargs -I{} kill -9 {} || true; \
 sleep 8; \

@@ -1637,6 +1637,13 @@ async function syncOrdersByUser(userId, options = {}) {
     };
     console.log(`[OrderSync] user_id=${uid} begin`);
     const now = options.now instanceof Date ? options.now : new Date();
+    try {
+        const { prepareGameInfoRefreshByUser } = require('./game_info_refresh_service');
+        result.game_info_refresh_prepare = await prepareGameInfoRefreshByUser(uid, { now, logger: options.logger });
+    } catch {
+        result.game_info_refresh_prepare = { error: 'refresh_prepare_failed' };
+        console.warn(`[OrderSync][GameInfoRefresh] user_id=${uid} prepare_failed`);
+    }
     let priceLadderFeature = options.price_ladder_feature_state || null;
     let priceLadderFeatureError = '';
     if (!priceLadderFeature) {
@@ -1914,6 +1921,22 @@ async function syncOrdersByUser(userId, options = {}) {
         };
     }
 
+    try {
+        const { reconcileGameInfoRefreshByUser } = require('./game_info_refresh_service');
+        const syncToken = String((result.game_info_refresh_prepare || {}).sync_token || '');
+        const refreshSyncComplete = canReconcileOrder3Off && syncToken.length > 0;
+        result.game_info_refresh = await reconcileGameInfoRefreshByUser(uid, {
+            now, sync_token: syncToken, sync_complete: refreshSyncComplete, logger: options.logger
+        });
+        if (options.defer_game_info_refresh_worker !== true && refreshSyncComplete && !result.game_info_refresh.skipped) {
+            const { startGameInfoRefreshWorker } = require('./game_info_refresh_worker');
+            result.game_info_refresh.worker = await startGameInfoRefreshWorker({ user_id: uid, now, logger: options.logger });
+        }
+    } catch {
+        result.game_info_refresh = { error: 'refresh_reconcile_failed' };
+        console.warn(`[OrderSync][GameInfoRefresh] user_id=${uid} reconcile_failed`);
+    }
+
     result.finished_at = new Date().toISOString();
     console.log(`[OrderSync] user_id=${uid} end ok=${result.ok} gate=${JSON.stringify(result.order_3_off_gate || {})}`);
     return result;
@@ -1938,6 +1961,7 @@ async function syncOrdersForAllUsers(options = {}) {
         const one = await syncOrdersByUser(user.id, {
             ...options,
             defer_auth_revoke_worker: true,
+            defer_game_info_refresh_worker: true,
             user
         });
         summary.results.push({
@@ -1954,6 +1978,20 @@ async function syncOrdersForAllUsers(options = {}) {
     summary.auth_revoke_worker = options.start_auth_revoke_worker === false
         ? { triggered: false, reason: 'disabled', pid: 0 }
         : startAuthRevokeTaskWorker({ task_dir: path.join(__dirname, '..') });
+    try {
+        const { startGameInfoRefreshWorker } = require('./game_info_refresh_worker');
+        const refreshUserIds = summary.results.filter(one =>
+            one.order_3_off_gate && one.order_3_off_gate.can_reconcile
+            && one.game_info_refresh_prepare && one.game_info_refresh_prepare.sync_token
+            && one.game_info_refresh && !one.game_info_refresh.skipped && !one.game_info_refresh.error
+        ).map(one => one.user_id);
+        summary.game_info_refresh_worker = options.start_game_info_refresh_worker === false
+            ? { triggered: false, reason: 'disabled', pid: 0 }
+            : await startGameInfoRefreshWorker({ user_ids: refreshUserIds, logger: options.logger, now: options.now });
+    } catch {
+        summary.game_info_refresh_worker = { triggered: false, reason: 'launch_failed', pid: 0 };
+        console.warn('[OrderSync][GameInfoRefresh] worker_launch_failed');
+    }
     summary.finished_at = new Date().toISOString();
     console.log(`[OrderSync] all_users summary=${JSON.stringify({
         total_users: summary.total_users,

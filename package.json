@@ -1,5 +1,7 @@
 {
   "scripts": {
+    "test:order-game-info-refresh": "node test/run_order_game_info_refresh_tests.js",
+    "coverage:order-game-info-refresh": "c8 --all --include=database/order_game_info_refresh_db.js --include=database/migrations/20261112_023_order_game_info_refresh.js --include=order/game_info_refresh_policy.js --include=order/game_info_refresh_service.js --include=order/game_info_refresh_worker.js --include=order/order.js --reporter=text --reporter=json --reporter=json-summary --reporter=html --report-dir=coverage/order-game-info-refresh node test/run_order_game_info_refresh_tests.js && node test/check_order_game_info_refresh_coverage.js",
     "test:uuzuhao-update-game-info": "node test/run_uuzuhao_update_game_info_tests.js",
     "coverage:uuzuhao-update-game-info": "c8 --all --include=uuzuhao/uuzuhao_api.js --reporter=text --reporter=json --reporter=json-summary --reporter=html --report-dir=coverage/uuzuhao-update-game-info --check-coverage --lines=90 node test/run_uuzuhao_update_game_info_tests.js",
     "test:uhaozu-auto-reshelf": "node test/run_uhaozu_auto_reshelf_tests.js",

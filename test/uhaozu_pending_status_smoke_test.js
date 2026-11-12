@@ -15,6 +15,15 @@ process.env.MAIN_DB_FILE_PATH = mainDbFile;
 process.env.RUNTIME_DB_FILE_PATH = runtimeDbFile;
 process.env.STATS_DB_FILE_PATH = statsDbFile;
 process.env.ORDER_DB_FILE_PATH = orderDbFile;
+process.env.PRICE_DB_FILE_PATH = path.join(tempDir, 'rent_robot_price.db');
+
+// The fixture below belongs to this business day; keep quick_filter=today
+// deterministic when this regression is executed on a later calendar date.
+const OriginalDate = Date;
+global.Date = class extends OriginalDate {
+    constructor(...args) { super(...(args.length ? args : ['2026-04-04T12:00:00+08:00'])); }
+    static now() { return new OriginalDate('2026-04-04T12:00:00+08:00').getTime(); }
+};
 
 const { initOrderDb, upsertOrder } = require('../database/order_db');
 const { mapUhaozuOrderToOrder } = require('../order/order_mapping');
@@ -133,4 +142,4 @@ async function main() {
 main().catch((err) => {
     console.error(`[UhaozuPendingStatusSmoke] failed: ${err.message}`);
     process.exit(1);
-});
+}).finally(() => { global.Date = OriginalDate; });
