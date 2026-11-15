@@ -1457,10 +1457,37 @@
 
     #orderView.orders-view {
       gap: 9px;
+      grid-template-columns: minmax(0, 1fr);
     }
 
     #orderView .orders-quick {
       padding-bottom: 0;
+    }
+
+    #orderView .orders-tabs {
+      min-width: 0;
+    }
+
+    #orderView .orders-tab {
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
+    #orderView .pager {
+      gap: 6px;
+    }
+
+    #orderView .pager .btn {
+      flex: 0 0 auto;
+      padding: 8px 10px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    #orderView .page-info {
+      min-width: 0;
+      font-size: 11px;
+      white-space: nowrap;
     }
 
     #orderView .orders-game-hint.head-summary-text {
@@ -1963,6 +1990,29 @@
 
     .list-search-field {
       margin-top: 0;
+    }
+
+    .list-search-submit {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .list-search-submit input {
+      flex: 1;
+      min-width: 0;
+      width: 0;
+    }
+
+    .list-search-submit .btn {
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
+    #orderView .order-search-feedback {
+      color: var(--danger);
+      overflow-wrap: anywhere;
     }
 
     #pricingView .pricing-search-field {

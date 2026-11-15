@@ -505,6 +505,7 @@
     }
 
     function renderOrdersView() {
+      orderSearch.render();
       const o = state.orders || {};
       if (o.countdown_timer_id) {
         clearInterval(o.countdown_timer_id);
@@ -548,12 +549,13 @@
         els.orderSyncNowBtn.textContent = o.syncing ? '同步中...' : '同步订单';
       }
       const progressAmountText = o.status_filter === 'progress'
-        ? ` · 预计订单金额 ¥${Number((o.stats && o.stats.progress_order_amount_sum) || 0).toFixed(2)}`
+        ? ` · 预计收入¥${Number((o.stats && o.stats.progress_order_amount_sum) || 0).toFixed(2)}`
         : '';
-      els.orderGameHint.textContent = `汇总：${Number(o.total || 0)}（0收-${Number((o.stats && o.stats.done_zero) || 0)}）${progressAmountText}`;
+      els.orderGameHint.textContent = `总计${Number(o.total || 0)}笔（0收入占${Number((o.stats && o.stats.done_zero) || 0)}笔）${progressAmountText}`;
 
       if (!Array.isArray(o.list) || o.list.length === 0) {
-        els.orderListContainer.innerHTML = '<div class="panel"><div style="color:#6d7a8a;font-size:13px;">暂无订单数据</div></div>';
+        const emptyMessage = o.search_error ? '订单查询失败，请重试' : (o.keyword ? '当前筛选条件下没有匹配订单，可调整时间范围（最多近30天）' : '暂无订单数据');
+        els.orderListContainer.innerHTML = `<div class="panel"><div>${emptyMessage}</div></div>`;
       } else {
         els.orderListContainer.innerHTML = o.list.map((item) => `
           <div class="order-card">

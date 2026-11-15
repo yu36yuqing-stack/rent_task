@@ -52,6 +52,7 @@ const {
     mapFiveEOrderToOrder
 } = require('./order_mapping');
 const { normalizeGameProfile } = require('../common/game_profile');
+const { buildOrderSearchPredicate, normalizeOrderSearchKeyword, normalizeOrderListQuickFilter } = require('./order_search');
 const {
     buildAuthRevokeCandidateOnStatusChange,
     enqueueAuthRevokeTasks,
@@ -246,7 +247,7 @@ function resolveDateRangeByQuickFilter(filter = 'today', now = new Date()) {
 function normalizeOrderListOptions(options = {}) {
     const page = Math.max(1, Number(options.page || 1));
     const pageSize = Math.min(100, Math.max(1, Number(options.page_size || options.pageSize || 20)));
-    const quickFilter = String(options.quick_filter || options.quickFilter || 'today').trim().toLowerCase();
+    const quickFilter = normalizeOrderListQuickFilter(options.quick_filter || options.quickFilter);
     const statusFilterRaw = String(options.status_filter || options.statusFilter || 'all').trim().toLowerCase();
     const statusFilter = (statusFilterRaw === 'progress' || statusFilterRaw === 'refund' || statusFilterRaw === 'done' || statusFilterRaw === 'all')
         ? statusFilterRaw
@@ -255,7 +256,7 @@ function normalizeOrderListOptions(options = {}) {
     const gameName = gameNameRaw === '全部' || gameNameRaw.toLowerCase() === 'all' ? '全部' : normalizeGameProfile('', gameNameRaw, {
         preserveUnknown: true
     }).game_name;
-    return { page, pageSize, quickFilter, statusFilter, gameName };
+    return { page, pageSize, quickFilter, statusFilter, gameName, keyword: normalizeOrderSearchKeyword(options.keyword) };
 }
 
 function isOrderProgressStatus(status) {
@@ -283,10 +284,12 @@ async function listOrdersForUser(userId, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
     const cfg = normalizeOrderListOptions(options);
-    const range = resolveDateRangeByQuickFilter(cfg.quickFilter, new Date());
+    const search = await buildOrderSearchPredicate(uid, cfg.keyword);
+    const now = new Date();
+    const range = resolveDateRangeByQuickFilter(cfg.quickFilter, now);
     const rangeStart = toDateTimeText(range.start);
     const rangeEnd = toDateTimeText(range.end);
-    const todayRange = resolveDateRangeByQuickFilter('today', new Date());
+    const todayRange = resolveDateRangeByQuickFilter('today', now);
     const todayStart = toDateTimeText(todayRange.start);
     const todayEnd = toDateTimeText(todayRange.end);
 
@@ -302,6 +305,10 @@ async function listOrdersForUser(userId, options = {}) {
     if (cfg.gameName !== '全部') {
         where.splice(2, 0, "COALESCE(game_name, '') = ?");
         params.splice(1, 0, cfg.gameName);
+    }
+    if (search.sql) {
+        where.push(search.sql);
+        params.push(...search.params);
     }
 
     if (cfg.statusFilter === 'progress') {
@@ -342,7 +349,8 @@ async function listOrdersForUser(userId, options = {}) {
               AND TRIM(COALESCE(end_time, '')) <> ''
               AND start_time < ?
               AND end_time >= ?
-        `, cfg.gameName === '全部' ? [uid, rangeEnd, rangeStart] : [uid, cfg.gameName, rangeEnd, rangeStart]);
+              ${search.sql ? `AND ${search.sql}` : ''}
+        `, [...(cfg.gameName === '全部' ? [uid, rangeEnd, rangeStart] : [uid, cfg.gameName, rangeEnd, rangeStart]), ...search.params]);
         const todayRow = await dbGet(db, `
             SELECT COUNT(*) AS today_total
             FROM "order"
@@ -353,7 +361,8 @@ async function listOrdersForUser(userId, options = {}) {
               AND TRIM(COALESCE(end_time, '')) <> ''
               AND start_time < ?
               AND end_time >= ?
-        `, cfg.gameName === '全部' ? [uid, todayEnd, todayStart] : [uid, cfg.gameName, todayEnd, todayStart]);
+              ${search.sql ? `AND ${search.sql}` : ''}
+        `, [...(cfg.gameName === '全部' ? [uid, todayEnd, todayStart] : [uid, cfg.gameName, todayEnd, todayStart]), ...search.params]);
         const offset = (cfg.page - 1) * cfg.pageSize;
         const listRaw = await dbAll(db, `
             SELECT
@@ -384,6 +393,7 @@ async function listOrdersForUser(userId, options = {}) {
             quick_filter: cfg.quickFilter,
             status_filter: cfg.statusFilter,
             game_name: cfg.gameName,
+            keyword: cfg.keyword,
             range: {
                 start: rangeStart,
                 end: rangeEnd

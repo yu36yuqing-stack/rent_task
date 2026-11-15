@@ -1248,12 +1248,14 @@ async function handleOrders(req, res, urlObj) {
     const statusFilter = String(urlObj.searchParams.get('status_filter') || 'all').trim().toLowerCase();
     const gameNameRaw = String(urlObj.searchParams.get('game_name') || '全部').trim() || '全部';
     const gameName = gameNameRaw === '全部' || gameNameRaw.toLowerCase() === 'all' ? '全部' : gameNameRaw;
+    const keyword = urlObj.searchParams.get('keyword') || '';
     const data = await listOrdersForUser(user.id, {
         page,
         page_size: pageSize,
         quick_filter: quickFilter,
         status_filter: statusFilter,
-        game_name: gameName
+        game_name: gameName,
+        keyword
     });
     let list = Array.isArray(data && data.list) ? data.list : [];
     if (list.length > 0) {

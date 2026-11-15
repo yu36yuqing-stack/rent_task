@@ -40,7 +40,7 @@
 | PageContainer | `.wrap` `.orders-view` | 全局页面、列表型页面 | 页面锚点只调整布局 |
 | Panel | `.panel` | 登录、配置、页面内容区 | 页面变体可以调整内部排版 |
 | Field | `.field` 及表单控件基础样式 | 登录、授权、配置、Sheet 表单 | 页面变体只调整排列和密度 |
-| ListSearch | `.field.list-search-field` + 页面搜索输入框 | 板卡、阶梯定价账号列表 | 复用 Field 外观；页面只提供检索字段和本地过滤函数 |
+| ListSearch | `.field.list-search-field` + 页面搜索输入框 | 板卡、阶梯定价账号列表、订单 | 复用 Field 外观；板卡/定价保留本地即时过滤；订单通过 `.list-search-submit` 布局变体以表单提交到服务端，输入框与搜索/清空按钮同行，输入框可收缩且按钮不压扁；不改变其他使用方 |
 | ModeOption | `.mode-options` `.mode-option-row` | 个人中心、订单规则、商品级配置 | 选项内容和选中状态可变 |
 | AppHeader | `.hero` `.hero-toolbar` `.hero-menu-trigger` `.hero-menu-title` | 登录态和应用态顶部区域 | 标题和菜单状态可变 |
 | Drawer | `.drawer-item` `.drawer-group` `.drawer-group-toggle` `.drawer-sub-list` `.drawer-sub-item` | 全局导航 | 菜单数据、展开和激活状态可变 |
@@ -82,6 +82,15 @@
 | PricingFeatureState（试用） | `window.PricingFeatureState`，`h5/public/js/ui/pricing_feature_state.js`；`read/merge/confirms/status/isRejected/withTimeout`，不操作 DOM | 阶梯定价全部四个游戏共用号主级周期配置状态 | 保存选择与后台处理进度分离；合并配置必须校验明确模式及版本，丢弃较旧版本完整响应，不能用默认24小时覆盖已保存选择；同版本允许完成重算，不允许旧待处理状态倒退；保存和回查请求各有15秒时限，超时先回查，不直接回退；明确失败才恢复上次确认配置；跨游戏、跨号主旧请求不得覆盖新列表。周期反馈只允许“待生效 / 已生效 / 保存失败”，未读取到可信配置时隐藏，不增加第四种可见状态；“已生效”仅代表计数周期重算，不代表所有渠道改价成功。验证正常保存、旧响应、失败与不确定结果、版本冲突、跨游戏并发、换号主及四游戏手机/桌面布局 |
 
 “试用”不表示禁止使用，而是表示复用时必须优先补齐公共契约，不能继续复制。
+
+### 订单搜索（ListSearch 提交模式页面变体）
+
+- 订单页四游戏共用 `OrderSearch` 控制器（`h5/public/js/ui/order_search.js`）及一个搜索表单，位于时间快捷筛选下、汇总上。复用 Field、Button/PageAction、HeadSummary、OrderCard、Pager 和 Toast；HeadSummary使用“总计XX笔（0收入占XX笔）”明确笔数，租赁中附“预计收入¥XX.XX”，沿用原订单金额估算口径。仅新增 `.list-search-submit` 的横向布局变体，不新增游戏分支、卡片、色板或内联样式。
+- `#orderView` 仅通过页面布局变体将 Grid 列设为可收缩的 `minmax(0,1fr)`；状态页签保持单行文字、容器横向滚动，分页按钮和页码使用紧凑间距/字号，不将中文标签挤成竖排。其他页面 HeaderTabs/Pager 的基础外观和布局不变。
+- 名称包含匹配与完整QQ号/游戏账号精确匹配由服务器分页前完成；只按钮或回车提交，输入不发请求；中文输入法组合期间不提交，搜索和清空都回第一页。已提交关键词与输入草稿分离，游戏/状态/当日、近24小时、近7天、近30天切换延用已提交关键词，分页、同步及详情返回保持。服务端最大范围为近30天。
+- 输入使用 `type=search` 与64字符上限；非空时显示清空，清空恢复当前筛选范围。所有请求均使用递增序号、完整条件指纹和用户身份校验；旧响应、旧错误与旧401/刷新响应不覆盖新条件或新登录用户。注销/换号清除关键词和订单快照；关键词不持久化到本地存储。
+- 查询失败保留上次成功列表，复用 HeadSummary 在搜索框下明确显示失败提示并使用 Toast；失败不得伪装成无匹配订单。无结果提示当前筛选范围并允许调整时间；表单保留草稿与焦点，不因卡片重绘重建输入框。
+- 验证：`test/order_search_frontend_test.js` 覆盖提交、组合输入、清空、过滤/分页、失败、并发、换号与认证竞态；`test/order_search_visual_test.js` 覆盖四游戏、320/390/1280px、长输入、清空、空结果、失败及无横向溢出。ListSearch 变体需回归板卡/定价原本的本地即时过滤。
 
 ### 独立时租倍率（套餐设置页面变体）
 

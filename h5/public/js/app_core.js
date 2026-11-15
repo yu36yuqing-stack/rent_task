@@ -426,6 +426,8 @@
     };
     const API_BASE = window.location.pathname.startsWith('/h5local') ? '/h5local' : '';
     let refreshPromise = null;
+    let refreshSessionVersion = -1;
+    let authSessionVersion = 0;
     let toastTimer = null;
     let toastCleanupTimer = null;
     const GLOBAL_LOADING_MIN_MS = 250;
@@ -729,6 +731,18 @@
       globalLoading: document.getElementById('globalLoading')
     };
 
+    const orderSearch = window.OrderSearch.create({
+      getOrders: () => state.orders,
+      getIdentity: () => state.user ? String(state.user.id || state.user.account || '') : '',
+      request,
+      render: () => { if (state.currentMenu === 'orders') renderOrdersView(); },
+      onError: showToast,
+      nodes: {
+        form: document.getElementById('orderSearchForm'), input: document.getElementById('orderSearchInput'),
+        clear: document.getElementById('orderSearchClear'), feedback: document.getElementById('orderSearchFeedback')
+      }
+    });
+
     function setGlobalLoadingVisible(visible) {
       if (!els.globalLoading) return;
       els.globalLoading.classList.toggle('hidden', !visible);
@@ -1008,9 +1022,14 @@
       showToast(`已设置为${threshold}单下架（${orderOffModeLabel(mode)}）`);
     }
 
-    function setAuth(accessToken, user, refreshToken = '', rememberLogin = state.rememberLogin) {
+    function setAuth(accessToken, user, refreshToken = '', rememberLogin = state.rememberLogin, preserveSession = false) {
+      const previousUser = state.user ? String(state.user.id || state.user.account || '') : '';
       state.token = String(accessToken || '').trim();
       state.user = user || null;
+      if (!preserveSession || previousUser !== (state.user ? String(state.user.id || state.user.account || '') : '')) {
+        authSessionVersion += 1;
+        orderSearch.reset();
+      }
       state.refreshToken = String(refreshToken || '').trim();
       state.rememberLogin = Boolean(rememberLogin);
       clearAllStoredAuth();
@@ -1033,8 +1052,11 @@
     }
 
     async function tryRefreshAccessToken() {
-      if (refreshPromise) return refreshPromise;
-      refreshPromise = (async () => {
+      const session = authSessionVersion;
+      if (refreshPromise && refreshSessionVersion === session) return refreshPromise;
+      const originalRefreshToken = state.refreshToken;
+      const originalUser = state.user ? String(state.user.id || state.user.account || '') : '';
+      const pending = (async () => {
         if (!state.refreshToken) {
           throw new Error('登录已过期，请重新登录');
         }
@@ -1048,23 +1070,29 @@
           })
         });
         const data = await res.json().catch(() => ({}));
+        if (session !== authSessionVersion || originalRefreshToken !== state.refreshToken
+          || originalUser !== (state.user ? String(state.user.id || state.user.account || '') : '')) throw new Error('登录请求已失效');
         if (!res.ok || data.ok === false) {
           throw new Error(data.message || '登录已过期，请重新登录');
         }
         const nextAccess = String(data.access_token || data.token || '').trim();
         const nextRefresh = String(data.refresh_token || '').trim();
         const nextUser = data.user || state.user || null;
-        setAuth(nextAccess, nextUser, nextRefresh, state.rememberLogin);
+        setAuth(nextAccess, nextUser, nextRefresh, state.rememberLogin, true);
       })();
+      refreshPromise = pending;
+      refreshSessionVersion = session;
       try {
-        await refreshPromise;
+        await pending;
       } finally {
-        refreshPromise = null;
+        if (refreshPromise === pending) refreshPromise = null;
       }
     }
 
     async function request(path, options = {}, triedRefresh = false) {
       const foreground = options.background !== true;
+      const session = authSessionVersion;
+      const isCurrent = () => session === authSessionVersion && (typeof options.is_current !== 'function' || options.is_current());
       if (foreground) beginGlobalRequestLoading();
       try {
         const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
@@ -1072,6 +1100,7 @@
         const fullPath = `${API_BASE}${path}`;
         const fetchOptions = Object.assign({}, options, { headers });
         delete fetchOptions.background;
+        delete fetchOptions.is_current;
         const contentType = String(headers['Content-Type'] || headers['content-type'] || '').toLowerCase();
         if (contentType.includes('application/json')
           && fetchOptions.body
@@ -1084,17 +1113,21 @@
         }
         let res = await fetch(fullPath, fetchOptions);
         if (res.status === 401 && !triedRefresh && path !== '/api/login' && path !== '/api/refresh') {
+          if (!isCurrent()) throw new Error('订单查询已失效');
           try {
             await tryRefreshAccessToken();
           } catch (refreshErr) {
+            if (!isCurrent()) throw refreshErr;
             clearAuthState();
             render();
             throw refreshErr;
           }
+          if (!isCurrent()) throw new Error('订单查询已失效');
           const retryHeaders = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
           if (state.token) retryHeaders.Authorization = `Bearer ${state.token}`;
           const retryOptions = Object.assign({}, options, { headers: retryHeaders });
           delete retryOptions.background;
+          delete retryOptions.is_current;
           const retryContentType = String(retryHeaders['Content-Type'] || retryHeaders['content-type'] || '').toLowerCase();
           if (retryContentType.includes('application/json')
             && retryOptions.body
@@ -1172,14 +1205,7 @@
     }
 
     async function loadOrders() {
-      const o = state.orders || {};
-      const data = await request(`/api/orders?page=${o.page}&page_size=${o.pageSize}&status_filter=${o.status_filter}&quick_filter=${o.quick_filter}&game_name=${encodeURIComponent(o.game_name || '全部')}`);
-      state.orders.total = Number(data.total || 0);
-      state.orders.list = Array.isArray(data.list) ? data.list : [];
-      state.orders.stats = data.stats || { progress: 0, done: 0, done_zero: 0, today_total: 0, progress_order_amount_sum: 0 };
-      state.orders.page = Number(data.page || o.page || 1);
-      state.orders.pageSize = Number(data.page_size || o.pageSize || 20);
-      state.orders.game_name = String(data.game_name || o.game_name || '全部').trim() || '全部';
+      return orderSearch.load();
     }
 
     async function loadStatsBoard(options = {}) {
