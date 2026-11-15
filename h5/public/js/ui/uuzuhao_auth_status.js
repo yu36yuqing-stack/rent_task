@@ -8,6 +8,8 @@
   };
 
   function messageFor(item) {
+    const recovery = recoveryLabel(item);
+    if (recovery) return recovery;
     return String(item?.uuzuhao_auth_state?.error_code || '').trim() === '12101001'
       ? productNotFoundMessage
       : shelfMessages[String(item?.uuzuhao_auth_state?.error_code || '').trim()] || message;
@@ -15,6 +17,18 @@
 
   function isRequired(item) {
     return Boolean(item && item.uuzuhao_auth_state && item.uuzuhao_auth_state.required === true);
+  }
+
+  function recoveryLabel(item) {
+    if (item?.asset_status === 'sold') return '';
+    const recovery = item && item.uuzuhao_recovery;
+    const abnormal = isRequired(item) || item?.platform_status_norm?.uuzuhao?.code === 'auth_abnormal';
+    if (!abnormal || !recovery) return '';
+    if (recovery.stage === 'manual_required') return '授权异常，需人工介入';
+    if (['queued', 'submitting', 'waiting_result', 'checking', 'restoring'].includes(recovery.stage)) {
+      return `授权异常，自动恢复中（已查询${Number(recovery.query_count) || 0}/3次）`;
+    }
+    return '';
   }
 
   function mainLabel(item, label, soldView) {
@@ -33,5 +47,5 @@
     return true;
   }
 
-  root.UuzuhaoAuthStatus = Object.freeze({ isRequired, mainLabel, applyState, message, messageFor });
+  root.UuzuhaoAuthStatus = Object.freeze({ isRequired, mainLabel, applyState, message, messageFor, recoveryLabel });
 })(window);

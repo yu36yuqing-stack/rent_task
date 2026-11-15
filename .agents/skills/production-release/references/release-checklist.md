@@ -14,6 +14,7 @@
 - 数据库迁移已检查，未发现未验证或不可逆的高风险操作。
 - 未把密码、令牌、数据库、日志或敏感配置加入待提交范围。
 - 同步排除所有SQLite临时文件 `*.db-wal`、`*.db-shm`、`*.db-journal`，确保 `rsync --delete` 不删除生产侧文件。
+- 代码同步排除 `.ai-generated-records/` 和 `rent_robot_history.jsonl`；本地会话快照不上传，生产运行历史与生产已有快照不被覆盖或删除。
 - 回拉过滤规则在 `--include '*.db'` 前排除 `rent_robot_runtime.db*`；业务库和日志继续回拉，Runtime 及其附属文件不回拉。可用 `node test/merge_code_sqlite_exclusion_test.js` 验证真实 rsync 过滤行为。
 
 ## 脚本阶段

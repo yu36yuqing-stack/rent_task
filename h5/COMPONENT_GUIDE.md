@@ -94,6 +94,7 @@
 ### 悠悠在线授权状态（试用）
 
 - 实现：`window.UuzuhaoAuthStatus`，`h5/public/js/ui/uuzuhao_auth_status.js`；四游戏商品卡片共用，不新建卡片或状态标签组件。
+- 恢复进度扩展：`uuzuhao_recovery` 为独立运行任务投影，包含 `stage/query_count/reason/task_id`。`recoveryLabel(item)` 仅在原有授权异常仍存在时显示“自动恢复中（已查询N/3次）”或“需人工介入”；已经恢复、已售视图与其他渠道不借此新增异常。沿用原 `.plat`、`.plat-abnormal`、详情Toast和价格后缀，不新增CSS或按钮。验证：`test/uuzuhao_reauthorize_test.js`、`test/uuzuhao_reauthorize_visual_test.js`。
 - 数据契约：`uuzuhao_auth_state.required === true` 时显示待授权；缺省或非布尔值不解释为待授权。手工响应通过 `applyState` 合并，低版本响应不得覆盖高版本状态。`messageFor(item)` 按标记的 `error_code` 选择提示：`12101001` 显示“悠悠商品不存在”；`12115014/12115012` 分别提示上架授权与账号密码不符/上架授权失效，指导重新授权并在渠道恢复正常上架或出租；其他值兼容原 QQ 鉴权失败提示。旧 `message` 常量保留兼容。
 - 顶部复用 `.chip`、`.status-main-chip`、`.plat-abnormal`：“状态正常”替换为“需重新授权”；已有黑名单/维护等原因保留原标签，旁边增加授权标签。已售主状态不变。
 - 渠道标签复用 `.plat.plat-abnormal`，只将悠悠状态部分替换为“授权异常”；原 `ChannelPriceSummary` 的最后成功档位、渠道价格和缺值回退全部保留，其他渠道不变。不重写实际渠道上下架状态。

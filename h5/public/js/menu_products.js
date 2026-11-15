@@ -19,9 +19,10 @@
           : (one && String(one.code || '').trim() ? String(one.code || '').trim() : '');
         const shortReason = isDangerStatusCode(code) ? shortenDangerReason(reason) : '';
         const suffix = shortReason && shortReason !== label ? `·${shortReason}` : '';
-        const display = authRequired ? '授权异常' : (code === 'auth_abnormal' && shortReason)
+        const recoveryLabel = d.key === 'uuzuhao' && window.UuzuhaoAuthStatus?.recoveryLabel(item);
+        const display = recoveryLabel || (authRequired ? '授权异常' : (code === 'auth_abnormal' && shortReason)
           ? shortReason
-          : `${label}${suffix}`;
+          : `${label}${suffix}`);
         const pricing = window.ChannelPriceSummary.formatSuffix(item && item.price_ladder && item.price_ladder[d.key]);
         return {
           key: d.key,

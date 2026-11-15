@@ -9,7 +9,7 @@ const { spawnSync } = require('child_process');
 const script = fs.readFileSync(path.join(__dirname, '../scripts/merge_code.sh'), 'utf8');
 const rsyncLine = script.split('\n').find(line => line.startsWith('RSYNC_CMD='));
 const excludes = [...rsyncLine.matchAll(/--exclude '([^']+)'/g)].map(match => match[1]);
-for (const pattern of ['*.db', '*.db-wal', '*.db-shm', '*.db-journal']) assert(excludes.includes(pattern));
+for (const pattern of ['*.db', '*.db-wal', '*.db-shm', '*.db-journal', '.ai-generated-records/', 'rent_robot_history.jsonl']) assert(excludes.includes(pattern));
 const pullLine = script.split('\n').find(line => line.startsWith('PULL_DB_CMD='));
 const pullFilters = [...pullLine.matchAll(/--(include|exclude) '([^']+)'/g)]
     .flatMap(match => [`--${match[1]}`, match[2]]);
@@ -39,11 +39,16 @@ try {
         write(destination, receiverOnly, 'PRODUCTION DATA MUST NOT CHANGE');
         write(source, `database/local_only${suffix}`, 'LOCAL DATA MUST NOT UPLOAD');
     }
-    for (const file of ['coverage/index.html', 'log/job.log', 'config/cloudinfo.md', 'config/CloudInfo.md', 'database/rent_robot_runtime.db.corrupt']) {
+    for (const file of ['coverage/index.html', 'log/job.log', 'config/cloudinfo.md', 'config/CloudInfo.md', 'database/rent_robot_runtime.db.corrupt',
+        'rent_robot_history.jsonl', '.ai-generated-records/records.json', '.ai-generated-records/.active-tool-snapshots/sensitive.json']) {
         protectedFiles.push(file);
         write(source, file, 'LOCAL DATA MUST NOT UPLOAD');
         write(destination, file, 'PRODUCTION DATA MUST NOT CHANGE');
     }
+    const remoteSnapshot = '.ai-generated-records/receiver-only.json';
+    protectedFiles.push(remoteSnapshot);
+    write(destination, remoteSnapshot, 'PRODUCTION DATA MUST NOT CHANGE');
+    write(source, '.ai-generated-records/local-only.json', 'LOCAL DATA MUST NOT UPLOAD');
     write(source, 'price/new.js', 'new updated code');
     write(destination, 'price/new.js', 'old code');
     write(destination, 'obsolete.js', 'delete unused code');
@@ -51,6 +56,7 @@ try {
     assert.strictEqual(result.status, 0, result.stderr);
     for (const file of protectedFiles) assert.strictEqual(read(file), 'PRODUCTION DATA MUST NOT CHANGE', file);
     for (const suffix of ['.db-wal', '.db-shm', '.db-journal']) assert(!fs.existsSync(path.join(destination, `database/local_only${suffix}`)));
+    assert(!fs.existsSync(path.join(destination, '.ai-generated-records/local-only.json')));
     assert.strictEqual(read('price/new.js'), 'new updated code');
     assert(!fs.existsSync(path.join(destination, 'obsolete.js')));
 

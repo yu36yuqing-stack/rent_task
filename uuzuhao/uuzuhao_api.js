@@ -13,6 +13,8 @@ const PATH_GAME_ONLINE = '/api/youpin/rent-connector/product/v1/game/online';
 const PATH_FORBIDDEN_PLAY = '/api/youpin/rent-connector/product/v1/forbidden/play';
 const PATH_STEAM_GUARD_CODE = '/api/youpin/rent-connector/product/v1/steamGuardCode';
 const PATH_AUTH_REVOKE = '/api/youpin/rent-connector/product/v1/interconnect/auth/revoke';
+const PATH_REAUTHORIZE_CREATE = '/api/youpin/rent-connector/product/v1/hosting/create';
+const PATH_REAUTHORIZE_STATUS = '/api/youpin/rent-connector/product/v1/hosting/status';
 const PATH_ORDER_LIST = '/api/youpin/rent-connector/order/v1/list';
 const PATH_ORDER_DETAIL = '/api/youpin/rent-connector/order/v1/detail';
 const PACKAGE_PRICE_RULES = Object.freeze([
@@ -622,7 +624,38 @@ async function getOrderDetail(params = {}, options = {}) {
     };
 }
 
+function hostingIdentity(accountNo, options = {}) {
+    const account = String(accountNo || '').trim();
+    const gameId = Number(options.game_id);
+    if (!account) throw new Error('accountNo 不能为空');
+    if (![1, 2, 3].includes(gameId)) throw new Error('重新授权仅支持 gameId 1/2/3');
+    return { accountNo: account, gameId };
+}
+
+async function createReauthorizeTask(accountNo, options = {}) {
+    const identity = hostingIdentity(accountNo, options);
+    const response = await postSigned(PATH_REAUTHORIZE_CREATE, { ...identity, scene: 'reauthorize' }, options.auth || {});
+    const taskId = String(response.data?.taskId || '').trim();
+    const gameUnionId = String(response.data?.gameUnionId || '').trim();
+    if (!taskId || gameUnionId !== `${identity.gameId}_${identity.accountNo}`) {
+        throw new Error('重新授权响应缺少taskId或账号身份不匹配');
+    }
+    return { task_id: taskId, game_union_id: gameUnionId };
+}
+
+async function queryReauthorizeTask(accountNo, taskId, options = {}) {
+    const identity = hostingIdentity(accountNo, options);
+    const id = String(taskId || '').trim();
+    if (!id) throw new Error('taskId 不能为空');
+    const response = await postSigned(PATH_REAUTHORIZE_STATUS, { ...identity, taskId: id }, options.auth || {});
+    const status = response.data?.status;
+    if (![-1, 1, 2, 3].includes(status)) throw new Error('未知的重新授权结果状态');
+    return { status };
+}
+
 module.exports = {
+    createReauthorizeTask,
+    queryReauthorizeTask,
     collectYoupinData,
     queryProductByAccount,
     youpinOffShelf,

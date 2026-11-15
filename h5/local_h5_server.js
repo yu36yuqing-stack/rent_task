@@ -79,6 +79,7 @@ const {
     isRestrictedLikeStatus
 } = require('../product/prod_channel_status');
 const { startProdRiskTaskWorker } = require('../product/prod_status_guard');
+const { startReauthorizeWorker, listRecoveryViews } = require('../product/uuzuhao_reauthorize_service');
 const { resolveDisplayNameByRow } = require('../product/display_name');
 const { normalizeGameProfile } = require('../common/game_profile');
 const { syncOrdersByUser } = require('../order/order');
@@ -849,6 +850,7 @@ async function handleProducts(req, res, urlObj) {
             if (platform) restrictPlatformMap[matchedKey][platform] = text;
         }
     }
+    const reauthorizeMap = await listRecoveryViews(user.id);
     const fullList = scopedRows.map((x) => {
         const acc = String(x.game_account || '').trim();
         const identityKey = keyOfGameAccount(x && x.game_id, acc);
@@ -901,6 +903,7 @@ async function handleProducts(req, res, urlObj) {
             lifecycle_profit_amount: Number(x.lifecycle_profit_amount || 0),
             channel_status: channelStatus,
             uuzuhao_auth_state: uuzuhaoAuthState,
+            uuzuhao_recovery: reauthorizeMap[identityKey] || null,
             platform_status_norm: platformStatusNorm,
             overall_status_norm: overallStatusNorm,
             five_e_info: buildFiveECardInfo(channelPrdInfo),
@@ -2871,6 +2874,7 @@ async function bootstrap() {
     await authBff.init();
     await orderBff.init();
     startProdRiskTaskWorker({ logger: console });
+    startReauthorizeWorker({ logger: console });
 
     const server = http.createServer(async (req, res) => {
         const urlObj = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);

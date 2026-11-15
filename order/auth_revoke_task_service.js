@@ -19,6 +19,7 @@ const { getLatestUserGameAccountByUserAndAccount } = require('../database/user_g
 const { revokeAccountAuth } = require('../uuzuhao/uuzuhao_api');
 const { normalizeGameProfile } = require('../common/game_profile');
 const { assertUuzuhaoBackgroundOperationAllowed } = require('../product/prod_probe_cache_service');
+const { withAuthorizationLock, hasAuthorizationConflict } = require('../database/uuzuhao_reauthorize_db');
 
 const AUTH_REVOKE_TASK_TYPE = 'uuzuhao_auth_revoke';
 const FINISHED_ORDER_STATUSES = new Set([
@@ -413,7 +414,17 @@ async function processAuthRevokeTasks(options = {}) {
             }
             if (!authCache.has(uid)) authCache.set(uid, resolveUuzuhaoRevokeAuthByUser(uid));
             const auth = await authCache.get(uid);
-            const response = await revokeAccountAuth(gameAccount, { game_id: gameId, auth });
+            const operation = await withAuthorizationLock({ user_id: uid, game_id: gameId, game_account: gameAccount }, async () => {
+                if (await hasAuthorizationConflict({ user_id: uid, game_id: gameId, game_account: gameAccount }, 'revoke')) return null;
+                return revokeAccountAuth(gameAccount, { game_id: gameId, auth });
+            });
+            if (!operation.acquired || operation.value === null) {
+                await updateRuntimeTask(task.task_id, { preserve_trigger_state: true, status: 'pending', stage: 'waiting_reauthorization',
+                    progress_text: '正在重新授权，暂缓解除授权', result_json: state });
+                out.deferred++;
+                continue;
+            }
+            const response = operation.value;
             await markRuntimeTaskFinished(task.task_id, {
                 preserve_trigger_state: true,
                 consume_manual_attempt: true,
