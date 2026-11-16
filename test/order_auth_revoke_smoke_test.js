@@ -19,6 +19,7 @@ const {
     AUTH_REVOKE_TASK_TYPE,
     buildAuthRevokeCandidate,
     buildAuthRevokeCandidateOnStatusChange,
+    buildAuthRevokeTaskView,
     enqueueAuthRevokeTasks,
     enqueueManualAuthRevokeTask,
     listLatestAuthRevokeTaskViewsByUser,
@@ -27,8 +28,10 @@ const {
 } = require('../order/auth_revoke_task_service');
 const {
     getRuntimeTaskByTaskId,
-    claimRuntimeTask
+    claimRuntimeTask,
+    updateRuntimeTask
 } = require('../database/runtime_task_db');
+const { withUuzuhaoOperationLock, OPERATIONS } = require('../common/uuzuhao_operation_lock');
 
 function all(db, sql, params = []) {
     return new Promise((resolve, reject) => {
@@ -281,26 +284,47 @@ async function main() {
             start_time: '2026-08-15 10:00:00',
             create_date: '2026-08-15 10:00:00'
         });
-        const deferred = await processAuthRevokeTasks();
-        assert.strictEqual(deferred.deferred, 1, '账号有新租赁订单时应延后解除授权');
-        assert.strictEqual(guardedCalls, 0, '延后任务不应调用解除接口');
+        const whileRenting = await processAuthRevokeTasks();
+        assert.strictEqual(whileRenting.success, 1, '前单终态触发的退出登录不因其他在租订单延后');
+        assert.strictEqual(whileRenting.deferred, 0);
+        assert.strictEqual(guardedCalls, 1, '不等待下线或冷却，应立即调用一次退出接口');
         let guardedTask = await getRuntimeTaskByTaskId(guardedEnqueue.task_ids[0]);
-        assert.strictEqual(guardedTask.status, 'pending', '延后任务应回到 pending');
-        assert.strictEqual(guardedTask.stage, 'waiting_active_order', '延后原因应记录在任务阶段');
+        assert.strictEqual(guardedTask.status, 'success');
+        assert.strictEqual(guardedTask.stage, 'done');
         const guardedView = await getAuthRevokeTaskViewByUser(8, guardedTask.task_id);
-        assert.strictEqual(guardedView.status_text, '等待订单结束', '页面状态应明确展示等待订单结束');
+        assert.strictEqual(guardedView.status_text, '成功');
+        assert.strictEqual((await processAuthRevokeTasks()).claimed, 0, '成功后不因另一单仍在租重复退出');
 
-        await upsertOrder({
-            user_id: 8,
-            ...order('uuzuhao', 'ORDER_ACTIVE_NOW', '已完成', '40004'),
-            start_time: '2026-08-15 10:00:00',
-            create_date: '2026-08-15 10:00:00'
-        });
-        const afterRental = await processAuthRevokeTasks();
-        assert.strictEqual(afterRental.success, 1, '活跃订单结束后延后任务应继续执行');
-        assert.strictEqual(guardedCalls, 1, '活跃订单结束后应调用一次解除接口');
-        guardedTask = await getRuntimeTaskByTaskId(guardedEnqueue.task_ids[0]);
-        assert.strictEqual(guardedTask.status, 'success', '延后任务最终应成功');
+        for (const stage of ['waiting_authorization', 'waiting_reauthorization', 'waiting_active_order']) {
+            const enqueued = await enqueueAuthRevokeTasks(8, [order('uhaozu', `LEGACY_${stage}`, '已完成', stage)]);
+            const legacyId = enqueued.task_ids[0];
+            const before = await getRuntimeTaskByTaskId(legacyId);
+            await updateRuntimeTask(legacyId, { stage, progress_text: '旧版本等待状态' });
+            const legacyView = await getAuthRevokeTaskViewByUser(8, legacyId);
+            assert.strictEqual(legacyView.status_text, '待执行');
+            assert.strictEqual(legacyView.progress_text, '等待退出租客登录', '历史阶段不能继续提示等授权或订单结束');
+            assert.strictEqual((await processAuthRevokeTasks()).success, 1, `${stage}无需改数据即可继续消费`);
+            const after = await getRuntimeTaskByTaskId(legacyId);
+            assert.strictEqual(after.task_id, before.task_id);
+            assert.deepStrictEqual(JSON.parse(after.result_json).triggers, JSON.parse(before.result_json).triggers);
+            assert.strictEqual(JSON.parse(after.result_json).attempt_count, 1);
+        }
+
+        const locked = await enqueueAuthRevokeTasks(8, [order('uuzuhao', 'SAME_OPERATION_LOCK', '已完成', 'LOCKED')]);
+        const lockedBefore = guardedCalls;
+        await withUuzuhaoOperationLock(OPERATIONS.LOGIN_REVOKE,
+            { user_id: 8, game_id: '1', game_account: 'LOCKED' }, async () => {
+                const deferred = await processAuthRevokeTasks();
+                assert.strictEqual(deferred.deferred, 1, '同一退出操作仍须互斥');
+                assert.strictEqual(guardedCalls, lockedBefore);
+            });
+        const lockedTask = await getRuntimeTaskByTaskId(locked.task_ids[0]);
+        assert.strictEqual(lockedTask.stage, 'waiting_operation_lock');
+        assert.strictEqual(JSON.parse(lockedTask.result_json).attempt_count, 0);
+        assert.strictEqual((await processAuthRevokeTasks()).success, 1, '同类锁释放后原任务继续执行');
+        assert.strictEqual(guardedCalls, lockedBefore + 1);
+
+        assert.strictEqual(buildAuthRevokeTaskView(null), null);
 
         const staleEnqueue = await enqueueAuthRevokeTasks(8, [order('uuzuhao', 'ORDER_STALE', '已完成', '30003')]);
         const claimed = await claimRuntimeTask(staleEnqueue.task_ids[0], AUTH_REVOKE_TASK_TYPE);

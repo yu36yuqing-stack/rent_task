@@ -14,12 +14,10 @@ const {
     markRuntimeTaskFinished
 } = require('../database/runtime_task_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
-const { listRentingOrderWindowByAccounts } = require('../database/order_db');
 const { getLatestUserGameAccountByUserAndAccount } = require('../database/user_game_account_db');
 const { revokeAccountAuth } = require('../uuzuhao/uuzuhao_api');
 const { normalizeGameProfile } = require('../common/game_profile');
-const { assertUuzuhaoBackgroundOperationAllowed } = require('../product/prod_probe_cache_service');
-const { withAuthorizationLock, hasAuthorizationConflict } = require('../database/uuzuhao_reauthorize_db');
+const { withUuzuhaoOperationLock, OPERATIONS } = require('../common/uuzuhao_operation_lock');
 
 const AUTH_REVOKE_TASK_TYPE = 'uuzuhao_auth_revoke';
 const FINISHED_ORDER_STATUSES = new Set([
@@ -134,19 +132,17 @@ function buildAuthRevokeTaskView(task = {}) {
     const input = safeJsonObject(state.input, {});
     const status = String(task.status || '').trim();
     const stage = String(task.stage || '').trim();
-    const statusText = status === 'pending' && stage === 'waiting_authorization'
-        ? '等待授权恢复'
-        : status === 'success'
+    const legacyWaiting = status === 'pending'
+        && ['waiting_authorization', 'waiting_reauthorization', 'waiting_active_order'].includes(stage);
+    const statusText = status === 'success'
         ? '成功'
         : status === 'running'
             ? '解除中'
             : status === 'failed'
                 ? '失败待重试'
-                : status === 'pending' && stage === 'waiting_active_order'
-                    ? '等待订单结束'
-                    : status === 'pending'
-                        ? '待执行'
-                        : '未知';
+                : status === 'pending'
+                    ? '待执行'
+                    : '未知';
     return {
         task_id: String(task.task_id || '').trim(),
         game_id: String(input.game_id || '').trim(),
@@ -154,7 +150,7 @@ function buildAuthRevokeTaskView(task = {}) {
         status,
         stage,
         status_text: statusText,
-        progress_text: String(task.progress_text || '').trim(),
+        progress_text: legacyWaiting ? '等待退出租客登录' : String(task.progress_text || '').trim(),
         last_error: String(state.last_error || '').trim(),
         started_at: String(task.started_at || '').trim(),
         finished_at: String(task.finished_at || '').trim(),
@@ -368,7 +364,7 @@ async function processAuthRevokeTasks(options = {}) {
             stale_after_sec: Number(options.stale_after_sec || 300),
             stale_before: options.stale_before,
             stage: 'revoke_auth',
-            progress_text: '正在解除账号授权'
+            progress_text: '正在退出租客登录'
         });
         if (!task) continue;
         out.claimed += 1;
@@ -376,9 +372,6 @@ async function processAuthRevokeTasks(options = {}) {
         const input = safeJsonObject(state.input, {});
         const attemptCount = Math.max(0, Number(state.attempt_count || 0)) + 1;
         const errors = safeJsonArray(task.error_json);
-        const manualCount = Number(task.attached_manual_count || 0);
-        const consumedCount = Number(state.manual_consumed_count ?? (Number(state.attempt_count || 0) > 0 ? manualCount : 0));
-        const manualAttempt = manualCount > consumedCount;
         try {
             const uid = Number(input.user_id || task.user_id || 0);
             const gameId = Number(input.game_id || 0);
@@ -386,41 +379,16 @@ async function processAuthRevokeTasks(options = {}) {
             if (!uid || !Number.isInteger(gameId) || gameId <= 0 || !gameAccount) {
                 throw new Error('解除授权任务参数不完整');
             }
-            await assertUuzuhaoBackgroundOperationAllowed(uid, gameAccount, {
-                game_id: String(gameId), game_name: input.game_name, manual: manualAttempt
-            });
-            const activeOrders = await listRentingOrderWindowByAccounts(uid, [{
-                game_id: String(gameId),
-                game_account: gameAccount
-            }]);
-            const accountKey = `${gameId}::${gameAccount}`;
-            if (activeOrders[accountKey]) {
-                await updateRuntimeTask(task.task_id, {
-                    preserve_trigger_state: true,
-                    status: 'pending',
-                    stage: 'waiting_active_order',
-                    progress_text: '账号仍有租赁中订单，等待下轮重试',
-                    result_json: {
-                        ...state,
-                        input,
-                        last_error: ''
-                    },
-                    error_json: errors,
-                    desc: 'auth revoke deferred because account is renting'
-                });
-                out.deferred += 1;
-                out.results.push({ task_id: task.task_id, ok: true, deferred: true, reason: 'active_order' });
-                continue;
-            }
             if (!authCache.has(uid)) authCache.set(uid, resolveUuzuhaoRevokeAuthByUser(uid));
             const auth = await authCache.get(uid);
-            const operation = await withAuthorizationLock({ user_id: uid, game_id: gameId, game_account: gameAccount }, async () => {
-                if (await hasAuthorizationConflict({ user_id: uid, game_id: gameId, game_account: gameAccount }, 'revoke')) return null;
-                return revokeAccountAuth(gameAccount, { game_id: gameId, auth });
-            });
-            if (!operation.acquired || operation.value === null) {
-                await updateRuntimeTask(task.task_id, { preserve_trigger_state: true, status: 'pending', stage: 'waiting_reauthorization',
-                    progress_text: '正在重新授权，暂缓解除授权', result_json: state });
+            const operation = await withUuzuhaoOperationLock(
+                OPERATIONS.LOGIN_REVOKE,
+                { user_id: uid, game_id: gameId, game_account: gameAccount },
+                () => revokeAccountAuth(gameAccount, { game_id: gameId, auth })
+            );
+            if (!operation.acquired) {
+                await updateRuntimeTask(task.task_id, { preserve_trigger_state: true, status: 'pending', stage: 'waiting_operation_lock',
+                    progress_text: '等待退出登录操作锁', result_json: state });
                 out.deferred++;
                 continue;
             }
@@ -430,7 +398,7 @@ async function processAuthRevokeTasks(options = {}) {
                 consume_manual_attempt: true,
                 status: TASK_STATUS_SUCCESS,
                 stage: 'done',
-                progress_text: '解除账号授权成功',
+                progress_text: '退出租客登录成功',
                 result_json: {
                     ...state,
                     input,
@@ -445,18 +413,6 @@ async function processAuthRevokeTasks(options = {}) {
             out.results.push({ task_id: task.task_id, ok: true, attempt_count: attemptCount });
         } catch (error) {
             const message = String(error && error.message ? error.message : error || 'auth_revoke_failed');
-            if (error.code === 'UUZUHAO_AUTHORIZATION_PAUSED') {
-                await updateRuntimeTask(task.task_id, {
-                    status: 'pending', stage: 'waiting_authorization',
-                    progress_text: message, finished_at: '',
-                    preserve_trigger_state: true,
-                    result_json: { ...state, input },
-                    desc: 'auth revoke paused until product authorization recovers'
-                });
-                out.deferred += 1;
-                out.results.push({ task_id: task.task_id, ok: true, deferred: true, reason: 'authorization' });
-                continue;
-            }
             errors.push({ time: new Date().toISOString(), attempt: attemptCount, message });
             const recentErrors = errors.slice(-20);
             await markRuntimeTaskFinished(task.task_id, {
@@ -464,7 +420,7 @@ async function processAuthRevokeTasks(options = {}) {
                 consume_manual_attempt: true,
                 status: TASK_STATUS_FAILED,
                 stage: 'failed',
-                progress_text: '解除账号授权失败，等待重试',
+                progress_text: '退出租客登录失败，等待重试',
                 result_json: {
                     ...state,
                     input,

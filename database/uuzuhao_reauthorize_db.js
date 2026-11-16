@@ -1,9 +1,7 @@
 'use strict';
 
-const crypto = require('crypto');
 const { openMainDatabase, openRuntimeDatabase } = require('./sqlite_client');
 const { initRuntimeTaskDb } = require('./runtime_task_db');
-const { tryAcquireLock, releaseOwnedLock } = require('./lock_db');
 const { normalizeUuzuhaoAuthState } = require('../common/uuzuhao_auth_state');
 const { resolveUuzuhaoReauthorizeState } = require('../product/prod_channel_status');
 
@@ -53,26 +51,6 @@ async function listRecoveryTasks(userId) {
     }
     return latest;
 }
-async function hasAuthorizationConflict(identity, operation) {
-    await initRuntimeTaskDb();
-    const rows = await read(openRuntimeDatabase, `SELECT task_type, stage, result_json FROM runtime_task
-        WHERE user_id = ? AND task_type = ? AND is_deleted = 0 AND status IN ('pending','running','failed')`,
-    [identity.user_id, operation === 'reauthorize' ? 'uuzuhao_auth_revoke' : TASK_TYPE]);
-    return rows.some(row => {
-        const state = object(row.result_json);
-        const input = state.input || state;
-        return String(input.game_id) === String(identity.game_id) && input.game_account === identity.game_account
-            && (operation === 'reauthorize' || Boolean(state.remote_task_id) || row.stage === 'submitting');
-    });
-}
-async function withAuthorizationLock(identity, work) {
-    const digest = crypto.createHash('sha256').update(`${identity.user_id}|${identity.game_id}|${identity.game_account}`).digest('hex');
-    const key = `uuzuhao_authorization_${digest}`;
-    const owner = `pid=${process.pid} token=${crypto.randomUUID()}`;
-    if (!(await tryAcquireLock(key, 120, owner)).acquired) return { acquired: false };
-    try { return { acquired: true, value: await work() }; }
-    finally { await releaseOwnedLock(key, owner); }
-}
 
 async function clearRecoveredAuthorization(expected, requestStartedAt) {
     const db = openMainDatabase();
@@ -115,4 +93,4 @@ async function clearRecoveredAuthorization(expected, requestStartedAt) {
 }
 
 module.exports = { TASK_TYPE, object, listRecoveryAccounts, getRecoveryAccount, hasAuthorizationError,
-    listRecoveryTasks, hasAuthorizationConflict, withAuthorizationLock, clearRecoveredAuthorization };
+    listRecoveryTasks, clearRecoveredAuthorization };

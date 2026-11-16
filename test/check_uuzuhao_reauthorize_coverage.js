@@ -6,7 +6,7 @@ const { createCoverageMap } = require('istanbul-lib-coverage');
 const root = path.resolve(__dirname, '..');
 const directory = path.join(root, 'coverage/uuzuhao-reauthorize');
 const coverage = createCoverageMap(JSON.parse(fs.readFileSync(path.join(directory, 'coverage-final.json'))));
-const core = ['uuzuhao/uuzuhao_api.js', 'database/uuzuhao_reauthorize_db.js',
+const core = ['common/uuzuhao_operation_lock.js', 'uuzuhao/uuzuhao_api.js', 'database/uuzuhao_reauthorize_db.js',
     'product/uuzuhao_reauthorize_service.js', 'order/auth_revoke_task_service.js', 'h5/public/js/ui/uuzuhao_auth_status.js'];
 const results = core.map(file => ({ file, ...coverage.fileCoverageFor(path.join(root, file)).toSummary().toJSON() }));
 let failed = results.some(result => result.lines.pct < 90);
@@ -47,7 +47,7 @@ const changedCore = core.map(file => {
 console.table(results.map(r => ({ file: r.file, lines: r.lines.pct, branches: r.branches.pct, functions: r.functions.pct })));
 console.table([...changedCore, ...glue]);
 fs.writeFileSync(path.join(directory, 'scope-coverage.json'), JSON.stringify({
-    scope: 'five complete core files; changed-line coverage for all seven runtime files; not whole repository', results, glue,
+    scope: 'six complete core files; changed-line coverage for all eight runtime files; not whole repository', results, glue,
     changed_lines: [...changedCore, ...glue]
 }, null, 2));
 if (failed) process.exitCode = 1;

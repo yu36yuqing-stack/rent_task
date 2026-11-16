@@ -5,6 +5,7 @@ const storage = require('../database/uuzuhao_reauthorize_db');
 const tasks = require('../database/runtime_task_db');
 const locks = require('../database/lock_db');
 const api = require('../uuzuhao/uuzuhao_api');
+const { withUuzuhaoOperationLock, OPERATIONS } = require('../common/uuzuhao_operation_lock');
 
 const QUERY_INTERVAL_MS = 90000;
 const MAX_QUERIES = 3;
@@ -23,7 +24,7 @@ function snapshot(row) {
 }
 
 function createRecoveryService(overrides = {}) {
-    const d = { ...storage, ...tasks, ...locks, ...api, now: Date.now, enabled, logger: console, ...overrides };
+    const d = { ...storage, ...tasks, ...locks, ...api, withUuzuhaoOperationLock, now: Date.now, enabled, logger: console, ...overrides };
     async function save(task, state, stage, terminal = false) {
         const completedText = { recovered: '重新授权成功，已解除授权异常', external_recovered: '授权异常已由原有流程解除',
             superseded: '已有新的异常信息，旧恢复任务结束', manual_required: '授权异常，需人工介入' };
@@ -46,7 +47,6 @@ function createRecoveryService(overrides = {}) {
             return finish(task, state, 'manual_required', 'creation_result_unknown');
         }
         if (!state.remote_task_id) {
-            if (await d.hasAuthorizationConflict(row, 'reauthorize')) return;
             if (![1, 2, 3].includes(Number(row.game_id))) return finish(task, state, 'manual_required', 'unsupported_game');
             state = { ...state, baseline: snapshot(row) };
             await save(task, state, 'submitting');
@@ -93,7 +93,7 @@ function createRecoveryService(overrides = {}) {
             for (const listed of accounts) {
                 if (!(await d.touchLock(WORKER_LOCK, 120, owner))) throw new Error('recovery worker lease lost');
                 try {
-                    await d.withAuthorizationLock(listed, async () => {
+                    await d.withUuzuhaoOperationLock(OPERATIONS.PLATFORM_REAUTHORIZE, listed, async () => {
                         const row = await d.getRecoveryAccount(listed.id);
                         if (!row || !usable(row, d.now())) return;
                         let task = latest.get(row.id);

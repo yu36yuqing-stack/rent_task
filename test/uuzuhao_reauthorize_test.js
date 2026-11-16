@@ -10,6 +10,7 @@ for (const name of ['MAIN', 'RUNTIME', 'ORDER', 'STATS', 'PRICE']) process.env[`
 global.fetch = async () => { throw new Error('unexpected external request'); };
 const api = require('../uuzuhao/uuzuhao_api');
 const storage = require('../database/uuzuhao_reauthorize_db');
+const { withUuzuhaoOperationLock, OPERATIONS } = require('../common/uuzuhao_operation_lock');
 const tasks = require('../database/runtime_task_db');
 const accountDb = require('../database/user_game_account_db');
 const userDb = require('../database/user_db');
@@ -183,18 +184,25 @@ async function main() {
     await sql("UPDATE user_game_account SET uuzuhao_auth_state='{}',channel_prd_info='{}' WHERE id=?", [external.id]);
     await service().tick(); assert.strictEqual((await latest(external)).stage, 'external_recovered');
     await clearFixtures();
-    const conflict = await seed('conflict');
-    const revoke = await tasks.createRuntimeTask({ user_id: 8, task_type: 'uuzuhao_auth_revoke',
-        result_json: { input: { game_id: '1', game_account: conflict.game_account } } });
-    await service().tick(); assert.strictEqual(creates, 0);
-    assert.strictEqual(await storage.hasAuthorizationConflict(conflict, 'revoke'), false, 'queued recovery must not deadlock a revoke task');
-    await tasks.markRuntimeTaskFinished(revoke.task_id);
-    await service().tick(); assert.strictEqual(creates, 1);
-    assert.strictEqual(await storage.hasAuthorizationConflict(conflict, 'revoke'), true);
-    await storage.withAuthorizationLock(conflict, async () => {
-        const nested = await storage.withAuthorizationLock(conflict, async () => assert.fail('must not run'));
-        assert.strictEqual(nested.acquired, false);
+    // Legacy login-exit task states do not control platform authorization recovery.
+    for (const status of ['pending', 'running', 'failed']) {
+        const independent = await seed(`independent-${status}`);
+        const loginTask = await tasks.createRuntimeTask({ user_id: 8, task_type: 'uuzuhao_auth_revoke', status,
+            result_json: { input: { game_id: '1', game_account: independent.game_account } } });
+        await service().tick();
+        assert.strictEqual(creates, 1, `${status} login-exit tasks must not prevent recovery creation`);
+        assert.strictEqual((await latest(independent)).stage, 'waiting_result');
+        assert.strictEqual((await tasks.getRuntimeTaskByTaskId(loginTask.task_id)).status, status,
+            'recovery must not complete or cancel the independent login-exit task');
+        await clearFixtures();
+    }
+    const operationLocked = await seed('operation-locked');
+    await withUuzuhaoOperationLock(OPERATIONS.PLATFORM_REAUTHORIZE, operationLocked, async () => {
+        const sameOperation = await service().tick();
+        assert.strictEqual(sameOperation.processed, 0);
+        assert.strictEqual(creates, 0, 'another platform recovery must retain same-operation exclusion');
     });
+    await service().tick(); assert.strictEqual(creates, 1);
     await clearFixtures();
     const unsupported = await seed('csgo', '4'); await service().tick();
     assert.strictEqual(creates, 0); assert.strictEqual((await latest(unsupported)).stage, 'manual_required');
@@ -251,24 +259,120 @@ async function main() {
     assert.strictEqual(queries, 1, 'a durable successful response is restored without a duplicate query');
     assert.strictEqual((await latest(persistent)).stage, 'recovered');
     await httpTests();
-    await revokeConflictTests();
+    await independentOperationTests();
     await timerTests();
     await frontendTests();
-    console.log('[PASS] reauthorize: API signatures, 90s/3 queries, persistence, recovery/manual, restart, isolation and UI');
+    console.log('[PASS] reauthorize: API signatures, 90s/3 queries, persistence, recovery/manual, restart, independent in-flight operations, isolation and UI');
 }
-async function revokeConflictTests() {
-    await clearFixtures();
-    const row = await seed('manual-revoke-conflict');
-    await service().tick();
+function deferred() {
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    return { promise, resolve };
+}
+async function awaitStarted(signal, runner) {
+    let timer;
+    try {
+        await Promise.race([
+            signal,
+            runner.then(() => { throw new Error('consumer returned before its independent HTTP request started'); }),
+            new Promise((resolve, reject) => { timer = setTimeout(() => reject(new Error('HTTP start timed out')), 2000); })
+        ]);
+    } finally { clearTimeout(timer); }
+}
+async function independentOperationTests() {
     const revoke = require('../order/auth_revoke_task_service');
-    const task = await revoke.enqueueManualAuthRevokeTask(8, { game_id: '1', game_account: row.game_account }, { start_worker: false });
-    assert.strictEqual((await revoke.processAuthRevokeTasks()).deferred, 1);
-    assert.strictEqual((await tasks.getRuntimeTaskByTaskId(task.task.task_id)).stage, 'waiting_reauthorization');
-    await storage.withAuthorizationLock(row, async () => {
-        assert.strictEqual((await revoke.processAuthRevokeTasks()).deferred, 1);
+    // Both directions exercise real API wrappers and real SQLite task/operation locks.
+    for (const scenario of [
+        { first: 'recovery', failed: null },
+        { first: 'recovery', failed: 'revoke' },
+        { first: 'revoke', failed: 'recovery' }
+    ]) {
+        await clearFixtures();
+        const row = await seed(`parallel-${scenario.first}-${scenario.failed || 'success'}`);
+        const loginTask = await revoke.enqueueManualAuthRevokeTask(8,
+            { game_id: '1', game_account: row.game_account }, { start_worker: false });
+        const recoveryStarted = deferred(), revokeStarted = deferred();
+        const recoveryRelease = deferred(), revokeRelease = deferred();
+        let recoveryRequests = 0, revokeRequests = 0, completedQueries = 0;
+        global.fetch = async (url, options) => {
+            const body = JSON.parse(options.body);
+            if (url.endsWith('/hosting/create')) {
+                recoveryRequests++; recoveryStarted.resolve(); await recoveryRelease.promise;
+                if (scenario.failed === 'recovery') throw new Error('offline recovery fixture');
+                return { ok: true, status: 200, text: async () => JSON.stringify({ code: 0,
+                    data: { taskId: 'parallel-remote', gameUnionId: `1_${body.accountNo}` } }) };
+            }
+            if (url.endsWith('/interconnect/auth/revoke')) {
+                revokeRequests++; revokeStarted.resolve(); await revokeRelease.promise;
+                return { ok: true, status: 200, text: async () => JSON.stringify(scenario.failed === 'revoke'
+                    ? { code: 500, msg: 'login exit fixture failure' } : { code: 0, data: {} }) };
+            }
+            if (url.endsWith('/hosting/status')) {
+                completedQueries++;
+                return { ok: true, status: 200, text: async () => JSON.stringify({ code: 0, data: { status: 2 } }) };
+            }
+            throw new Error('unexpected external request');
+        };
+        const recoveryService = createRecoveryService({ ...deps,
+            createReauthorizeTask: api.createReauthorizeTask, queryReauthorizeTask: api.queryReauthorizeTask });
+        let recoveryRun, revokeRun;
+        try {
+            if (scenario.first === 'recovery') {
+                recoveryRun = recoveryService.tick();
+                await awaitStarted(recoveryStarted.promise, recoveryRun);
+                revokeRun = revoke.processAuthRevokeTasks();
+                await awaitStarted(revokeStarted.promise, revokeRun);
+            } else {
+                revokeRun = revoke.processAuthRevokeTasks();
+                await awaitStarted(revokeStarted.promise, revokeRun);
+                recoveryRun = recoveryService.tick();
+                await awaitStarted(recoveryStarted.promise, recoveryRun);
+            }
+            assert.strictEqual(recoveryRequests, 1);
+            assert.strictEqual(revokeRequests, 1);
+            assert.strictEqual((await latest(row)).stage, 'submitting');
+            assert.strictEqual((await tasks.getRuntimeTaskByTaskId(loginTask.task.task_id)).status, 'running');
+            assert.strictEqual((await recoveryService.tick()).reason, 'locked', 'same recovery worker cannot submit twice');
+            assert.strictEqual((await revoke.processAuthRevokeTasks()).claimed, 0,
+                'same login-exit task cannot be claimed twice while its request is pending');
+            assert.strictEqual(recoveryRequests, 1);
+            assert.strictEqual(revokeRequests, 1);
+            recoveryRelease.resolve(); revokeRelease.resolve();
+            await Promise.all([recoveryRun, revokeRun]);
+            const loginAfter = await tasks.getRuntimeTaskByTaskId(loginTask.task.task_id);
+            assert.strictEqual(loginAfter.status, scenario.failed === 'revoke' ? 'failed' : 'success');
+            const recoveryAfter = await latest(row);
+            assert.strictEqual(recoveryAfter.stage, scenario.failed === 'recovery' ? 'manual_required' : 'waiting_result');
+            assert.strictEqual((await storage.getRecoveryAccount(row.id)).uuzuhao_auth_state.required, true,
+                'a login-exit result must not clear the platform authorization error');
+            if (scenario.failed !== 'recovery') {
+                now += 90000; await recoveryService.tick();
+                assert.strictEqual((await latest(row)).stage, 'recovered');
+                assert.strictEqual(completedQueries, 1);
+                assert.strictEqual((await tasks.getRuntimeTaskByTaskId(loginTask.task.task_id)).status, loginAfter.status,
+                    'platform recovery must not overwrite the login-exit result');
+            } else {
+                await recoveryService.tick();
+                assert.strictEqual(recoveryRequests, 1, 'unknown/failed creation is not automatically recreated');
+                assert.strictEqual(completedQueries, 0);
+            }
+        } finally {
+            recoveryRelease.resolve(); revokeRelease.resolve();
+            await Promise.allSettled([recoveryRun, revokeRun].filter(Boolean));
+            global.fetch = async () => { throw new Error('unexpected external request'); };
+        }
+    }
+    await clearFixtures();
+    const ownLock = await seed('own-login-lock');
+    const task = await revoke.enqueueManualAuthRevokeTask(8,
+        { game_id: '1', game_account: ownLock.game_account }, { start_worker: false });
+    await withUuzuhaoOperationLock(OPERATIONS.LOGIN_REVOKE, ownLock, async () => {
+        const out = await revoke.processAuthRevokeTasks();
+        assert.strictEqual(out.deferred, 1, 'same login-exit operation must remain excluded');
+        assert.strictEqual((await tasks.getRuntimeTaskByTaskId(task.task.task_id)).stage, 'waiting_operation_lock');
+        await service().tick();
+        assert.strictEqual(creates, 1, 'a held login-exit lock does not stop platform recovery');
     });
-    assert.strictEqual(queries, 0);
-    assert.strictEqual(creates, 1);
 }
 async function httpTests() {
     await clearFixtures(); result = 1;

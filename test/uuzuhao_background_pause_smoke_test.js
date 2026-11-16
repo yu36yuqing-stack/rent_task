@@ -9,7 +9,7 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rent-auth-pause-'));
 for (const name of ['MAIN', 'ORDER', 'RUNTIME', 'STATS', 'PRICE']) {
     process.env[`${name}_DB_FILE_PATH`] = path.join(tempDir, `${name}.db`);
 }
-const { upsertUserGameAccount } = require('../database/user_game_account_db');
+const { upsertUserGameAccount, getLatestUserGameAccountByUserAndAccount } = require('../database/user_game_account_db');
 const { upsertUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { initOrderDb, upsertOrder } = require('../database/order_db');
 const { getRuntimeTaskByTaskId, updateRuntimeTask } = require('../database/runtime_task_db');
@@ -93,23 +93,33 @@ async function main() {
     await assert.rejects(() => probes.queryOnlineStatusCached(8, 'BAD', { auth }), { code: 'UUZUHAO_AUTHORIZATION_PAUSED' });
 
     const queued = await tasks.enqueueAuthRevokeTasks(8, [finished('BAD')]);
-    const taskId = queued.task_ids[0];
+    let taskId = queued.task_ids[0];
     const beforePause = calls.length;
-    await tasks.processAuthRevokeTasks();
-    await tasks.processAuthRevokeTasks();
+    const automatic = await tasks.processAuthRevokeTasks();
+    assert.strictEqual(automatic.success, 1, '商品授权异常不应阻止腾讯退出租客登录');
+    assert.strictEqual((await tasks.processAuthRevokeTasks()).claimed, 0, '成功任务不重复退出');
     let row = await getRuntimeTaskByTaskId(taskId);
-    assert.strictEqual(row.stage, 'waiting_authorization');
-    assert.strictEqual(JSON.parse(row.result_json).attempt_count, 0);
-    assert.strictEqual(calls.length, beforePause);
-    assert.strictEqual((await tasks.getAuthRevokeTaskViewByUser(8, taskId)).status_text, '等待授权恢复');
+    assert.strictEqual(row.stage, 'done');
+    assert.strictEqual(JSON.parse(row.result_json).attempt_count, 1);
+    assert.strictEqual(calls.length, beforePause + 1);
+    assert.strictEqual((await tasks.getAuthRevokeTaskViewByUser(8, taskId)).status_text, '成功');
+    const afterExit = await getLatestUserGameAccountByUserAndAccount(8, 'BAD', '1', 'WZRY');
+    assert.strictEqual(afterExit.channel_prd_info.uuzuhao.off_type, 'REAUTHORIZE_ERROR',
+        '腾讯退出成功不能清理悠悠平台的授权异常');
+    await assert.rejects(() => probes.queryOnlineStatusCached(8, 'BAD', { auth }), { code: 'UUZUHAO_AUTHORIZATION_PAUSED' });
 
+    await updateRuntimeTask(taskId, { finished_at: '2000-01-01 00:00:00' });
     fail = true;
-    assert.strictEqual((await manual()).task.task_id, taskId);
+    const nextManual = await manual();
+    assert.notStrictEqual(nextManual.task.task_id, taskId, '成功复用窗口过后创建下一轮退出任务');
+    taskId = nextManual.task.task_id;
     const attempted = await tasks.processAuthRevokeTasks();
     assert.strictEqual(attempted.failed, 1);
-    assert.strictEqual(calls.length, beforePause + 1);
-    await tasks.processAuthRevokeTasks();
-    assert.strictEqual(calls.length, beforePause + 1, 'failed manual attempt must not grant unlimited retries');
+    assert.strictEqual(calls.length, beforePause + 2);
+    const retry = await tasks.processAuthRevokeTasks();
+    assert.strictEqual(retry.failed, 1, '退出失败仍沿用下一轮重试，不依赖商品授权恢复');
+    assert.strictEqual(calls.length, beforePause + 3);
+    assert.strictEqual(JSON.parse((await getRuntimeTaskByTaskId(taskId)).result_json).attempt_count, 2);
 
     // Click and a different channel's order attach while the same request is in flight.
     await manual();
@@ -117,26 +127,25 @@ async function main() {
         onRevoke = null;
         await manual();
         await tasks.enqueueAuthRevokeTasks(8, [finished('BAD', 'SECOND_ORDER')]);
+        assert.strictEqual((await tasks.processAuthRevokeTasks()).claimed, 0,
+            '接口在途时新的手工/订单触发只合并，不重复领取同一任务');
     };
     await tasks.processAuthRevokeTasks();
     row = await getRuntimeTaskByTaskId(taskId);
     const state = JSON.parse(row.result_json);
     assert.ok(state.triggers.some((trigger) => trigger.order_no === 'SECOND_ORDER'));
     assert.strictEqual(state.manual_consumed_count, row.attached_manual_count);
-    await tasks.processAuthRevokeTasks();
-    assert.strictEqual(calls.length, beforePause + 2, 'overlapping click must not cause another request');
+    assert.strictEqual(calls.length, beforePause + 4, '在途点击和订单触发没有增加本轮请求次数');
 
     fail = false;
-    await account('BAD', '');
     await upsertOrder({ user_id: 8, ...finished('BAD', 'NEW_RENT'), order_status: '租赁中' });
     await manual();
-    await tasks.processAuthRevokeTasks();
-    assert.strictEqual((await getRuntimeTaskByTaskId(taskId)).stage, 'waiting_active_order');
-    await upsertOrder({ user_id: 8, ...finished('BAD', 'NEW_RENT') });
-    await tasks.processAuthRevokeTasks();
+    const whileRenting = await tasks.processAuthRevokeTasks();
+    assert.strictEqual(whileRenting.success, 1, '无需等其他在租订单结束、租客下线或冷却期');
+    assert.strictEqual(calls.length, beforePause + 5);
     assert.strictEqual((await getRuntimeTaskByTaskId(taskId)).status, 'success');
 
-    // Paused tasks rotate through the bounded queue; they cannot starve normal accounts.
+    // Product pause does not apply to login revocation, including bounded batches and game 3.
     await account('PAUSED');
     const paused = await tasks.enqueueAuthRevokeTasks(8, [finished('PAUSED')]);
     await updateRuntimeTask(paused.task_ids[0], { started_at: '2000-01-01 00:00:00' });

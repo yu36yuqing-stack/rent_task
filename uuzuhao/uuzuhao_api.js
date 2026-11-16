@@ -515,7 +515,7 @@ async function getSteamGuardCode(accountId, options = {}) {
     };
 }
 
-// 解除账号在 U 租号侧的游戏授权。
+// 经悠悠接口退出腾讯侧本次租客登录；独立于 hosting 的悠悠平台QQ重新授权。
 // accountNo 是游戏账号，不是商品 ID；game_id 必须由调用方根据订单明确传入。
 async function revokeAccountAuth(accountNo, options = {}) {
     const auth = options.auth || {};
