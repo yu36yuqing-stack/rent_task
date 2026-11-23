@@ -537,6 +537,7 @@
       orderTotal: document.getElementById('orderTotal'),
       listContainer: document.getElementById('listContainer'),
       orderGameTabs: document.getElementById('orderGameTabs'),
+      orderSearchInput: document.getElementById('orderSearchInput'),
       orderStatusTabs: document.getElementById('orderStatusTabs'),
       orderSyncNowBtn: document.getElementById('orderSyncNowBtn'),
       orderQuickFilters: document.getElementById('orderQuickFilters'),
@@ -651,6 +652,7 @@
       moreOpsMaintenanceBtn: document.getElementById('moreOpsMaintenanceBtn'),
       moreOpsPurchaseBtn: document.getElementById('moreOpsPurchaseBtn'),
       moreOpsCostBtn: document.getElementById('moreOpsCostBtn'),
+      moreOpsCostDetailBtn: document.getElementById('moreOpsCostDetailBtn'),
       moreOpsAuthRevokeBtn: document.getElementById('moreOpsAuthRevokeBtn'),
       moreOpsSoldBtn: document.getElementById('moreOpsSoldBtn'),
       moreOpsCloseBtn: document.getElementById('moreOpsCloseBtn'),
@@ -1184,6 +1186,7 @@
     }
 
     async function loadList() {
+      if (state.currentMenu === 'products_sold' && state.product_game_name === 'GTA6') state.product_game_name = '全部';
       const gameName = String(state.product_game_name || '全部').trim() || '全部';
       const assetStatus = state.currentMenu === 'products_sold' ? 'sold' : 'active';
       const filter = assetStatus === 'sold' ? 'all' : state.filter;
@@ -2016,11 +2019,12 @@
         state.productsSyncing = true;
         renderList();
         try {
-          await request('/api/products/sync', { method: 'POST', body: '{}' });
+          const refreshSnapshot = state.product_game_name === 'GTA6';
+          if (!refreshSnapshot) await request('/api/products/sync', { method: 'POST', body: '{}' });
           state.page = 1;
           await loadList();
           renderList();
-          showToast('商品已同步');
+          showToast(refreshSnapshot ? '主机列表已刷新' : '商品已同步');
         } catch (e) {
           showToast(e.message || '商品同步失败');
         } finally {
@@ -2089,10 +2093,12 @@
         state.orders.syncing = true;
         renderOrdersView();
         try {
-          await request('/api/orders/sync', { method: 'POST', body: '{}' });
+          const out = await request('/api/orders/sync', { method: 'POST', body: JSON.stringify({ game_name:state.orders.game_name }) });
           await loadOrders();
           renderOrdersView();
-          showToast('订单已同步');
+          showToast(out.reused ? '已有订单同步任务在执行'
+            : out.rental_device_orders?.reason === 'disabled' && state.orders.game_name === 'GTA6' ? '主机同步未开通'
+            : '订单已同步');
         } catch (e) {
           showToast(e.message || '订单同步失败');
         } finally {
@@ -2169,6 +2175,12 @@
       if (!item) return;
       closeMoreOpsSheet();
       openPurchaseSheet(item);
+    });
+    els.moreOpsCostDetailBtn?.addEventListener('click', () => {
+      const item = findCurrentProductItem();
+      if (item?.product_kind !== 'device') return;
+      closeMoreOpsSheet();
+      openCostDetailForProduct(item);
     });
     if (els.moreOpsCostBtn) {
       els.moreOpsCostBtn.addEventListener('click', () => {
@@ -2325,7 +2337,7 @@
     els.statsRefreshBtn.addEventListener('click', async () => {
       try {
         const gameName = String((state.statsBoard && state.statsBoard.game_name) || '全部').trim() || '全部';
-        await request('/api/stats/refresh', {
+        const out = await request('/api/stats/refresh', {
           method: 'POST',
           body: JSON.stringify({ game_name: gameName })
         });
@@ -2334,7 +2346,10 @@
           await loadStatsCalendar((state.statsBoard.calendar && state.statsBoard.calendar.month) || '');
         }
         renderStatsView();
-        showToast('统计已刷新（最近14天）');
+        showToast(gameName !== 'GTA6' ? '统计已刷新（最近14天）'
+          : out.order_sync?.ok === false ? '主机订单同步失败，保留上次数据'
+          : out.order_sync?.result?.rental_device_orders?.reason === 'disabled' ? '主机同步未开通'
+          : '主机收益已刷新');
       } catch (e) {
         alert(e.message || '统计刷新失败');
       }

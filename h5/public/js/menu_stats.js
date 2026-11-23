@@ -56,10 +56,10 @@
             <p class="stats-cost-detail-date">${x.cost_date || '-'}</p>
             <div class="stats-cost-detail-top-actions">
               <p class="stats-cost-detail-money">¥${Number(x.cost_amount || 0).toFixed(2)}</p>
-              <button class="btn btn-ghost btn-card-action stats-cost-detail-delete" data-cost-delete-id="${Number(x.id || 0)}" ${deleting ? 'disabled' : ''}>删除</button>
+              ${d.read_only ? '' : `<button class="btn btn-ghost btn-card-action stats-cost-detail-delete" data-cost-delete-id="${Number(x.id || 0)}" ${deleting ? 'disabled' : ''}>删除</button>`}
             </div>
           </div>
-          <p class="stats-cost-detail-meta">类型：${costTypeText(x.cost_type)}${x.cost_desc ? ` · ${x.cost_desc}` : ''}</p>
+          <p class="stats-cost-detail-meta">类型：${costTypeText(x.cost_type)}${x.cost_desc ? ` · ${escapeAttr(x.cost_desc)}` : ''}</p>
         </div>
       `).join('');
       Array.from(els.statsCostDetailList.querySelectorAll('[data-cost-delete-id]')).forEach((n) => {
@@ -122,6 +122,7 @@
           open: true,
           loading: false,
           deleting: false,
+          read_only: Boolean(out.read_only),
           game_account: String(out.game_account || gameAccount).trim(),
           game_name: String(out.game_name || gameName).trim() || gameName,
           display_name: String(out.display_name || state.statsCostDetail.display_name || gameAccount).trim(),
@@ -220,6 +221,7 @@
     function gameIconByName(gameName) {
       const key = String(gameName || '').trim();
       if (key === 'WZRY') return '/assets/game_icons/wzry.webp';
+      if (key === 'GTA6') return '/assets/game_icons/gta6.svg';
       if (key === '和平精英') return '/assets/game_icons/hpjy.png';
       if (key === 'CFM') return '/assets/game_icons/cfm.png';
       if (key === 'CSGO') return '/assets/game_icons/csgo.png?v=20260425-soldier';
@@ -312,6 +314,7 @@
       const games = [
         { k: '全部', t: '全部', icon: '' },
         { k: 'WZRY', t: '王者荣耀', icon: '/assets/game_icons/wzry.webp' },
+        { k: 'GTA6', t: 'GTA6', icon: '/assets/game_icons/gta6.svg' },
         { k: '和平精英', t: '和平精英', icon: '/assets/game_icons/hpjy.png' },
         { k: 'CFM', t: 'CFM', icon: '/assets/game_icons/cfm.png' },
         { k: 'CSGO', t: 'CSGO', icon: '/assets/game_icons/csgo.png?v=20260425-soldier' }
@@ -324,6 +327,8 @@
       ];
       const summary = s.summary || {};
       const profitability = s.profitability || {};
+      const devicesOnly = s.game_name === 'GTA6';
+      const percent = value => value === null ? '—' : `${(Number(value || 0) * 100).toFixed(2)}%`;
       const orderBase = Number(summary.order_cnt_total || 0);
       const avgRec = orderBase > 0 ? Number(summary.amount_rec_sum || 0) / orderBase : 0;
 
@@ -370,7 +375,7 @@
         </div>
         <div class="stats-kpi-card">
           <p class="stats-kpi-key">年化收益率</p>
-          <p class="stats-kpi-value">${(Number(profitability.annualized_return_rate || 0) * 100).toFixed(2)}%</p>
+          <p class="stats-kpi-value">${percent(profitability.annualized_return_rate)}</p>
         </div>
         <div class="stats-kpi-card">
           <p class="stats-kpi-key">日均单数</p>
@@ -389,18 +394,20 @@
           <p class="stats-kpi-value">¥${Number(summary.avg_daily_rec || 0).toFixed(2)}</p>
         </div>
         <div class="stats-kpi-card">
-          <p class="stats-kpi-key">3单达成率</p>
-          <p class="stats-kpi-value">${(Number(summary.target3_rate || 0) * 100).toFixed(1)}%</p>
+          <p class="stats-kpi-key">${devicesOnly ? '退款总额' : '3单达成率'}</p>
+          <p class="stats-kpi-value">${devicesOnly ? '¥'+Number(summary.amount_refund_sum || 0).toFixed(2) : (Number(summary.target3_rate || 0) * 100).toFixed(1)+'%'}</p>
         </div>
       `;
       renderStatsCalendar();
 
-      els.statsAccountTitle.textContent = `账号收益（已配置 ${Number(s.configured_account_count || 0)} 个）`;
+      els.statsAccountTitle.textContent = `${devicesOnly ? '主机' : '账号'}收益（已配置成本 ${Number(s.configured_account_count || 0)} 个）`;
       const list = Array.isArray(s.by_account) ? s.by_account : [];
       if (list.length === 0) {
         els.statsAccountList.innerHTML = '<div class="panel"><div style="color:#6d7a8a;font-size:13px;">暂无可展示的账号统计</div></div>';
       } else {
         els.statsAccountList.innerHTML = list.map((x) => {
+          const device = x.product_kind === 'device';
+          const costAttrs = device && !x.cost_detail_available ? '' : `data-stats-cost-detail="${escapeAttr(x.game_account)}" data-stats-cost-game="${escapeAttr(x.game_name)}"`;
           const sold = String(x.asset_status || '').trim() === 'sold';
           const soldMeta = sold ? ` · 已售${x.sold_at ? ` ${x.sold_at}` : ''}` : '';
           const soldChips = sold ? `
@@ -410,20 +417,20 @@
           return `
           <div class="stats-acc-item ${sold ? 'is-sold' : ''}">
             <div class="stats-acc-top">
-              <p class="stats-acc-name">${gameIconByName(x.game_name) ? `<span class="game-avatar"><img src="${gameIconByName(x.game_name)}" alt="${x.game_name || ''}" loading="lazy" decoding="async"></span>` : ''}${x.display_name || x.role_name || x.game_account || '-'}${sold ? '<span class="chip chip-black">已售</span>' : ''}</p>
+              <p class="stats-acc-name">${gameIconByName(x.game_name) ? `<span class="game-avatar"><img src="${gameIconByName(x.game_name)}" alt="${escapeAttr(x.game_name)}" loading="lazy" decoding="async"></span>` : ''}${escapeAttr(x.display_name || x.role_name || x.game_account || '-')}${sold ? '<span class="chip chip-black">已售</span>' : ''}</p>
               <span class="stats-acc-money">¥${Number(x.amount_rec_sum || 0).toFixed(2)}</span>
             </div>
-            <p class="stats-acc-meta">账号：${x.game_account || '-'} · 有效订单：${Number(x.order_cnt_effective || 0)} · 采购：${x.purchase_date || '-'}${soldMeta}</p>
+            <p class="stats-acc-meta">${device ? '主机编号' : '账号'}：${escapeAttr((device ? x.device_no : x.game_account) || '-')} · 有效订单：${Number(x.order_cnt_effective || 0)} · 采购：${x.purchase_date || '-'}${soldMeta}</p>
             <div class="stats-acc-grid">
-              <div class="stats-acc-chip is-clickable" data-stats-cost-detail="${x.game_account || ''}" data-stats-cost-game="${x.game_name || ''}"><p class="stats-acc-chip-k">维护成本<span class="stats-acc-chip-mark">›</span></p><p class="stats-acc-chip-v">¥${Number(x.total_cost_amount || 0).toFixed(2)}</p></div>
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">采购成本</p><p class="stats-acc-chip-v">¥${Number(x.purchase_cost_amount || x.purchase_base || 0).toFixed(2)}</p></div>
+              <div class="stats-acc-chip ${costAttrs ? 'is-clickable' : ''}" ${costAttrs}><p class="stats-acc-chip-k">${device ? '总成本' : '维护成本'}${costAttrs ? '<span class="stats-acc-chip-mark">›</span>' : ''}</p><p class="stats-acc-chip-v">¥${Number(x.total_cost_amount || 0).toFixed(2)}</p></div>
+              <div class="stats-acc-chip"><p class="stats-acc-chip-k">采购成本</p><p class="stats-acc-chip-v">${device && !x.cost_configured ? '未填写' : '¥'+Number(x.purchase_cost_amount || x.purchase_base || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">历史总收入</p><p class="stats-acc-chip-v">¥${Number(x.total_rec_amount_all_time || 0).toFixed(2)}</p></div>
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">年化(单利)</p><p class="stats-acc-chip-v">${(Number(x.annualized_return_rate || 0) * 100).toFixed(2)}%</p></div>
+              <div class="stats-acc-chip"><p class="stats-acc-chip-k">年化(单利)</p><p class="stats-acc-chip-v">${percent(x.annualized_return_rate)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">日均单数</p><p class="stats-acc-chip-v">${Number(x.avg_daily_order_cnt || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">日均时长</p><p class="stats-acc-chip-v">${Number(x.avg_daily_rent_hour || 0).toFixed(2)}h</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">日均单价</p><p class="stats-acc-chip-v">¥${Number(x.avg_order_price || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">日均实收</p><p class="stats-acc-chip-v">¥${Number(x.avg_daily_rec || 0).toFixed(2)}</p></div>
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">3单达成率</p><p class="stats-acc-chip-v">${(Number(x.target3_rate || 0) * 100).toFixed(1)}%</p></div>
+              ${device ? '' : `<div class="stats-acc-chip"><p class="stats-acc-chip-k">3单达成率</p><p class="stats-acc-chip-v">${(Number(x.target3_rate || 0) * 100).toFixed(1)}%</p></div>`}
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">退款/撤单</p><p class="stats-acc-chip-v">${Number(x.order_cnt_refund || 0)}/${Number(x.order_cnt_cancel || 0)}</p></div>
               ${soldChips}
             </div>

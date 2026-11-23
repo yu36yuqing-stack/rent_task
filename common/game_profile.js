@@ -1,4 +1,5 @@
 const GAME_PROFILES = [
+    { canonical_id: 'GTA6', canonical_name: 'GTA6', ids: ['GTA6'], names: ['GTA6'] },
     {
         canonical_id: '1',
         canonical_name: 'WZRY',

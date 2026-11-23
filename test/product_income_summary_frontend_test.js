@@ -66,7 +66,7 @@ assert(Object.isFrozen(context.window.ProductIncomeSummary));
 const renderedCards = [];
 context.document = {
     createElement: () => ({
-        style: {}, innerHTML: '', addEventListener() {}, contains: () => true,
+        style: {}, dataset: {}, innerHTML: '', addEventListener() {}, contains: () => true,
         querySelector: selector => selector === '.copy-btn' ? null : { addEventListener() {} }
     })
 };

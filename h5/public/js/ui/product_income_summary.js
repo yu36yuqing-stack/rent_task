@@ -25,7 +25,9 @@
       const hasIncome = income && income.status === 'ready' && typeof income.amount === 'number'
         && Number.isFinite(income.amount);
       lines.push(`<span class="purchase-brief-line" data-slot="total-cost">总成本 ${hasCost ? `¥${totalCost.toFixed(2)}` : '--'}</span>`);
-      lines.push(`<span class="purchase-brief-line" data-slot="rental-income">累计租金 ${hasIncome ? `¥${income.amount.toFixed(2)}` : '--'}</span>`);
+      if (product.product_kind !== 'device') {
+        lines.push(`<span class="purchase-brief-line" data-slot="rental-income">累计租金 ${hasIncome ? `¥${income.amount.toFixed(2)}` : '--'}</span>`);
+      }
     }
     return `<div class="purchase-brief${soldView ? '' : ' product-income-brief'}">${lines.join('')}</div>`;
   }

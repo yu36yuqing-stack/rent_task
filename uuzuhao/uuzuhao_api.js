@@ -94,7 +94,7 @@ async function postSigned(path, businessParams = {}, auth = {}, options = {}) {
         const text = await res.text();
         let json;
         try {
-            json = JSON.parse(text);
+            json = JSON.parse(text, options.reviver);
         } catch (e) {
             throw new Error(`API 返回非JSON: status=${res.status}, body=${text.slice(0, 200)}`);
         }
@@ -653,7 +653,61 @@ async function queryReauthorizeTask(accountNo, taskId, options = {}) {
     return { status };
 }
 
+async function listRentalDevices(auth) {
+    const devices = new Map();
+    for (let pageNum = 1; pageNum <= 200; pageNum++) {
+        const response = await postSigned('/api/youpin/rent-connector/device/v1/list',
+            { tab: 0, pageNum, pageSize: 100 }, auth, {
+                reviver: (key, value, context) => key === 'deviceId' && typeof value === 'number'
+                    ? (context?.source || (Number.isSafeInteger(value) ? String(value) : null)) : value
+            });
+        const page = response.data;
+        if (!Array.isArray(page?.deviceList) || typeof page.hasMore !== 'boolean') throw new Error('主机列表返回结构异常');
+        const before = devices.size;
+        for (const item of page.deviceList) {
+            const id = String(item?.deviceId ?? '');
+            if (!/^[1-9]\d*$/.test(id)) throw new Error('主机缺少有效 deviceId');
+            devices.set(id, item);
+        }
+        if (!page.hasMore) return [...devices.values()];
+        if (devices.size === before) throw new Error('主机列表分页未前进');
+    }
+    throw new Error('主机列表超过分页上限');
+}
+
+const GTA6_DEVICE_GAME_ID = 11000;
+
+async function listGta6DeviceOrders(auth, { maxPages = 20 } = {}) {
+    const orders = new Map();
+    const pageSize = 50;
+    let expected;
+    for (let page = 1; page <= maxPages; page++) {
+        const response = await postSigned('/api/youpin/rent-connector/device/v1/order/list',
+            { orderStatus: 0, page, pageSize, gameId: GTA6_DEVICE_GAME_ID }, auth, {
+                reviver: (key, value, context) => key === 'deviceId' && typeof value === 'number'
+                    ? (context?.source || (Number.isSafeInteger(value) ? String(value) : null)) : value
+            });
+        const data = response.data;
+        if (!Number.isSafeInteger(data?.totalCount) || data.totalCount < 0 || !Array.isArray(data.orderList)
+            || data.orderList.length > pageSize) throw new Error('主机订单列表返回结构异常');
+        expected ??= data.totalCount;
+        if (data.totalCount !== expected) throw new Error('主机订单分页期间总数变化');
+        for (const order of data.orderList) {
+            const orderNo = typeof order?.purchaseOrderNo === 'string' ? order.purchaseOrderNo.trim() : '';
+            if (!orderNo || Number(order.gameId) !== GTA6_DEVICE_GAME_ID || orders.has(orderNo)) {
+                throw new Error('主机订单编号、游戏或分页重复异常');
+            }
+            orders.set(orderNo, order);
+        }
+        if (orders.size === expected) return [...orders.values()];
+        if (orders.size > expected || data.orderList.length !== pageSize) throw new Error('主机订单分页不完整');
+    }
+    throw new Error('主机订单超过分页上限');
+}
+
 module.exports = {
+    listGta6DeviceOrders,
+    listRentalDevices,
     createReauthorizeTask,
     queryReauthorizeTask,
     collectYoupinData,

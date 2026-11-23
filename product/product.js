@@ -419,6 +419,8 @@ async function pullPlatformDataByAuth(platform, authPayload = {}) {
     throw new Error(`不支持的平台: ${platform}`);
 }
 
+const { syncEnabledDevices } = require('./rental_device_service');
+
 async function syncUserAccountsByAuth(userId) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
@@ -483,6 +485,8 @@ async function syncUserAccountsByAuth(userId) {
     const pulledRowsByPlatform = {};
 
     const platformPullStartedAt = nowMs();
+    const deviceAuth = validAuthRows.find(row => row.platform === PLATFORM_YYZ);
+    const deviceSync = deviceAuth ? syncEnabledDevices(uid, deviceAuth.auth_payload) : { skipped: true };
     const platformResults = await Promise.allSettled(validAuthRows.map(async (row) => {
         const platform = String(row.platform || '');
         const authPayload = row.auth_payload || {};
@@ -620,6 +624,7 @@ async function syncUserAccountsByAuth(userId) {
     const anomalyStartedAt = nowMs();
     const anomalies = await reconcileProductSyncAnomalies(uid, currentRows, pulledRowsByPlatform, errors, validPlatforms);
     timing.anomaly_reconcile_ms = elapsedMs(anomalyStartedAt);
+    const deviceResult = await deviceSync;
     timing.total_ms = elapsedMs(totalStartedAt);
 
     return {
@@ -627,6 +632,7 @@ async function syncUserAccountsByAuth(userId) {
         user_id: uid,
         platforms: validPlatforms,
         pulled,
+        rental_devices: deviceResult,
         upserted,
         mirrored_by_orders: mirroredByOrders,
         cleaned: 0,

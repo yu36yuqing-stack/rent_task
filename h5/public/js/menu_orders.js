@@ -128,6 +128,7 @@
     function normalizeOrderGameName(gameName, gameId) {
       const n = String(gameName || '').trim();
       const lower = n.toLowerCase();
+      if (lower === 'gta6' || gameId === 'GTA6') return 'GTA6';
       if (n === 'CSGO' || lower === 'csgo' || n === 'CS:GO' || lower === 'cs2' || n.includes('反恐精英')) return 'CSGO';
       if (n.includes('CFM') || n.includes('枪战王者') || n.includes('穿越火线') || lower === 'cfm') return 'CFM';
       if (n === '和平精英' || n.toUpperCase() === 'HPJY') return '和平精英';
@@ -140,6 +141,7 @@
 
     function buildOrderGameAvatarHtml(item) {
       const normalized = normalizeOrderGameName(item && item.game_name, item && item.game_id);
+      if (normalized === 'GTA6') return '<span class="game-avatar"><img src="/assets/game_icons/gta6.svg" alt="GTA6"></span>';
       if (normalized === 'CSGO') {
         return `<span class="game-avatar game-avatar-csgo" title="CSGO" aria-label="CSGO">
           <img src="/assets/game_icons/csgo.png?v=20260425-soldier" alt="CSGO" loading="lazy" decoding="async">
@@ -514,6 +516,7 @@
       const games = [
         { k: '全部', t: '全部', icon: '' },
         { k: 'WZRY', t: '王者荣耀', icon: '/assets/game_icons/wzry.webp' },
+        { k: 'GTA6', t: 'GTA6', icon: '/assets/game_icons/gta6.svg' },
         { k: '和平精英', t: '和平精英', icon: '/assets/game_icons/hpjy.png' },
         { k: 'CFM', t: 'CFM', icon: '/assets/game_icons/cfm.png' },
         { k: 'CSGO', t: 'CSGO', icon: '/assets/game_icons/csgo.png?v=20260425-soldier' }
@@ -521,7 +524,7 @@
       const tabs = [
         { k: 'all', t: '全部' },
         { k: 'progress', t: '租赁中' },
-        { k: 'refund', t: '已退款' },
+        { k: 'refund', t: o.game_name === 'GTA6' ? '退款/取消' : '已退款' },
         { k: 'done', t: '已完成' }
       ];
       const quick = [
@@ -537,6 +540,11 @@
             <span class="stats-game-tab-text">${x.t}</span>
           </button>
         `).join('');
+      }
+      if (els.orderSearchInput) {
+        const hint = o.game_name === 'GTA6' ? '搜索主机名称、编号或订单号' : '搜索名称 / 账号';
+        els.orderSearchInput.placeholder = hint;
+        els.orderSearchInput.setAttribute('aria-label',hint);
       }
       els.orderStatusTabs.innerHTML = tabs.map((x) => `
         <button class="orders-tab header-tab ${o.status_filter === x.k ? 'active' : ''}" data-order-status="${x.k}">${x.t}</button>
@@ -560,26 +568,32 @@
         els.orderListContainer.innerHTML = o.list.map((item) => `
           <div class="order-card">
             <div class="order-card-top">
-              <p class="order-card-role">${buildOrderGameAvatarHtml(item)}<span class="order-role-text">${item.display_name || item.game_account || '-'}</span></p>
+            <p class="order-card-role">${buildOrderGameAvatarHtml(item)}<span class="order-role-text">${escapeAttr(item.display_name || item.game_account || '-')}</span></p>
               <span class="order-chip ${orderStatusClass(item.order_status)}">${item.order_status || '-'}</span>
             </div>
             <div class="order-id-row">
-              <span class="order-id-label">No.${item.order_no || '-'}</span>
-              <button class="order-copy-btn" data-order-copy="${item.order_no || ''}">复制</button>
+              <span class="order-id-label">No.${escapeAttr(item.order_no || '-')}</span>
+              <button class="order-copy-btn" data-order-copy="${escapeAttr(item.order_no)}">复制</button>
               ${item.has_complaint ? `<button class="order-complaint-btn" data-order-complaint="${item.order_no || ''}" data-order-channel="${item.channel || ''}">投诉详情</button>` : ''}
               ${(String(item.channel || '').trim().toLowerCase() === 'uhaozu' && (String(item.order_status || '').trim() === '已完成' || String(item.order_status || '').trim() === '部分完成'))
                 ? `<button class="order-complaint-btn" data-order-detail="${item.order_no || ''}" data-order-detail-channel="${item.channel || ''}">查看详情</button>`
                 : ''}
             </div>
             <div class="order-card-line">${formatOrderTimeRange(item)}</div>
-            <div class="order-card-line">渠道：${item.channel || '-'} · 账号：${item.game_account || '-'}</div>
-            <div class="order-card-line">时长：${formatOrderRentPackage(item)} · 订单金额：¥${Number(item.order_amount || 0).toFixed(2)}</div>
+            <div class="order-card-line">${item.order_kind === 'device'
+              ? `渠道：悠悠主机 · 编号：${escapeAttr(item.device_no || '-')} · ${escapeAttr(item.ren_way || '-')}`
+              : `渠道：${item.channel || '-'} · 账号：${item.game_account || '-'}`}</div>
+            <div class="order-card-line">时长：${item.order_kind === 'device' ? `${Number(item.rent_hour || 0)}小时` : formatOrderRentPackage(item)} · ${item.order_kind === 'device' ? '应收' : '订单金额'}：${item.order_amount == null && item.order_kind === 'device' ? '—' : '¥'+Number(item.order_amount || 0).toFixed(2)}</div>
+            ${item.order_kind === 'device' && item.refund_amount > 0
+              ? `<div class="order-card-line">退款：¥${Number(item.refund_amount).toFixed(2)}</div>` : ''}
+            ${item.order_kind === 'device' && item.settlement_amount != null && item.settlement_amount !== item.rec_amount
+              ? `<div class="order-card-line">渠道结算：¥${Number(item.settlement_amount).toFixed(2)}</div>` : ''}
             <div class="order-bottom">
               <div class="order-bottom-left">
                 ${buildOrderCountdownHtml(item)}
               </div>
               <div class="order-income">
-                <span class="order-income-label">到手</span>¥${Number(item.rec_amount || 0).toFixed(2)}
+                <span class="order-income-label">${item.order_kind === 'device' ? '入账' : '到手'}</span>${item.order_kind === 'device' && item.order_status === '租赁中' ? '—' : '¥'+Number(item.rec_amount || 0).toFixed(2)}
               </div>
             </div>
           </div>

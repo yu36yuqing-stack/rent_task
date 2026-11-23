@@ -14,6 +14,7 @@ const {
     updateUserGameAccountTotalCostByUserAndAccount
 } = require('../database/user_game_account_db');
 const { canonicalGameId, canonicalGameNameById } = require('../common/game_profile');
+const { writeDeviceCost } = require('./rental_device_service');
 
 function normalizeCostType(v, fallback = 'other') {
     const text = String(v || '').trim().toLowerCase();
@@ -56,6 +57,7 @@ async function savePurchaseCostByUserAndAccount(userId, payload = {}) {
     const purchaseDesc = String(payload.purchase_desc || '').trim();
     if (!Number.isFinite(purchasePrice) || purchasePrice < 0) throw new Error('purchase_price 不合法');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(purchaseDate)) throw new Error('purchase_date 格式不合法');
+    if (gameId === 'GTA6') return writeDeviceCost(userId, payload, 'purchase');
 
     await ensureAccountExists(userId, gameAccount, gameId, gameName);
     const account = await updateUserGameAccountPurchaseByUserAndAccount(
@@ -99,6 +101,7 @@ async function createAccountCostByUserAndAccount(userId, payload = {}) {
     const costDesc = String(payload.cost_desc || '').trim();
     if (!Number.isFinite(costAmount) || costAmount < 0) throw new Error('cost_amount 不合法');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(costDate)) throw new Error('cost_date 格式不合法');
+    if (gameId === 'GTA6') return writeDeviceCost(userId, { ...payload, cost_type: costType }, 'create');
 
     const account = await ensureAccountExists(userId, gameAccount, gameId, gameName);
     const record = await createAccountCostRecord({
@@ -131,6 +134,7 @@ async function deleteAccountCostByUserAndAccount(userId, payload = {}) {
     const gameName = canonicalGameNameById(gameId, payload.game_name || 'WZRY');
     if (!recordId) throw new Error('record_id 不合法');
     if (!gameAccount) throw new Error('game_account 不能为空');
+    if (gameId === 'GTA6') return writeDeviceCost(userId, payload, 'delete');
 
     await ensureAccountExists(userId, gameAccount, gameId, gameName);
     const record = await softDeleteAccountCostRecordById(userId, recordId, {

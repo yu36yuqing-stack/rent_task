@@ -53,6 +53,8 @@ const {
 } = require('./order_mapping');
 const { normalizeGameProfile } = require('../common/game_profile');
 const { buildOrderSearchPredicate, normalizeOrderSearchKeyword, normalizeOrderListQuickFilter } = require('./order_search');
+const { initRentalDeviceOrderDb } = require('../database/rental_device_order_db');
+const { syncConfiguredRentalDeviceOrders } = require('./rental_device_order_service');
 const {
     buildAuthRevokeCandidateOnStatusChange,
     enqueueAuthRevokeTasks,
@@ -249,7 +251,7 @@ function normalizeOrderListOptions(options = {}) {
     const pageSize = Math.min(100, Math.max(1, Number(options.page_size || options.pageSize || 20)));
     const quickFilter = normalizeOrderListQuickFilter(options.quick_filter || options.quickFilter);
     const statusFilterRaw = String(options.status_filter || options.statusFilter || 'all').trim().toLowerCase();
-    const statusFilter = (statusFilterRaw === 'progress' || statusFilterRaw === 'refund' || statusFilterRaw === 'done' || statusFilterRaw === 'all')
+    const statusFilter = (statusFilterRaw === 'progress' || statusFilterRaw === 'refund' || statusFilterRaw === 'done' || statusFilterRaw === 'cancel' || statusFilterRaw === 'all')
         ? statusFilterRaw
         : 'all';
     const gameNameRaw = String(options.game_name || options.gameName || 'WZRY').trim() || 'WZRY';
@@ -284,6 +286,7 @@ async function listOrdersForUser(userId, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
     const cfg = normalizeOrderListOptions(options);
+    await initRentalDeviceOrderDb();
     const search = await buildOrderSearchPredicate(uid, cfg.keyword);
     const now = new Date();
     const range = resolveDateRangeByQuickFilter(cfg.quickFilter, now);
@@ -293,46 +296,60 @@ async function listOrdersForUser(userId, options = {}) {
     const todayStart = toDateTimeText(todayRange.start);
     const todayEnd = toDateTimeText(todayRange.end);
 
-    const where = [
-        'user_id = ?',
-        'is_deleted = 0',
-        "TRIM(COALESCE(start_time, '')) <> ''",
-        "TRIM(COALESCE(end_time, '')) <> ''",
-        'start_time < ?',
-        'end_time >= ?'
-    ];
-    const params = [uid, rangeEnd, rangeStart];
+    const source = `WITH visible_orders AS (
+        SELECT id,user_id,channel,order_no,game_id,game_name,game_account,role_name,order_status,order_amount,rent_hour,
+            ren_way,rec_amount,start_time,end_time,create_date,modify_date,'' AS order_kind,'' AS device_no,NULL AS refund_amount,
+            NULL AS settlement_amount,NULL AS source_status,start_time AS range_start,end_time AS range_end
+        FROM "order" WHERE user_id=? AND is_deleted=0 AND TRIM(COALESCE(start_time,''))<>'' AND TRIM(COALESCE(end_time,''))<>''
+        UNION ALL
+        SELECT id,user_id,source,order_no,'GTA6','GTA6',
+            CASE WHEN device_id='' THEN 'device:unlinked' ELSE 'device:'||device_id END,device_name,
+            order_status,receivable_cent/100.0,rent_hour,order_type,booked_cent/100.0,start_time,end_time,create_date,modify_date,
+            'device',device_no,refund_cent/100.0,settlement_cent/100.0,source_status,
+            COALESCE(NULLIF(start_time,''),NULLIF(placed_at,''),end_time),
+            COALESCE(NULLIF(end_time,''),NULLIF(placed_at,''),start_time)
+        FROM rental_device_order WHERE user_id=? AND is_deleted=0
+    )`;
+    const where = ["range_start <> ''", "range_end <> ''", 'range_start < ?', 'range_end >= ?'];
+    const params = [uid, uid, rangeEnd, rangeStart];
     if (cfg.gameName !== '全部') {
-        where.splice(2, 0, "COALESCE(game_name, '') = ?");
-        params.splice(1, 0, cfg.gameName);
+        where.push("COALESCE(game_name, '') = ?");
+        params.push(cfg.gameName);
     }
     if (search.sql) {
-        where.push(search.sql);
-        params.push(...search.params);
+        where.push(`((order_kind='' AND ${search.sql}) OR (order_kind='device' AND
+            (INSTR(LOWER(role_name),LOWER(?))>0 OR LOWER(device_no)=LOWER(?) OR LOWER(order_no)=LOWER(?))))`);
+        params.push(...search.params,cfg.keyword,cfg.keyword,cfg.keyword);
     }
+    const baseWhere = where.join(' AND ');
+    const todayParams = [uid, uid, todayEnd, todayStart, ...params.slice(4)];
 
     if (cfg.statusFilter === 'progress') {
         where.push("COALESCE(order_status, '') IN ('租赁中', '出租中')");
     } else if (cfg.statusFilter === 'refund') {
-        where.push("COALESCE(order_status, '') IN ('已退款')");
+        where.push(cfg.gameName === 'GTA6'
+            ? "(order_status IN ('已退款','已取消') OR refund_amount>0)"
+            : "(order_status='已退款' OR (order_kind='device' AND refund_amount>0))");
     } else if (cfg.statusFilter === 'done') {
-        where.push("COALESCE(order_status, '') IN ('已完成', '部分完成', '已撤单', '已退款', '投诉/撤单')");
+        where.push("(order_status='已完成' OR (order_kind='' AND order_status IN ('部分完成','已撤单','已退款','投诉/撤单')))");
+    } else if (cfg.statusFilter === 'cancel') {
+        where.push("order_status='已取消'");
     }
 
     const whereSql = where.join(' AND ');
     const db = openOrderDatabase();
     try {
         const totalRow = await dbGet(db, `
-            SELECT COUNT(*) AS total
-            FROM "order"
+            ${source} SELECT COUNT(*) AS total
+            FROM visible_orders
             WHERE ${whereSql}
         `, params);
         const countsRow = await dbGet(db, `
-            SELECT
+            ${source} SELECT
               SUM(CASE WHEN COALESCE(order_status, '') IN ('租赁中', '出租中') THEN 1 ELSE 0 END) AS progress_cnt,
-              SUM(CASE WHEN COALESCE(order_status, '') IN ('已完成', '部分完成', '已撤单', '已退款', '投诉/撤单') THEN 1 ELSE 0 END) AS done_cnt,
+              SUM(CASE WHEN COALESCE(order_status, '') IN ('已完成', '部分完成', '已撤单', '已退款', '投诉/撤单', '已取消') THEN 1 ELSE 0 END) AS done_cnt,
               SUM(CASE
-                    WHEN COALESCE(order_status, '') IN ('已完成', '部分完成', '已撤单', '已退款', '投诉/撤单')
+                    WHEN COALESCE(order_status, '') IN ('已完成', '部分完成', '已撤单', '已退款', '投诉/撤单', '已取消')
                      AND COALESCE(rec_amount, 0) <= 0
                     THEN 1 ELSE 0 END
               ) AS done_zero_cnt,
@@ -341,35 +358,18 @@ async function listOrdersForUser(userId, options = {}) {
                     THEN COALESCE(order_amount, 0)
                     ELSE 0 END
               ) AS progress_order_amount_sum
-            FROM "order"
-            WHERE user_id = ?
-              AND is_deleted = 0
-              ${cfg.gameName === '全部' ? '' : 'AND COALESCE(game_name, \'\') = ?'}
-              AND TRIM(COALESCE(start_time, '')) <> ''
-              AND TRIM(COALESCE(end_time, '')) <> ''
-              AND start_time < ?
-              AND end_time >= ?
-              ${search.sql ? `AND ${search.sql}` : ''}
-        `, [...(cfg.gameName === '全部' ? [uid, rangeEnd, rangeStart] : [uid, cfg.gameName, rangeEnd, rangeStart]), ...search.params]);
+            FROM visible_orders WHERE ${baseWhere}
+        `, params);
         const todayRow = await dbGet(db, `
-            SELECT COUNT(*) AS today_total
-            FROM "order"
-            WHERE user_id = ?
-              AND is_deleted = 0
-              ${cfg.gameName === '全部' ? '' : 'AND COALESCE(game_name, \'\') = ?'}
-              AND TRIM(COALESCE(start_time, '')) <> ''
-              AND TRIM(COALESCE(end_time, '')) <> ''
-              AND start_time < ?
-              AND end_time >= ?
-              ${search.sql ? `AND ${search.sql}` : ''}
-        `, [...(cfg.gameName === '全部' ? [uid, todayEnd, todayStart] : [uid, cfg.gameName, todayEnd, todayStart]), ...search.params]);
+            ${source} SELECT COUNT(*) AS today_total FROM visible_orders WHERE ${baseWhere}
+        `, todayParams);
         const offset = (cfg.page - 1) * cfg.pageSize;
         const listRaw = await dbAll(db, `
-            SELECT
+            ${source} SELECT
               o.channel, o.order_no, o.game_id, o.game_name, o.game_account, o.role_name,
               o.order_status, o.order_amount, o.rent_hour, o.ren_way, o.rec_amount,
-              o.start_time, o.end_time, o.create_date, o.modify_date,
-              EXISTS(
+              o.start_time, o.end_time, o.create_date, o.modify_date, o.order_kind, o.device_no, o.refund_amount, o.settlement_amount, o.source_status,
+              o.order_kind='' AND EXISTS(
                   SELECT 1
                   FROM order_complaint oc
                   WHERE oc.user_id = o.user_id
@@ -377,9 +377,9 @@ async function listOrdersForUser(userId, options = {}) {
                     AND oc.order_no = o.order_no
                     AND oc.is_deleted = 0
               ) AS has_complaint
-            FROM "order" o
+            FROM visible_orders o
             WHERE ${whereSql}
-            ORDER BY o.end_time DESC, o.id DESC
+            ORDER BY o.range_end DESC, o.id DESC, o.order_kind DESC
             LIMIT ? OFFSET ?
         `, [...params, cfg.pageSize, offset]);
         const list = listRaw.map((row) => ({
@@ -1638,6 +1638,10 @@ async function syncFiveEOrdersToDb(userId, options = {}) {
 async function syncOrdersByUser(userId, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
+    if (options.game_name === 'GTA6') {
+        const device = await syncConfiguredRentalDeviceOrders(uid);
+        return { user_id: uid, ok: device.ok, skipped: Boolean(device.skipped), platforms: {}, rental_device_orders: device };
+    }
     const expectedPlatforms = await listAuthorizedOrderPlatforms(uid);
     const result = {
         user_id: uid,
@@ -1947,6 +1951,8 @@ async function syncOrdersByUser(userId, options = {}) {
         console.warn(`[OrderSync][GameInfoRefresh] user_id=${uid} reconcile_failed`);
     }
 
+    result.rental_device_orders = await syncConfiguredRentalDeviceOrders(uid);
+    if (!result.rental_device_orders.ok) result.ok = false;
     result.finished_at = new Date().toISOString();
     console.log(`[OrderSync] user_id=${uid} end ok=${result.ok} gate=${JSON.stringify(result.order_3_off_gate || {})}`);
     return result;

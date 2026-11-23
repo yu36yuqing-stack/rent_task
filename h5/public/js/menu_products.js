@@ -223,6 +223,7 @@
     function normalizeGameName(gameName, gameId) {
       const n = String(gameName || '').trim();
       const lower = n.toLowerCase();
+      if (lower === 'gta6' || gameId === 'GTA6') return 'GTA6';
       if (n === 'CSGO' || lower === 'csgo' || n === 'CS:GO' || lower === 'cs2' || n.includes('反恐精英')) return 'CSGO';
       if (n.includes('CFM') || n.includes('枪战王者') || n.includes('穿越火线') || lower === 'cfm') return 'CFM';
       if (n === '和平精英' || n.toUpperCase() === 'HPJY') return '和平精英';
@@ -244,6 +245,7 @@
 
     function buildGameAvatarHtml(item) {
       const normalized = normalizeGameName(item && item.game_name, item && item.game_id);
+      if (normalized === 'GTA6') return '<span class="game-avatar"><img src="/assets/game_icons/gta6.svg" alt="GTA6"></span>';
       if (normalized === 'CSGO') {
         return `<span class="game-avatar game-avatar-csgo" title="CSGO" aria-label="CSGO">
           <img src="/assets/game_icons/csgo.png?v=20260425-soldier" alt="CSGO" loading="lazy" decoding="async">
@@ -822,11 +824,14 @@
       const maintenanceEnabled = Boolean(state.moreOpsSheet.maintenance_enabled);
       const prodGuardLoading = Boolean(state.moreOpsSheet.prod_guard_loading);
       const authRevokeLoading = Boolean(state.moreOpsSheet.auth_revoke_loading);
-      const hideCsgoOnlyActions = isCs2Product(state.moreOpsSheet);
+      const device = state.moreOpsSheet.game_id === 'GTA6';
+      const hideCsgoOnlyActions = device || isCs2Product(state.moreOpsSheet);
       const prodGuardEnabled = state.moreOpsSheet.prod_guard_enabled === undefined ? true : Boolean(state.moreOpsSheet.prod_guard_enabled);
       const orderOffSummary = String(state.moreOpsSheet.order_off_summary || '').trim() || 'X单下架';
       const cooldownSummary = String(state.moreOpsSheet.cooldown_summary || '').trim() || '冷却期配置';
-      els.moreOpsSheetTitle.textContent = `更多操作 · ${name || '当前账号'}`;
+      els.moreOpsSheetTitle.textContent = `${device ? '采购与成本' : '更多操作'} · ${name || '当前账号'}`;
+      for (const btn of [els.moreOpsOrderOffBtn, els.moreOpsCooldownBtn, els.moreOpsSoldBtn]) btn?.classList.toggle('hidden', device);
+      els.moreOpsCostDetailBtn?.classList.toggle('hidden', !device);
       els.moreOpsForbiddenBtn.classList.toggle('hidden', hideCsgoOnlyActions);
       els.moreOpsForbiddenBtn.disabled = hideCsgoOnlyActions || querying || handling || maintenanceLoading || prodGuardLoading || authRevokeLoading;
       if (els.moreOpsOrderOffBtn) {
@@ -1824,10 +1829,12 @@
 
     function renderFilters() {
       const soldView = state.currentMenu === 'products_sold';
+      const deviceView = !soldView && state.product_game_name === 'GTA6';
       if (els.productGameTabs) {
         const games = [
           { k: '全部', t: '全部', icon: '' },
           { k: 'WZRY', t: '王者荣耀', icon: '/assets/game_icons/wzry.webp' },
+          ...(!soldView ? [{ k: 'GTA6', t: 'GTA6', icon: '/assets/game_icons/gta6.svg' }] : []),
           { k: '和平精英', t: '和平精英', icon: '/assets/game_icons/hpjy.png' },
           { k: 'CFM', t: 'CFM', icon: '/assets/game_icons/cfm.png' },
           { k: 'CSGO', t: 'CSGO', icon: '/assets/game_icons/csgo.png?v=20260425-soldier' }
@@ -1843,6 +1850,7 @@
             const k = String(n.getAttribute('data-product-game') || '全部').trim();
             if (k === String(state.product_game_name || '全部')) return;
             state.product_game_name = k;
+            if (k === 'GTA6' && state.filter === 'restricted') state.filter = 'all';
             state.page = 1;
             await loadList();
             renderList();
@@ -1858,10 +1866,13 @@
         ? '<button class="stats-period-btn product-filter-tab active" data-filter="all" type="button">已售商品</button>'
         : `
           <button class="stats-period-btn product-filter-tab ${allActive ? 'active' : ''}" data-filter="all" type="button">全部</button>
-          <button class="stats-period-btn product-filter-tab ${restrictedActive ? 'active' : ''}" data-filter="restricted" type="button">限制中</button>
+          ${deviceView ? '' : `<button class="stats-period-btn product-filter-tab ${restrictedActive ? 'active' : ''}" data-filter="restricted" type="button">限制中</button>`}
           <button class="stats-period-btn product-filter-tab ${rentingActive ? 'active' : ''}" data-filter="renting" type="button">租赁中</button>
         `;
-      els.orderTotal.innerHTML = `
+      els.orderTotal.innerHTML = deviceView
+        ? `<span class="order-total-main">主机数：${Number(state.stats.master_total || 0)}</span>
+           <span class="order-total-divider" aria-hidden="true"></span><span class="order-total-summary">租赁中：${Number(state.stats.total_renting || 0)} 台</span>`
+        : `
         <span class="order-total-main">${soldView ? '已售商品' : orderCountLabel}：${soldView ? Number(state.stats.master_total || state.stats.total_all || 0) : Number(state.stats.total_paid || 0)}</span>
         <span class="order-total-divider" aria-hidden="true"></span>
         <span class="order-total-summary">商品主档总数：${Number(state.stats.master_total || state.stats.total_all || 0)}</span>
@@ -1881,7 +1892,7 @@
         const syncing = Boolean(state.productsSyncing);
         els.productSyncNowBtn.classList.toggle('hidden', soldView);
         els.productSyncNowBtn.disabled = syncing || soldView;
-        els.productSyncNowBtn.textContent = syncing ? '同步中...' : '同步商品';
+        els.productSyncNowBtn.textContent = deviceView ? (syncing ? '刷新中...' : '刷新列表') : (syncing ? '同步中...' : '同步商品');
       }
     }
 
@@ -1902,6 +1913,24 @@
           const soldView = state.currentMenu === 'products_sold';
           const node = document.createElement('div');
           node.className = 'order-card product-card';
+          if (item.product_kind === 'device') {
+            const status = escapeAttr(item.status_desc || ['未知','待编辑','待审核','审核中','上架中','租赁中','待上架','审核失败'][item.status] || '未知');
+            const price = item.hour_price == null || item.hour_price === '' ? '—' : `¥${escapeAttr(item.hour_price)} / 小时`;
+            node.innerHTML = `<div class="order-card-top product-card-top">
+              <p class="order-card-role product-card-role">${buildGameAvatarHtml(item)}<span class="product-role-text">${escapeAttr(item.role_name)}</span></p>
+              <span class="chip ${item.status === 5 ? 'plat-renting' : item.status === 7 ? 'plat-abnormal' : ''}">${status}</span></div>
+              <div class="info-squares device-info-squares"><div class="info-square base-square">
+                <p class="square-title">主机信息</p><p class="square-line">编号：${escapeAttr(item.device_no) || '—'}</p>
+                <p class="square-line">机型：${escapeAttr(item.model_name) || '—'}</p>
+                <p class="square-line">供货价：${price}</p>
+                <p class="square-line">最长租期：${item.max_hours == null ? '—' : escapeAttr(String(item.max_hours)) + ' 小时'}</p></div>
+                <div class="info-square"><p class="square-title">采购与成本</p>${buildPurchaseBriefHtml(item, false)}
+                <p class="square-line" title="${escapeAttr(item.synced_at)}">同步：${escapeAttr(formatBlacklistTimeForCard(item.synced_at))}</p></div></div>
+              <div class="ops"><button class="btn btn-ghost btn-card-action product-op-btn" data-op="device-cost">采购与成本</button></div>`;
+            node.querySelector('[data-op="device-cost"]').addEventListener('click', () => openMoreOpsSheet(item));
+            root.appendChild(node);
+            return;
+          }
           node.dataset.authRequired = String(!soldView && Boolean(window.UuzuhaoAuthStatus?.isRequired(item)));
           const plat = platformBadges(item).map((x) => {
             const text = String((x && x.text) || '').trim();

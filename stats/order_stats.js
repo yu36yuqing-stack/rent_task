@@ -29,6 +29,12 @@ const { resolveDisplayNameByRow } = require('../product/display_name');
 const { listAccountCostRecordsByUserAndAccount } = require('../database/account_cost_record_db');
 const { canonicalGameId } = require('../common/game_profile');
 const { buildHistoricalIncomeTotals } = require('./historical_income');
+const { tryAcquireLock, releaseOwnedLock } = require('../database/lock_db');
+const { randomUUID } = require('node:crypto');
+const { initRentalDeviceDb, listDeviceCards } = require('../database/rental_device_db');
+const { initAccountCostRecordDb } = require('../database/account_cost_record_db');
+const { initRentalDeviceOrderDb, listDirtyDeviceDates, clearDirtyDeviceDates, listDeviceOrderIdentities,
+    readDailyDeviceOrderStats } = require('../database/rental_device_order_db');
 
 const STATS_JOB_KEY_ALL_USERS = 'order_stats_daily_all_users';
 const DEFAULT_TARGET_HOUR = 2;
@@ -241,7 +247,27 @@ async function loadAccountConfigByUser(userId, gameName = DEFAULT_GAME_NAME) {
                   AND COALESCE(game_name, '') = ?
                 ORDER BY id DESC
             `, [uid, g]);
-        return buildAccountConfigStatus(rows);
+        const config = buildAccountConfigStatus(rows);
+        if (g !== 'GTA6' && g !== ALL_GAME_NAME) return config;
+        await initRentalDeviceOrderDb();
+        const identities = await listDeviceOrderIdentities(uid);
+        if (g !== 'GTA6' && identities.length === 0) return config;
+        await initRentalDeviceDb();
+        await initAccountCostRecordDb();
+        const cards = await listDeviceCards(uid,undefined,{includeInactive:true});
+        const map = new Map(cards.map(card => [card.game_account,card]));
+        for (const order of identities) {
+            if (map.has(order.game_account)) continue;
+            map.set(order.game_account, { game_account:order.game_account, device_no:order.device_no,
+                role_name:order.device_name || order.device_no || '未关联主机', inactive:1, from_order:true });
+        }
+        const devices = [...map.values()].map(d => ({
+            ...d, game_name:'GTA6', display_name:d.role_name,
+            purchase_price:toMoney2(d.purchase_price), purchase_date:String(d.purchase_date || ''),
+            cost_configured:Number(d.purchase_price)>0 && Boolean(normalizeStatDateText(d.purchase_date)),
+            asset_status:d.inactive ? 'inactive' : 'active'
+        }));
+        return { ...config, devices };
     } finally {
         db.close();
     }
@@ -442,7 +468,7 @@ async function refreshWeeklySnapshotsByUserAndGame(userId, gameName, options = {
     if (!uid) throw new Error('user_id 不合法');
     if (g === ALL_GAME_NAME) throw new Error('周快照刷新不支持 全部 游戏聚合');
     const refreshRange = normalizeStatsRefreshRange(options);
-    const rebuildWeekEnd = getWeekEndDateText(refreshRange.start_date);
+    const rebuildWeekEnd = getWeekEndDateText(options.rebuild_start_date || refreshRange.start_date);
     const sourceRows = await listDailyIncomeRowsForAccountByGame(uid, g, refreshRange.end_date);
     const cumulativeByAccount = new Map();
     const snapshotRowMap = new Map();
@@ -514,6 +540,7 @@ async function refreshOrderStatsDailyByUser(userId, options = {}) {
     const refreshRange = normalizeStatsRefreshRange(options);
     const days = refreshRange.days;
     const gameName = String(options.game_name || DEFAULT_GAME_NAME).trim() || DEFAULT_GAME_NAME;
+    if (gameName === 'GTA6') return refreshRentalDeviceStats(uid,options);
     if (gameName === ALL_GAME_NAME) {
         const games = await listConfiguredGamesByUser(uid);
         const results = [];
@@ -523,6 +550,8 @@ async function refreshOrderStatsDailyByUser(userId, options = {}) {
                 game_name: oneGame
             }));
         }
+        const device = await refreshRentalDeviceStats(uid,options);
+        if (!device.skipped) { games.push('GTA6'); results.push(device); }
         return {
             user_id: uid,
             game_name: ALL_GAME_NAME,
@@ -568,6 +597,32 @@ async function refreshOrderStatsDailyByUser(userId, options = {}) {
         configured_accounts: configured.length,
         missing_accounts: (config.missing || []).length
     };
+}
+
+async function refreshRentalDeviceStats(uid, options = {}) {
+    await initRentalDeviceOrderDb();
+    const { end_date: today } = normalizeStatsRefreshRange(options);
+    if ((await listDirtyDeviceDates(uid,today)).length === 0) return { game_name:'GTA6', skipped:true };
+    const key = `rental_device_stats:${uid}`;
+    const owner = `device-stats:${process.pid}:${randomUUID()}`;
+    const lock = await tryAcquireLock(key,120,owner);
+    if (!lock.acquired) return { game_name:'GTA6', skipped:true, reason:'stats_busy' };
+    try {
+        const dirty = await listDirtyDeviceDates(uid,today);
+        if (!dirty.length) return { game_name:'GTA6', skipped:true };
+        await initOrderStatsDailyDb();
+        const { devices = [] } = await loadAccountConfigByUser(uid,'GTA6');
+        const configMap = new Map(devices.map(d => [d.game_account,d]));
+        for (const { stat_date:day } of dirty) {
+            const rows = normalizeDailyRowsFromOrders(await readDailyDeviceOrderStats(uid,day),configMap);
+            await replaceOrderStatsRowsForDay(uid,day,'GTA6',rows,'主机订单变更重算');
+        }
+        const weekly_snapshot = await refreshWeeklySnapshotsByUserAndGame(uid,'GTA6',{
+            ...options,rebuild_start_date:dirty[0].stat_date,desc:'主机订单变更重算'
+        });
+        await clearDirtyDeviceDates(uid,dirty);
+        return { game_name:'GTA6', user_id:uid, refreshed_days:dirty.length, weekly_snapshot };
+    } finally { await releaseOwnedLock(key,owner); }
 }
 
 async function refreshOrderStatsDailyForAllUsers(options = {}) {
@@ -737,13 +792,16 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         : buildPeriodRange(options.period, now);
     const rows = await listOrderStatsRowsByScope(uid, periodInfo.startDate, periodInfo.endDate, gameName);
     const config = await loadAccountConfigByUser(uid, gameName);
+    const devices = config.devices || [];
+    const historicalAccounts = [...(config.configured || []),...devices];
     const mergedConfigured = gameName === ALL_GAME_NAME ? mergeAccountRowsByGameAccount(config.configured || []) : (config.configured || []);
     const mergedMissing = gameName === ALL_GAME_NAME ? mergeAccountRowsByGameAccount(config.missing || []) : (config.missing || []);
     const isSoldAccount = (x) => String(x && x.asset_status || 'active').trim() === 'sold';
-    const activeConfigured = mergedConfigured.filter((x) => !isSoldAccount(x));
+    const activeConfigured = mergedConfigured.filter((x) => !isSoldAccount(x))
+        .concat(devices.filter(x=>x.cost_configured && !x.inactive));
     const activeMissing = mergedMissing.filter((x) => !isSoldAccount(x));
     const latestDisplayNameMap = new Map(
-        [...mergedConfigured, ...mergedMissing]
+        [...mergedConfigured, ...mergedMissing, ...devices]
             .map((x) => {
                 const acc = String(x.game_account || '').trim();
                 const rowGameName = String(x.game_name || '').trim();
@@ -754,7 +812,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
             .filter(([k]) => Boolean(k))
     );
     const historicalTotalTargetDate = currentDateText(now);
-    const historicalTotalMap = await buildHistoricalTotalMapByUser(uid, gameName, historicalTotalTargetDate, config.configured || []);
+    const historicalTotalMap = await buildHistoricalTotalMapByUser(uid, gameName, historicalTotalTargetDate, historicalAccounts);
 
     const summary = reduceRows(rows);
     const periodDays = dateDiffDaysInclusive(periodInfo.startDate, periodInfo.endDate);
@@ -798,10 +856,10 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const soldPeriodAccountSet = new Set(Array.from(byAccountMap.entries())
         .filter(([, arr]) => (arr || []).length > 0)
         .map(([accountKey]) => accountKey));
-    const displayConfigured = mergedConfigured.filter((x) => {
+    const displayConfigured = mergedConfigured.concat(devices).filter((x) => {
         const acc = String(x.game_account || '').trim();
         if (!acc) return false;
-        return !isSoldAccount(x) || soldPeriodAccountSet.has(acc);
+        return (!isSoldAccount(x) && !x.inactive) || soldPeriodAccountSet.has(acc);
     });
     const configuredByAccount = new Map(
         displayConfigured
@@ -829,11 +887,14 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
             ? (accountPeriodReturnRate * (365 / Math.max(1, accountAnnualizedDays)))
             : 0;
         const totalRecAmountAllTime = toMoney2(historicalTotalMap.get(accountKey) || 0);
+        const device = cfgOne.game_name === 'GTA6';
         return {
             game_account: rawAccount,
             game_name: String(cfgOne.game_name || (arr[0] && arr[0].game_name) || gameName).trim() || gameName,
             role_name: roleName || rawAccount,
             display_name: displayName,
+            ...(device ? { device_no:cfgOne.device_no, product_kind:'device', cost_configured:cfgOne.cost_configured,
+                cost_detail_available:!cfgOne.from_order } : {}),
             total_cost_amount: accountTotalCostAmount,
             purchase_cost_amount: accountPurchaseBase,
             purchase_base: accountPurchaseBase,
@@ -848,10 +909,10 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
             avg_daily_rent_hour: Number((Number(s.rent_hour_sum || 0) / periodDays).toFixed(4)),
             avg_order_price: Number((Number(s.amount_order_sum || 0) / orderBase).toFixed(4)),
             avg_daily_rec: Number((Number(s.amount_rec_sum || 0) / periodDays).toFixed(4)),
-            target3_hit_days: hitDays,
-            target3_rate: Number((hitDays / periodDays).toFixed(4)),
-            period_return_rate: Number(accountPeriodReturnRate.toFixed(6)),
-            annualized_return_rate: Number(accountAnnualizedRate.toFixed(6)),
+            target3_hit_days: device ? 0 : hitDays,
+            target3_rate: device ? null : Number((hitDays / periodDays).toFixed(4)),
+            period_return_rate: device && !cfgOne.cost_configured ? null : Number(accountPeriodReturnRate.toFixed(6)),
+            annualized_return_rate: device && !cfgOne.cost_configured ? null : Number(accountAnnualizedRate.toFixed(6)),
             ...s
         };
     }).sort((a, b) => b.amount_rec_sum - a.amount_rec_sum);
@@ -863,7 +924,10 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const costBaseValue = costBaseMode === 'today_snapshot'
         ? toMoney2(costSeries[costSeries.length - 1] || 0)
         : toMoney2(costSeries.reduce((sum, x) => sum + Number(x || 0), 0) / Math.max(1, periodDays));
-    const periodReturnRate = costBaseValue > 0 ? (summary.amount_rec_sum / costBaseValue) : 0;
+    const costBackedDevices = new Set(devices.filter(x=>x.cost_configured && !x.inactive).map(x=>x.game_account));
+    const comparableIncome = rows.filter(row => row.game_name !== 'GTA6' || costBackedDevices.has(row.game_account))
+        .reduce((sum,row)=>sum+Number(row.amount_rec_sum || 0),0);
+    const periodReturnRate = costBaseValue > 0 ? (comparableIncome / costBaseValue) : 0;
     const earliestPurchaseDate = activeConfigured
         .map((x) => String(x.purchase_date || '').slice(0, 10))
         .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
@@ -874,8 +938,9 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const orderBase = Math.max(1, summary.order_cnt_total);
     const summaryHitDaysByAccount = by_account.reduce((sum, x) => sum + Number(x.target3_hit_days || 0), 0);
     const configuredCount = Number(activeConfigured.length || 0);
-    const target3RateOverall = configuredCount > 0
-        ? Number((summaryHitDaysByAccount / (configuredCount * periodDays)).toFixed(4))
+    const rulesCount = activeConfigured.filter(x=>x.game_name!=='GTA6').length;
+    const target3RateOverall = rulesCount > 0
+        ? Number((summaryHitDaysByAccount / (rulesCount * periodDays)).toFixed(4))
         : 0;
     const totalRecAmountAllTime = toMoney2(Array.from(historicalTotalMap.values())
         .reduce((sum, amount) => sum + Number(amount || 0), 0));
@@ -905,9 +970,9 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
             cost_base_value: toMoney2(costBaseValue),
             cost_base_days: periodDays,
             period_days: periodDays,
-            period_rec_amount: toMoney2(summary.amount_rec_sum),
-            period_return_rate: Number(periodReturnRate.toFixed(6)),
-            annualized_return_rate: Number(annualizedRate.toFixed(6))
+            period_rec_amount: toMoney2(comparableIncome),
+            period_return_rate: gameName === 'GTA6' && costBaseValue <= 0 ? null : Number(periodReturnRate.toFixed(6)),
+            annualized_return_rate: gameName === 'GTA6' && costBaseValue <= 0 ? null : Number(annualizedRate.toFixed(6))
         },
         by_channel,
         by_account,
@@ -1014,6 +1079,7 @@ module.exports = {
     shouldTriggerDailyStatsNow,
     startOrderStatsWorkerIfNeeded,
     refreshOrderStatsDailyByUser,
+    refreshRentalDeviceStats,
     refreshOrderStatsDailyForAllUsers,
     getOrderStatsDashboardByUser,
     getAccountCostDetailByUser,

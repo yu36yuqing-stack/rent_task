@@ -35,6 +35,11 @@ const stubs = {
     fs: { existsSync: () => s.exists },
     child_process: { fork(script, args, options) { call('fork', { script, args, options }); return { pid: s.forkPid, unref() { call('unref'); } }; } },
     '../database/user_platform_auth_db': { async listUserPlatformAuth(uid, options) { call('auth', { uid, options }); return s.auth; } },
+    '../database/rental_device_order_db': { async initRentalDeviceOrderDb() {} },
+    './rental_device_order_service': { async syncConfiguredRentalDeviceOrders(uid) {
+        call('deviceSync', uid);
+        return s.deviceResult || { ok: true, skipped: true };
+    } },
     './service/order_query_service': { async initOrderQueryService() {}, async listPaidCountByAccounts(uid, accounts, options) { call('counts', { uid, accounts, options }); return s.counts; } },
     './service/order_command_service': {
         async initOrderCommandService() {}, async initOrderComplaintDb() {},
@@ -108,6 +113,12 @@ async function main() {
     assert.strictEqual(calls('upsert').length, 4);assert.strictEqual(calls('price')[0].options.allow_apply, true);
     assert.strictEqual(result.platforms.zuhaowang.daily_compensation.hit, true);assert(!('_price_ladder_candidates' in result.platforms.uuzuhao));
     assert.strictEqual(calls('authWorker').length, 1);assert.strictEqual(calls('refreshWorker').length, 1);
+    assert.deepStrictEqual(calls('deviceSync'), [8]);
+    reset(); s.deviceResult = { ok:false, phase:'import' };
+    result = await order.syncOrdersByUser(8, { now: fixedNow });
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.order_3_off_gate.can_reconcile, true);
+    assert.strictEqual(result.auth_revoke_gate.can_enqueue, true);
 
     // A failed enabled channel blocks cross-channel convergence but doesn't stop
     // other channels from persisting orders; all four error paths remain intact.
@@ -232,7 +243,7 @@ async function main() {
     }
     for (const status of ['refund', 'done', 'bad']) {
         result = await order.listOrdersForUser(8, { status_filter: status, game_name: 'WZRY' });
-        assert.strictEqual(result.status_filter, status === 'bad' ? 'all' : status);assert.strictEqual(result.stats.progress_order_amount_sum, 0);assert.strictEqual(calls('dbAll').at(-1).params[1], 'WZRY');
+        assert.strictEqual(result.status_filter, status === 'bad' ? 'all' : status);assert.strictEqual(result.stats.progress_order_amount_sum, 0);assert.strictEqual(calls('dbAll').at(-1).params[4], 'WZRY');
     }
     await assert.rejects(order.listOrdersForUser(0), /user_id/);
     for (const point of ['dbGet', 'dbAll']) {

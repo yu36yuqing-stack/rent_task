@@ -281,16 +281,25 @@ function escapeRegExp(text) {
     return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+const rentalDevices = require('../product/rental_device_service');
+const DEVICE_COST_ROUTES = new Set(['/api/products/purchase-config', '/api/products/account-cost/create', '/api/products/account-cost/delete']);
+
 async function readJsonBody(req) {
     const chunks = [];
     for await (const c of req) chunks.push(c);
     const raw = Buffer.concat(chunks).toString('utf8').trim();
     if (!raw) return {};
+    let body;
     try {
-        return JSON.parse(raw);
+        body = JSON.parse(raw);
     } catch {
         throw new Error('请求体必须是合法 JSON');
     }
+    const route = String(req.url || '').split('?')[0];
+    if (/^\/api\/(products|blacklist)\//.test(route) &&
+        (String(body?.game_name).toUpperCase() === 'GTA6' || body?.game_id === 'GTA6' || /^device:/.test(body?.game_account)) &&
+        !DEVICE_COST_ROUTES.has(route)) throw httpError(400, '主机商品只支持查询和本地成本维护');
+    return body;
 }
 
 async function requireAuth(req) {
@@ -683,6 +692,15 @@ async function handleProducts(req, res, urlObj) {
         : 'all';
     const assetStatusRaw = String(urlObj.searchParams.get('asset_status') || 'active').trim().toLowerCase();
     const assetStatus = assetStatusRaw === 'sold' ? 'sold' : 'active';
+    const devices = (isAllGame || gameName === 'GTA6') && assetStatus === 'active'
+        ? await rentalDevices.listDeviceCards(user.id) : [];
+    const rentingDevices = devices.filter(d => d.status === 5);
+    const visibleDevices = filter === 'renting' ? rentingDevices : filter === 'restricted' ? [] : devices;
+    if (gameName === 'GTA6') {
+        return json(res, 200, { ok: true, game_name: gameName, asset_status: assetStatus, page, page_size: pageSize,
+            total: visibleDevices.length, filter, stats: { total_all: devices.length, master_total: devices.length,
+                total_renting: rentingDevices.length }, list: visibleDevices.slice((page-1)*pageSize, page*pageSize) });
+    }
     const mode = Number(getBlacklistV2Mode());
     const blacklistRows = await listUserBlacklistByUserWithMeta(user.id);
     const keyOfGameAccount = (gameId, gameAccount) => `${String(gameId || '1').trim() || '1'}::${String(gameAccount || '').trim()}`;
@@ -938,16 +956,18 @@ async function handleProducts(req, res, urlObj) {
         : filter === 'renting'
         ? fullList.filter((x) => isRentingByChannelStatus(x.channel_status))
         : fullList;
-    const total = sourceList.length;
+    const combined = sourceList.concat(visibleDevices);
+    const total = combined.length;
     const offset = (page - 1) * pageSize;
-    const pageList = sourceList.slice(offset, offset + pageSize);
+    const pageList = combined.slice(offset, offset + pageSize);
+    const accountPage = pageList.filter(x => x.product_kind !== 'device');
     const [priceSummaries, incomeSummaries] = await Promise.all([
-        getProductChannelPriceSummaries(user.id, pageList.map((item) =>
+        getProductChannelPriceSummaries(user.id, accountPage.map((item) =>
             accountRowMap.get(keyOfGameAccount(item.game_id, item.game_account))
         )),
-        assetStatus === 'sold' ? Promise.resolve({}) : getProductIncomeSummaries(user.id, pageList)
+        assetStatus === 'sold' ? Promise.resolve({}) : getProductIncomeSummaries(user.id, accountPage)
     ]);
-    for (const item of pageList) {
+    for (const item of accountPage) {
         item.price_ladder = priceSummaries[keyOfGameAccount(item.game_id, item.game_account)] || {};
         if (assetStatus !== 'sold') {
             item.rental_income = incomeSummaries[keyOfGameAccount(item.game_id, item.game_account)]
@@ -978,12 +998,12 @@ async function handleProducts(req, res, urlObj) {
         total,
         filter,
         stats: {
-            total_all: scopedRows.length,
-            master_total: scopedRows.length,
-            sync_effective_total: Math.max(0, scopedRows.length - syncMissingKeySet.size),
+            total_all: scopedRows.length + devices.length,
+            master_total: scopedRows.length + devices.length,
+            sync_effective_total: devices.length + Math.max(0, scopedRows.length - syncMissingKeySet.size),
             total_blacklisted: totalBlacklisted,
             total_restricted: totalRestricted,
-            total_renting: totalRenting,
+            total_renting: totalRenting + rentingDevices.length,
             total_paid: totalPaid,
             sync_anomaly_count: scopedSyncAnomalies.length,
             sync_anomaly_text: scopedSyncAnomalies.length > 0
@@ -1271,6 +1291,7 @@ async function handleOrders(req, res, urlObj) {
         );
         list = list.map((item) => {
             const acc = String((item && item.game_account) || '').trim();
+            if (item.order_kind === 'device') return { ...item, display_name: item.role_name || item.device_no || '未关联主机' };
             const gid = String((item && item.game_id) || '').trim();
             const hit = accountMap.get(`${gid}::${acc}`) || null;
             const displayName = resolveDisplayNameByRow({
@@ -1289,6 +1310,7 @@ async function handleOrders(req, res, urlObj) {
 
 async function handleOrderSyncNow(req, res) {
     const user = await requireAuth(req);
+    const body = await readJsonBody(req);
     const owner = `h5/orders/sync user_id=${user.id} pid=${process.pid}`;
     const lock = await tryAcquireLock(ORDER_SYNC_LOCK_KEY, ORDER_SYNC_LOCK_LEASE_SEC, owner);
     if (!lock.acquired) {
@@ -1335,6 +1357,7 @@ async function handleOrderSyncNow(req, res) {
             out = await syncOrdersByUser(user.id, {
                 user,
                 trigger_task_id: runtimeTask.task_id,
+                game_name: body?.game_name,
                 uuzuhao: { maxPages: 20 },
                 uhaozu: { maxPages: 20 },
                 zuhaowang: { maxPages: 20 }
@@ -1356,7 +1379,9 @@ async function handleOrderSyncNow(req, res) {
             stage: 'done',
             progress_text: Boolean(out && out.ok) ? '订单同步完成' : '订单同步完成，存在部分失败',
             result_json: out || {},
-            error_json: Boolean(out && out.ok) ? [] : [JSON.stringify((out && out.platforms) || {})],
+            error_json: Boolean(out && out.ok) ? [] : [JSON.stringify({
+                ...(out?.platforms || {}), rental_device_orders: out?.rental_device_orders
+            })],
             desc: `manual order sync done user=${user.id}`
         });
         return json(res, 200, {
@@ -1596,7 +1621,7 @@ async function handleStatsAccountCostDetail(req, res, urlObj) {
     const gameAccount = String(urlObj.searchParams.get('game_account') || '').trim();
     const gameName = String(urlObj.searchParams.get('game_name') || 'WZRY').trim() || 'WZRY';
     if (!gameAccount) return json(res, 400, { ok: false, message: 'game_account 不能为空' });
-    const data = await getAccountCostDetailByUser(user.id, {
+    const data = gameName === 'GTA6' ? await rentalDevices.deviceCosts(user.id, gameAccount) : await getAccountCostDetailByUser(user.id, {
         game_account: gameAccount,
         game_name: gameName
     });
@@ -1632,6 +1657,7 @@ async function handleStatsRefresh(req, res) {
             try {
                 const syncOut = await syncOrdersByUser(user.id, {
                     user,
+                    game_name: gameName,
                     uuzuhao: { maxPages: 20 },
                     uhaozu: { maxPages: 20 },
                     zuhaowang: { maxPages: 20 }
@@ -2948,7 +2974,7 @@ async function bootstrap() {
             if ((req.method === 'GET' || req.method === 'HEAD') && tryServeStatic(req, urlObj, res)) return;
             return json(res, 404, { ok: false, message: 'Not Found' });
         } catch (e) {
-            const statusCode = Number(e && e.statusCode) || 500;
+            const statusCode = Number(e && e.statusCode) || ({ DEVICE_NOT_FOUND: 404, INVALID_DEVICE: 400, INVALID_DEVICE_COST: 400 }[e?.code]) || 500;
             return json(res, statusCode, { ok: false, message: String(e.message || e) });
         }
     });
