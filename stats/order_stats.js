@@ -29,6 +29,8 @@ const { resolveDisplayNameByRow } = require('../product/display_name');
 const { listAccountCostRecordsByUserAndAccount } = require('../database/account_cost_record_db');
 const { canonicalGameId } = require('../common/game_profile');
 const { buildHistoricalIncomeTotals } = require('./historical_income');
+const { readDashboardOrders } = require('../order/service/dashboard_order_facts');
+const { dashboardMetrics, orderTotals } = require('./dashboard_metrics');
 const { tryAcquireLock, releaseOwnedLock } = require('../database/lock_db');
 const { randomUUID } = require('node:crypto');
 const { initRentalDeviceDb, listDeviceCards } = require('../database/rental_device_db');
@@ -567,13 +569,14 @@ async function refreshOrderStatsDailyByUser(userId, options = {}) {
 
     const config = await loadAccountConfigByUser(uid, gameName);
     const configured = Array.isArray(config.configured) ? config.configured : [];
-    const configMap = new Map(configured.map((x) => [`${String(x.game_name || '').trim()}::${x.game_account}`, x]));
+    const incomeAccounts = [...configured, ...(config.missing || [])];
+    const configMap = new Map(incomeAccounts.map((x) => [`${String(x.game_name || '').trim()}::${x.game_account}`, x]));
 
     const touched = [];
     for (let i = 0; i < days; i += 1) {
         const day = addDays(baseDate, -i);
         const statDate = toDateText(day);
-        const rawRows = await queryDailyRowsFromOrder(uid, statDate, gameName, configured);
+        const rawRows = await queryDailyRowsFromOrder(uid, statDate, gameName, incomeAccounts);
         const normalized = normalizeDailyRowsFromOrders(rawRows, configMap);
         await replaceOrderStatsRowsForDay(uid, statDate, gameName, normalized, desc);
         touched.push({ stat_date: statDate, rows: normalized.length });
@@ -779,6 +782,18 @@ function startOrderStatsWorkerIfNeeded(options = {}) {
     })();
 }
 
+async function listDashboardCosts(uid, game) {
+    await initAccountCostRecordDb();
+    const db = openStatsDatabase();
+    try {
+        return await all(db, `SELECT game_name,game_account,cost_type,cost_amount,cost_date
+            FROM account_cost_record WHERE user_id=? AND is_deleted=0
+            ${game === ALL_GAME_NAME ? '' : 'AND game_name=?'}`, game === ALL_GAME_NAME ? [uid] : [uid,game]);
+    } finally {
+        db.close();
+    }
+}
+
 async function getOrderStatsDashboardByUser(userId, options = {}) {
     const uid = Number(userId || 0);
     if (!uid) throw new Error('user_id 不合法');
@@ -793,7 +808,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const rows = await listOrderStatsRowsByScope(uid, periodInfo.startDate, periodInfo.endDate, gameName);
     const config = await loadAccountConfigByUser(uid, gameName);
     const devices = config.devices || [];
-    const historicalAccounts = [...(config.configured || []),...devices];
+    const historicalAccounts = [...config.configured, ...config.missing, ...devices];
     const mergedConfigured = gameName === ALL_GAME_NAME ? mergeAccountRowsByGameAccount(config.configured || []) : (config.configured || []);
     const mergedMissing = gameName === ALL_GAME_NAME ? mergeAccountRowsByGameAccount(config.missing || []) : (config.missing || []);
     const isSoldAccount = (x) => String(x && x.asset_status || 'active').trim() === 'sold';
@@ -945,6 +960,26 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const totalRecAmountAllTime = toMoney2(Array.from(historicalTotalMap.values())
         .reduce((sum, amount) => sum + Number(amount || 0), 0));
 
+    const accountHolding = new Map();
+    const [reportOrders, reportCosts] = await Promise.all([
+        readDashboardOrders(uid, gameName, periodInfo.startDate, [
+            periodInfo.endDate + ' 23:59:59', toDateTimeText(now)
+        ].sort()[0]),
+        listDashboardCosts(uid, gameName)
+    ]);
+    const metrics = dashboardMetrics(historicalAccounts, reportOrders, reportCosts, periodInfo, totalRecAmountAllTime, accountHolding, rows);
+    const detailOrders = new Map();
+    for (const order of reportOrders) {
+        if (!detailOrders.has(order.game_account)) detailOrders.set(order.game_account, []);
+        detailOrders.get(order.game_account).push(order);
+    }
+    for (const account of by_account) {
+        account.settled_orders = orderTotals(detailOrders.get(account.game_account) || []);
+        const held = accountHolding.get(account.game_account);
+        account.turnover_hours = held && (held.timed || !held.missing) ? held.hours / held.days : null;
+        account.turnover_partial = Boolean(held?.missing);
+        account.settled_daily_count = account.settled_orders.paid / periodDays;
+    }
     return {
         period: periodInfo.period,
         selected_date: pickedDate,
@@ -955,6 +990,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         game_name: gameName,
         summary: {
             ...summary,
+            operating_metrics: metrics,
             total_rec_amount_all_time: totalRecAmountAllTime,
             refund_rate: Number((summary.order_cnt_refund / orderBase).toFixed(4)),
             cancel_rate: Number((summary.order_cnt_cancel / orderBase).toFixed(4)),

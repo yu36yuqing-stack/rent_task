@@ -109,7 +109,7 @@ function mapRentAccount(item = {}) {
         pinned_time: String(item.pinnedTime || '').trim(),
         use_coupon: Number(item.useCoupon || 0),
         finished_order_count: Number(item.rentFinishCount || 0),
-        income_amount: String(item.rentFinishAmount || '').trim(),
+        income_amount: String(item.rentFinishAmount ?? '').trim(),
         raw: item
     };
 }
@@ -133,7 +133,7 @@ function mapRentOrder(item = {}) {
         discount_amount: String(item.discountAmount || '').trim(),
         paid_amount: String(item.realAmount || '').trim(),
         channel_divide: Number(item.channelDivide || 0),
-        income_amount: String(item.channelRevenue || '').trim(),
+        income_amount: String(item.channelRevenue ?? '').trim(),
         order_status: Number(item.orderStatus),
         is_refund: Number(item.isRefund || 0) === 1,
         is_refund_raw: Number(item.isRefund || 0),

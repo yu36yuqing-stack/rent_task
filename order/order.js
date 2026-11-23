@@ -1,3 +1,4 @@
+const { receiptNote } = require('./report_receipt');
 const fs = require('fs');
 const path = require('path');
 const { fork } = require('child_process');
@@ -587,8 +588,8 @@ async function fetchAndStoreUhaozuOrderDetailByOrder(userId, orderNo, options = 
         detail_query_time: toDateTimeText(new Date()),
         desc: String(options.desc || 'fetch single uhaozu order detail').trim()
     });
-    if (Number.isFinite(Number(detail.net_rent_amount))) {
-        await updateOrderRecAmount(uid, CHANNEL_UHAOZU, no, Number(detail.net_rent_amount), 'rewrite rec_amount by uhaozu order detail');
+    if (detail.net_rent_confirmed && Number.isFinite(Number(detail.net_rent_amount))) {
+        await updateOrderRecAmount(uid, CHANNEL_UHAOZU, no, Number(detail.net_rent_amount), receiptNote('rewrite rec_amount by uhaozu order detail', detail.net_rent_amount));
     }
     return getOrderDetailByOrder(uid, CHANNEL_UHAOZU, no);
 }
@@ -626,8 +627,8 @@ async function syncUhaozuCompletedOrderDetails(userId, auth, orderNos = [], opti
             });
             fetched += 1;
             updated += 1;
-            if (Number.isFinite(Number(detail.net_rent_amount))) {
-                await updateOrderRecAmount(uid, CHANNEL_UHAOZU, orderNo, Number(detail.net_rent_amount), 'rewrite rec_amount by uhaozu order detail');
+            if (detail.net_rent_confirmed && Number.isFinite(Number(detail.net_rent_amount))) {
+                await updateOrderRecAmount(uid, CHANNEL_UHAOZU, orderNo, Number(detail.net_rent_amount), receiptNote('rewrite rec_amount by uhaozu order detail', detail.net_rent_amount));
                 recAmountRewritten += 1;
             }
         } catch (e) {
@@ -1179,7 +1180,7 @@ async function syncUuzuhaoOrdersToDb(userId, options = {}) {
         const orderWrite = await upsertOrder({
             user_id: uid,
             ...mapped,
-            desc: String(options.desc || 'sync by order/uuzuhao')
+            desc: receiptNote(String(options.desc || 'sync by order/uuzuhao'), raw.settlementAmount, raw.settlementStatus == null || Number(raw.settlementStatus) === 2)
         });
         const authRevokeCandidate = buildAuthRevokeCandidateOnStatusChange(uid, mapped, orderWrite);
         if (authRevokeCandidate) authRevokeCandidates.push(authRevokeCandidate);
@@ -1350,7 +1351,7 @@ async function syncUhaozuOrdersToDb(userId, options = {}) {
         const orderWrite = await upsertOrder({
             user_id: uid,
             ...mapped,
-            desc: String(options.desc || 'sync by order/uhaozu')
+            desc: receiptNote(String(options.desc || 'sync by order/uhaozu'), raw.actualRent == null || String(raw.actualRent).trim() === '' ? null : Number(raw.actualRent) / 100)
         });
         const authRevokeCandidate = buildAuthRevokeCandidateOnStatusChange(uid, mapped, orderWrite);
         if (authRevokeCandidate) authRevokeCandidates.push(authRevokeCandidate);
@@ -1490,7 +1491,7 @@ async function syncZuhaowangOrdersToDb(userId, options = {}) {
         const orderWrite = await upsertOrder({
             user_id: uid,
             ...mapped,
-            desc: String(options.desc || 'sync by order/zuhaowang')
+            desc: receiptNote(String(options.desc || 'sync by order/zuhaowang'), raw.income)
         });
         const authRevokeCandidate = buildAuthRevokeCandidateOnStatusChange(uid, mapped, orderWrite);
         if (authRevokeCandidate) authRevokeCandidates.push(authRevokeCandidate);
@@ -1599,12 +1600,12 @@ async function syncFiveEOrdersToDb(userId, options = {}) {
             const orderWrite = await upsertOrder({
                 user_id: uid,
                 ...mapped,
-                desc: String(options.desc || [
+                desc: receiptNote(String(options.desc || [
                     'sync by order/5e',
                     `parent_order_no=${mapped.parent_order_no || ''}`,
                     `raw_status=${Number.isFinite(mapped.raw_order_status) ? mapped.raw_order_status : ''}`,
                     `cash_status=${Number.isFinite(mapped.raw_cash_status) ? mapped.raw_cash_status : ''}`
-                ].join(' '))
+                ].join(' ')), raw.income_amount ?? raw.channelRevenue)
             });
             priceLadderCandidates.push(...buildPriceLadderCandidatesIfEnabled(options.price_ladder_enabled, mapped, orderWrite));
             upserted += 1;

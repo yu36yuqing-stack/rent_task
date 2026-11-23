@@ -172,10 +172,10 @@ function stripHtml(value = '') {
         .trim();
 }
 
-function extractFirstAmountByLabel(html, label) {
+function extractFirstAmountByLabel(html, label, missing = 0) {
     const re = new RegExp(`<label>\\s*${label}\\s*：\\s*<\\/label>[\\s\\S]*?<span>[\\s\\S]*?<em[^>]*>([-+]?\\d+(?:\\.\\d+)?)<\\/em>`, 'i');
     const m = String(html || '').match(re);
-    return m ? Number(m[1]) : 0;
+    return m ? Number(m[1]) : missing;
 }
 
 function extractFirstTextByLabel(html, label) {
@@ -195,6 +195,7 @@ function normalizePartialDateTime(value = '', baseDateText = '') {
 
 function parseUhaozuOrderDetailHtml(html = '') {
     const src = String(html || '');
+    const netAmount = extractFirstAmountByLabel(src, '结余租金', null);
     const detailStatus = stripHtml((src.match(/<span class="order-status">[\s\S]*?<span class="gray">([\s\S]*?)<\/span>/i) || [])[1] || '');
     const createDate = extractFirstTextByLabel(src, '创建时间');
     const completeTime = normalizePartialDateTime(extractFirstTextByLabel(src, '完成时间'), createDate);
@@ -203,7 +204,8 @@ function parseUhaozuOrderDetailHtml(html = '') {
         detail_status: detailStatus,
         actual_rent_amount: extractFirstAmountByLabel(src, '实收租金'),
         service_fee_amount: extractFirstAmountByLabel(src, '订单手续费'),
-        net_rent_amount: extractFirstAmountByLabel(src, '结余租金'),
+        net_rent_amount: netAmount ?? 0,
+        net_rent_confirmed: netAmount !== null,
         complete_time: completeTime,
         complaint_result_text: complaintResultText
     };
