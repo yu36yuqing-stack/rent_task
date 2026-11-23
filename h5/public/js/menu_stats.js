@@ -366,7 +366,7 @@
       els.statsKpiGrid.querySelector('[data-turnover-label]').appendChild(help);
       window.HelpSheet.bind(help, document.getElementById('statsMetricHelpSheet'), document.getElementById('statsMetricHelpCloseBtn'));
       const gaps = [];
-      if (m.missing_hours) gaps.push(`${m.missing_hours} 笔时长待核实`);
+      if (m.missing_hours) gaps.push(`${m.missing_hours} 笔有收入订单时长待核实`);
       if (m.unknown_receipts) gaps.push(`${m.unknown_receipts} 笔实收待核实`);
       if (m.missing_holding) gaps.push(`${m.missing_holding} 个资产未计持有期`);
       if (m.missing_cost) gaps.push(`${m.missing_cost} 个资产成本待补`);
@@ -401,10 +401,10 @@
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">采购成本</p><p class="stats-acc-chip-v">${device && !x.cost_configured ? '未填写' : '¥'+Number(x.purchase_cost_amount || x.purchase_base || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">历史总收入</p><p class="stats-acc-chip-v">¥${Number(x.total_rec_amount_all_time || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">年化(单利)</p><p class="stats-acc-chip-v">${percent(x.annualized_return_rate)}</p></div>
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">日均单数</p><p class="stats-acc-chip-v">${Number(x.settled_daily_count || 0).toFixed(2)}</p></div>
+              <div class="stats-acc-chip"><p class="stats-acc-chip-k">日均单数</p><p class="stats-acc-chip-v">${fmt(x.settled_daily_count)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">账号周转率</p><p class="stats-acc-chip-v">${x.turnover_hours == null ? '—' : (x.turnover_partial ? '≥' : '') + fmt(x.turnover_hours, 1) + ' 小时/天'}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">单均订单额</p><p class="stats-acc-chip-v">¥${Number(x.avg_order_price || 0).toFixed(2)}</p></div>
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">日均实收</p><p class="stats-acc-chip-v">¥${Number(x.avg_daily_rec || 0).toFixed(2)}</p></div>
+              <div class="stats-acc-chip"><p class="stats-acc-chip-k">日均实收</p><p class="stats-acc-chip-v">${cash(x.avg_daily_rec)}</p></div>
               ${device ? '' : `<div class="stats-acc-chip"><p class="stats-acc-chip-k">3单达成率</p><p class="stats-acc-chip-v">${(Number(x.target3_rate || 0) * 100).toFixed(1)}%</p></div>`}
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">零实收撤单</p><p class="stats-acc-chip-v">${Number(x.settled_orders?.cancelled || 0)}</p></div>
               ${soldChips}

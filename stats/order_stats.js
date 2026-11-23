@@ -30,7 +30,7 @@ const { listAccountCostRecordsByUserAndAccount } = require('../database/account_
 const { canonicalGameId } = require('../common/game_profile');
 const { buildHistoricalIncomeTotals } = require('./historical_income');
 const { readDashboardOrders } = require('../order/service/dashboard_order_facts');
-const { dashboardMetrics, orderTotals } = require('./dashboard_metrics');
+const { dashboardMetrics, dailyAverages, orderTotals } = require('./dashboard_metrics');
 const { tryAcquireLock, releaseOwnedLock } = require('../database/lock_db');
 const { randomUUID } = require('node:crypto');
 const { initRentalDeviceDb, listDeviceCards } = require('../database/rental_device_db');
@@ -253,7 +253,6 @@ async function loadAccountConfigByUser(userId, gameName = DEFAULT_GAME_NAME) {
         if (g !== 'GTA6' && g !== ALL_GAME_NAME) return config;
         await initRentalDeviceOrderDb();
         const identities = await listDeviceOrderIdentities(uid);
-        if (g !== 'GTA6' && identities.length === 0) return config;
         await initRentalDeviceDb();
         await initAccountCostRecordDb();
         const cards = await listDeviceCards(uid,undefined,{includeInactive:true});
@@ -920,10 +919,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
             lifecycle_income_amount: toMoney2(cfgOne.lifecycle_income_amount || 0),
             lifecycle_profit_amount: toMoney2(cfgOne.lifecycle_profit_amount || 0),
             total_rec_amount_all_time: totalRecAmountAllTime,
-            avg_daily_order_cnt: Number((Number(s.order_cnt_effective || 0) / periodDays).toFixed(4)),
-            avg_daily_rent_hour: Number((Number(s.rent_hour_sum || 0) / periodDays).toFixed(4)),
             avg_order_price: Number((Number(s.amount_order_sum || 0) / orderBase).toFixed(4)),
-            avg_daily_rec: Number((Number(s.amount_rec_sum || 0) / periodDays).toFixed(4)),
             target3_hit_days: device ? 0 : hitDays,
             target3_rate: device ? null : Number((hitDays / periodDays).toFixed(4)),
             period_return_rate: device && !cfgOne.cost_configured ? null : Number(accountPeriodReturnRate.toFixed(6)),
@@ -967,7 +963,9 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         ].sort()[0]),
         listDashboardCosts(uid, gameName)
     ]);
-    const metrics = dashboardMetrics(historicalAccounts, reportOrders, reportCosts, periodInfo, totalRecAmountAllTime, accountHolding, rows);
+    const { daily_averages: overallDaily, ...metrics } = dashboardMetrics(
+        historicalAccounts, reportOrders, reportCosts, periodInfo, totalRecAmountAllTime, accountHolding, rows
+    );
     const detailOrders = new Map();
     for (const order of reportOrders) {
         if (!detailOrders.has(order.game_account)) detailOrders.set(order.game_account, []);
@@ -978,7 +976,7 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
         const held = accountHolding.get(account.game_account);
         account.turnover_hours = held && (held.timed || !held.missing) ? held.hours / held.days : null;
         account.turnover_partial = Boolean(held?.missing);
-        account.settled_daily_count = account.settled_orders.paid / periodDays;
+        Object.assign(account, dailyAverages(held?.daily));
     }
     return {
         period: periodInfo.period,
@@ -994,10 +992,8 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
             total_rec_amount_all_time: totalRecAmountAllTime,
             refund_rate: Number((summary.order_cnt_refund / orderBase).toFixed(4)),
             cancel_rate: Number((summary.order_cnt_cancel / orderBase).toFixed(4)),
-            avg_daily_order_cnt: Number((Number(summary.order_cnt_effective || 0) / periodDays).toFixed(4)),
-            avg_daily_rent_hour: Number((Number(summary.rent_hour_sum || 0) / periodDays).toFixed(4)),
+            ...overallDaily,
             avg_order_price: Number((Number(summary.amount_order_sum || 0) / Math.max(1, Number(summary.order_cnt_effective || 0))).toFixed(4)),
-            avg_daily_rec: Number((Number(summary.amount_rec_sum || 0) / periodDays).toFixed(4)),
             target3_rate: target3RateOverall
         },
         profitability: {

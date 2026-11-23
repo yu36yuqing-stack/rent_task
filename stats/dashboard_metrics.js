@@ -30,7 +30,7 @@ function occupiedHours(row) {
 }
 
 function orderTotals(orders) {
-    const counts = { paid: 0, cancelled: 0, unknown: 0, timed: 0, timedPaid: 0, missingHours: 0,
+    const counts = { paid: 0, cancelled: 0, unknown: 0, timed: 0, timedPaid: 0, missingHours: 0, missingTurnover: 0,
         income: 0, hours: 0, paidHours: 0, settledHours: 0, timedIncome: 0 };
     for (const row of orders) {
         const hours = occupiedHours(row);
@@ -51,9 +51,12 @@ function orderTotals(orders) {
                 counts.paidHours += hours;
                 counts.timedIncome += amount;
                 counts.timedPaid++;
+            } else {
+                counts.missingTurnover++;
             }
         } else {
             counts.unknown++;
+            if (hours !== 0) counts.missingTurnover++;
         }
     }
     return counts;
@@ -69,14 +72,39 @@ function groupByAsset(rows) {
     return map;
 }
 
+function dailyTotals(days = 0) {
+    return { days, income: 0, paid: 0, effectiveOrders: 0, rentHours: 0 };
+}
+
+function mergeDailyTotals(total, asset) {
+    // All operating intervals end on the selected end date, so their union is the longest interval.
+    total.days = Math.max(total.days, asset.days);
+    total.income += asset.income;
+    total.paid += asset.paid;
+    total.effectiveOrders += asset.effectiveOrders;
+    total.rentHours += asset.rentHours;
+}
+
+function dailyAverages(total = dailyTotals()) {
+    const average = value => total.days ? Number((value / total.days).toFixed(4)) : null;
+    return {
+        operating_days: total.days,
+        avg_daily_rec: average(total.income),
+        avg_daily_order_cnt: average(total.effectiveOrders),
+        avg_daily_rent_hour: average(total.rentHours),
+        settled_daily_count: divide(total.paid, total.days)
+    };
+}
+
 function dashboardMetrics(assets, orders, costs, range, historicalRent, accountHolding = new Map(), incomeRows = []) {
-    const start = dayOf(range.startDate), end = dayOf(range.endDate), days = end - start + 1;
+    const start = dayOf(range.startDate), end = dayOf(range.endDate);
     const ordersByAsset = groupByAsset(orders), costsByAsset = groupByAsset(costs);
     const dailyIncomeByAsset = groupByAsset(incomeRows);
     const totals = orderTotals(orders);
     let heldDays = 0, heldCount = 0, rentedCount = 0, costDays = 0, comparableIncome = 0;
     let totalCost = 0, sale = 0, missingCost = 0, missingHolding = 0;
-    let heldHours = 0, heldTimed = 0, missingHeldHours = 0, heldRent = 0;
+    let heldHours = 0, heldTimed = 0, missingHeldHours = 0, operatingAssetDays = 0;
+    const operating = dailyTotals();
     for (const asset of assets) {
         const key = keyOf(asset);
         const rows = ordersByAsset.get(key) || [];
@@ -93,24 +121,37 @@ function dashboardMetrics(assets, orders, costs, range, historicalRent, accountH
         if (sold) sale += Number(asset.sold_price || 0);
         if (!Number.isFinite(held) || (asset.inactive && !sold)) missingHolding++;
         else if (held > 0) {
-            const inHolding = rows.filter(r => dayOf(r.end_time) >= first && dayOf(r.end_time) <= last);
+            const operatingOrders = rows.filter(r => dayOf(r.end_time) >= first && dayOf(r.end_time) <= end);
+            const inHolding = last === end ? operatingOrders : operatingOrders.filter(r => dayOf(r.end_time) <= last);
             const part = orderTotals(inHolding);
-            const detail = accountHolding.get(asset.game_account) || { days: 0, hours: 0, timed: 0, missing: 0 };
+            const sample = dailyTotals(end - first + 1);
+            sample.paid = last === end ? part.paid : operatingOrders.filter(r => receipt(r) > 0).length;
+            let periodIncome = 0;
+            for (const r of dailyIncomeByAsset.get(key) || []) {
+                const day = dayOf(r.stat_date);
+                if (!(day >= first && day <= end)) continue;
+                const income = Number(r.amount_rec_sum || 0);
+                sample.income += income;
+                sample.effectiveOrders += Number(r.order_cnt_effective || 0);
+                sample.rentHours += Number(r.rent_hour_sum || 0);
+                if (day <= last) periodIncome += income;
+            }
+            const detail = accountHolding.get(asset.game_account) || { days: 0, hours: 0, timed: 0, missing: 0, daily: dailyTotals() };
+            mergeDailyTotals(detail.daily, sample);
+            mergeDailyTotals(operating, sample);
+            operatingAssetDays += sample.days;
             detail.days += held;
-            detail.hours += part.hours;
-            detail.timed += part.timed;
-            detail.missing += part.missingHours;
+            const knownTurnover = inHolding.length - part.missingTurnover;
+            detail.hours += part.paidHours;
+            detail.timed += knownTurnover;
+            detail.missing += part.missingTurnover;
             accountHolding.set(asset.game_account, detail);
             heldDays += held;
             heldCount++;
             rentedCount += Number(part.paid > 0);
-            heldHours += part.hours;
-            heldTimed += part.timed;
-            missingHeldHours += part.missingHours;
-            const periodIncome = (dailyIncomeByAsset.get(key) || [])
-                .filter(r => dayOf(r.stat_date) >= first && dayOf(r.stat_date) <= last)
-                .reduce((sum, r) => sum + Number(r.amount_rec_sum), 0);
-            heldRent += periodIncome;
+            heldHours += part.paidHours;
+            heldTimed += knownTurnover;
+            missingHeldHours += part.missingTurnover;
             if (cost > 0) {
                 let investedDays = 0;
                 if (!hasPurchaseRecord) investedDays += Number(asset.purchase_price || 0) * held;
@@ -129,14 +170,16 @@ function dashboardMetrics(assets, orders, costs, range, historicalRent, accountH
         if (!currentAssets.has(key)) missingHolding++;
     }
     const hoursPerDay = missingHeldHours && !heldTimed ? null : divide(heldHours, heldDays);
+    const averages = dailyAverages(operating);
     return {
+        daily_averages: averages,
         cumulative_cost: totalCost,
         sale_amount: sale,
         payback: missingCost ? null : divide(historicalRent + sale, totalCost),
-        income_per_asset_day: divide(heldRent, heldDays),
+        income_per_asset_day: divide(operating.income, operatingAssetDays),
         annual_rent_return: divide(comparableIncome * 365, costDays),
         paid_orders: totals.paid,
-        paid_orders_per_day: divide(totals.paid, days),
+        paid_orders_per_day: averages.settled_daily_count,
         income_per_order: divide(totals.income, totals.paid),
         hours_per_paid_order: divide(totals.paidHours, totals.timedPaid),
         rented_asset_rate: divide(rentedCount, heldCount),
@@ -146,11 +189,11 @@ function dashboardMetrics(assets, orders, costs, range, historicalRent, accountH
         cancelled: totals.cancelled,
         cancellation_rate: divide(totals.cancelled, totals.cancelled + totals.paid),
         unknown_receipts: totals.unknown,
-        missing_hours: totals.missingHours,
+        missing_hours: totals.paid - totals.timedPaid,
         missing_held_hours: missingHeldHours,
         missing_holding: missingHolding,
         missing_cost: missingCost,
         held_days: heldDays
     };
 }
-module.exports = { dashboardMetrics, orderTotals };
+module.exports = { dashboardMetrics, dailyAverages, orderTotals };
