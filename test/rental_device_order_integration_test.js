@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
+const { promisify } = require('node:util');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rent-device-orders-'));
 process.env.TZ = 'Asia/Shanghai';
 for (const key of ['MAIN','ORDER','STATS','RUNTIME','PRICE']) process.env[key + '_DB_FILE_PATH'] = path.join(root,key+'.db');
@@ -17,9 +18,10 @@ const { setSystemConfig } = require('../database/system_config_db');
 const { upsertOrder } = require('../order/service/order_command_service');
 const { listActiveRentingOrdersByUser } = require('../order/service/order_query_service');
 const { replaceDeviceSnapshot } = require('../database/rental_device_db');
-const { upsertRentalDeviceOrders, listDirtyDeviceDates } = require('../database/rental_device_order_db');
+const { initRentalDeviceOrderDb, upsertRentalDeviceOrders, listDirtyDeviceDates } = require('../database/rental_device_order_db');
+const { openOrderDatabase } = require('../database/sqlite_client');
 const { importRentalDeviceOrders, syncConfiguredRentalDeviceOrders } = require('../order/rental_device_order_service');
-const { listGta6DeviceOrders, _internals } = require('../uuzuhao/uuzuhao_api');
+const { listRentalDeviceOrders, _internals } = require('../uuzuhao/uuzuhao_api');
 const { refreshRentalDeviceStats, getOrderStatsDashboardByUser, getIncomeCalendarByUser } = require('../stats/order_stats');
 const { createAccessToken } = require('../user/auth_token');
 const ms = text => String(Date.parse(text.replace(' ','T')+'+08:00'));
@@ -28,8 +30,18 @@ const yesterday = new Date(Date.now()-86400000).toLocaleDateString('sv-SE');
 const stableNow = new Date(`${today}T23:00:00+08:00`);
 const oldDate = '2025-01-05';
 const fixture = { purchaseOrderNo:'host-a', gameId:11000, deviceId:'9223372036854775806', deviceNo:'X_01',
+    gameName:'GTA6',
     deviceName:'轻舟<测试>', orderType:2, orderStatus:4000, receivableAmount:10, settlementAmount:7.25, returnAmount:2.75,
     rentHour:2, createTime:ms(yesterday+' 20:00:00'), rentStartTime:ms(yesterday+' 22:00:00'), rentEndTime:ms(today+' 00:00:00') };
+const gameLogo = 'https://acctrade-pic.youpinimg.com/test/game.png';
+const otherGame = { ...fixture, purchaseOrderNo:'host-other-game', gameId:11001, gameName:'黑神话：悟空',
+    gameLogoUrl:gameLogo, receivableAmount:1.75, settlementAmount:1.75, returnAmount:0 };
+
+async function orderSql(method, sql, params = []) {
+    const db = openOrderDatabase();
+    try { return await promisify(db[method]).call(db,sql,params); }
+    finally { await promisify(db.close).call(db); }
+}
 
 async function browserCheck(base,user) {
     const puppeteer = require('puppeteer-core');
@@ -50,6 +62,12 @@ async function browserCheck(base,user) {
             const page = await browser.newPage();
             const errors = [];
             page.on('pageerror',e=>errors.push(e.message));
+            await page.setRequestInterception(true);
+            page.on('request', req => {
+                if (req.url() === gameLogo) return void req.respond({ status:404 }).catch(()=>{});
+                if (req.url().startsWith(base+'/')) return void req.continue().catch(()=>{});
+                return void req.abort().catch(()=>{});
+            });
             await page.setViewport({width,height:850});
             await page.evaluateOnNewDocument(auth=>sessionStorage.setItem('h5_auth_bundle',JSON.stringify(auth)),
                 {token:createAccessToken(user),user:{id:user.id,account:user.account,user_type:user.user_type}});
@@ -72,7 +90,24 @@ async function browserCheck(base,user) {
                 await page.waitForSelector(tab+'.active',{visible:true,timeout:6000}).catch(error => {
                     throw new Error(`${menu}: ${error.message}; browser errors: ${errors.join(' | ')}`);
                 });
-                if (menu === 'orders') await page.locator('[data-order-quick="last7"]').click();
+                if (menu === 'orders') {
+                    await page.waitForSelector('[data-order-quick="last24h"].active',{visible:true});
+                    await page.locator('[data-order-game="WZRY"]').click();
+                    await page.waitForSelector('[data-order-game="WZRY"].active',{visible:true});
+                    await page.waitForSelector('[data-order-quick="last24h"].active',{visible:true});
+                    await page.locator(tab).click();
+                    await page.waitForSelector(tab+'.active',{visible:true});
+                    await page.locator('[data-order-quick="last7"]').click();
+                    await page.waitForFunction(()=>Array.from(document.querySelectorAll('#orderListContainer img'))
+                        .some(img=>img.alt==='黑神话：悟空' && img.src.endsWith('/console.svg') && img.naturalWidth>0),{timeout:8000});
+                } else {
+                    assert(await page.$eval('#statsKpiGrid', n=>n.innerText.includes('区间实收')));
+                    await page.locator('[data-stats-game="WZRY"]').click();
+                    await page.waitForSelector('[data-stats-game="WZRY"].active',{visible:true});
+                    assert(await page.$eval('#statsKpiGrid', n=>n.innerText.includes('区间实收')));
+                    await page.locator(tab).click();
+                    await page.waitForSelector(tab+'.active',{visible:true});
+                }
                 await page.waitForFunction((s,t)=>document.querySelector(s)?.innerText.includes(t),{timeout:8000},selector,needle);
                 assert(await page.$eval(tab+' img',img=>img.complete && img.naturalWidth>0));
                 assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
@@ -85,6 +120,13 @@ async function browserCheck(base,user) {
 }
 
 async function main() {
+    await initRentalDeviceOrderDb();
+    for (const column of ['source_game_id','source_game_name','source_game_logo']) {
+        await orderSql('run', `ALTER TABLE rental_device_order DROP COLUMN ${column}`);
+    }
+    await orderSql('run', `INSERT INTO rental_device_order (user_id,order_no,device_id,device_no,device_name,
+        source_status,order_status,order_type,placed_at,start_time,end_time,rent_hour,booked_cent)
+        VALUES (999,'legacy','11','001','Legacy',4000,'已完成','','','','',2,100)`);
     const web = await bootstrap();
     let rows = [], override, calls = [], broken = false;
     const merchant = http.createServer(async(req,res)=>{
@@ -97,6 +139,8 @@ async function main() {
             .replaceAll('"9223372036854775806"','9223372036854775806'));
     });
     try {
+        assert.deepEqual(await orderSql('get', 'SELECT source_game_id,source_game_name,source_game_logo,booked_cent FROM rental_device_order WHERE order_no=?',['legacy']),
+            {source_game_id:'',source_game_name:'',source_game_logo:'',booked_cent:100});
         await new Promise(r=>merchant.listen(0,'127.0.0.1',r));
         const user = await createUserByAdmin({account:'host-fixture',password:'fixture-password',status:'enabled',user_type:'内部'});
         const other = await createUserByAdmin({account:'other-host',password:'fixture-password',status:'enabled',user_type:'内部'});
@@ -125,7 +169,8 @@ async function main() {
         assert.equal(calls.length,2);
         for (const [i,c] of calls.entries()) {
             assert.equal(c.url,'/api/youpin/rent-connector/device/v1/order/list');
-            assert.deepEqual([c.method,c.body.gameId,c.body.orderStatus,c.body.page],['POST',11000,0,i+1]);
+            assert.deepEqual([c.method,c.body.orderStatus,c.body.page],['POST',0,i+1]);
+            assert(!('gameId' in c.body));
             assert.equal(c.body.sign,_internals.createSign(c.body,auth.app_secret)); assert(!('userId' in c.body));
         }
         const scoped = '/api/orders?game_name=GTA6&quick_filter=last30&page_size=20';
@@ -157,12 +202,12 @@ async function main() {
         assert.equal((await importRentalDeviceOrders(uid,auth)).changed,0);
         assert.equal((await refreshRentalDeviceStats(uid)).skipped,true);
 
-        await assert.rejects(()=>listGta6DeviceOrders(auth,{maxPages:1}),/分页上限/);
+        await assert.rejects(()=>listRentalDeviceOrders(auth,{maxPages:1}),/分页上限/);
         const original = rows;
         for(const [data,msg] of [
             [{totalCount:-1,orderList:[]},/结构/],
             [{totalCount:51,orderList:[fixture]},/不完整/],
-            [{totalCount:1,orderList:[{...fixture,gameId:11001}]},/游戏/],
+            [{totalCount:1,orderList:[{...fixture,purchaseOrderNo:''}]},/订单编号/],
             [{totalCount:2,orderList:[fixture,fixture]},/重复/]
         ]) {
             override=()=>data;
@@ -190,6 +235,27 @@ async function main() {
         await replaceDeviceSnapshot(uid,[]);
         assert.equal((await view({period:'today'})).summary.total_rec_amount_all_time,7.25);
         await replaceDeviceSnapshot(uid,[{deviceId:fixture.deviceId,deviceName:fixture.deviceName,deviceNo:fixture.deviceNo}]);
+        const beforeMixed = (await api(scoped)).total;
+        rows.push(otherGame,
+            {...otherGame,purchaseOrderNo:'host-unknown-game',gameId:undefined,gameName:undefined,gameLogoUrl:'https://untrusted.invalid/test.png',
+                orderStatus:4200,settlementAmount:0,returnAmount:1.75},
+            {...otherGame,purchaseOrderNo:'host-malformed-logo',gameId:10000,gameLogoUrl:'not a URL',
+                orderStatus:4200,settlementAmount:0,returnAmount:1.75});
+        assert.equal((await importRentalDeviceOrders(uid,auth)).changed,3);
+        assert.equal((await refreshRentalDeviceStats(uid)).refreshed_days,1);
+        assert.equal((await api(scoped)).total,beforeMixed+3);
+        const mixed=(await api(scoped+'&keyword=host-other-game')).list[0];
+        assert.deepEqual([mixed.game_name,mixed.source_game_id,mixed.source_game_name,mixed.source_game_logo,mixed.rec_amount],
+            ['GTA6','11001','黑神话：悟空',gameLogo,1.75]);
+        assert.equal((await api(scoped+'&keyword=host-unknown-game')).list[0].source_game_logo,'');
+        assert.equal((await api(scoped+'&keyword=host-malformed-logo')).list[0].source_game_logo,'');
+        assert.equal((await view({period:'today'})).summary.total_rec_amount_all_time,9);
+        assert.equal((await getOrderStatsDashboardByUser(uid,{game_name:'全部',period:'today'})).summary.amount_rec_sum,9);
+        assert.equal((await importRentalDeviceOrders(uid,auth)).changed,0);
+        rows.find(o=>o.purchaseOrderNo==='host-a').gameName='GTA6 order name updated';
+        assert.equal((await importRentalDeviceOrders(uid,auth)).changed,1);
+        assert.deepEqual(await listDirtyDeviceDates(uid,today),[]);
+        assert.equal((await view({period:'today'})).summary.total_rec_amount_all_time,9);
         if(process.argv.includes('--ui')) await browserCheck(base,user);
         console.log('[PASS] GTA6 order pagination, mapping, isolation, reports and old refund replay');
     } finally {

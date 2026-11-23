@@ -675,16 +675,14 @@ async function listRentalDevices(auth) {
     throw new Error('主机列表超过分页上限');
 }
 
-const GTA6_DEVICE_GAME_ID = 11000;
-
-async function listGta6DeviceOrders(auth, { maxPages = 20 } = {}) {
+async function listRentalDeviceOrders(auth, { maxPages = 20 } = {}) {
     const orders = new Map();
     const pageSize = 50;
     let expected;
     for (let page = 1; page <= maxPages; page++) {
         const response = await postSigned('/api/youpin/rent-connector/device/v1/order/list',
-            { orderStatus: 0, page, pageSize, gameId: GTA6_DEVICE_GAME_ID }, auth, {
-                reviver: (key, value, context) => key === 'deviceId' && typeof value === 'number'
+            { orderStatus: 0, page, pageSize }, auth, {
+                reviver: (key, value, context) => (key === 'deviceId' || key === 'gameId') && typeof value === 'number'
                     ? (context?.source || (Number.isSafeInteger(value) ? String(value) : null)) : value
             });
         const data = response.data;
@@ -694,8 +692,8 @@ async function listGta6DeviceOrders(auth, { maxPages = 20 } = {}) {
         if (data.totalCount !== expected) throw new Error('主机订单分页期间总数变化');
         for (const order of data.orderList) {
             const orderNo = typeof order?.purchaseOrderNo === 'string' ? order.purchaseOrderNo.trim() : '';
-            if (!orderNo || Number(order.gameId) !== GTA6_DEVICE_GAME_ID || orders.has(orderNo)) {
-                throw new Error('主机订单编号、游戏或分页重复异常');
+            if (!orderNo || orders.has(orderNo)) {
+                throw new Error('主机订单编号或分页重复异常');
             }
             orders.set(orderNo, order);
         }
@@ -706,7 +704,7 @@ async function listGta6DeviceOrders(auth, { maxPages = 20 } = {}) {
 }
 
 module.exports = {
-    listGta6DeviceOrders,
+    listRentalDeviceOrders,
     listRentalDevices,
     createReauthorizeTask,
     queryReauthorizeTask,

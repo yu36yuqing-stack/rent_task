@@ -2,6 +2,9 @@
 const { promisify } = require('node:util');
 const { openOrderDatabase } = require('./sqlite_client');
 
+const SOURCE_GAME_FIELDS = ['source_game_id','source_game_name','source_game_logo'];
+const SOURCE_GAME_COLUMNS = SOURCE_GAME_FIELDS.map(field => `${field} TEXT NOT NULL DEFAULT ''`);
+
 async function withDb(action) {
     const db = openOrderDatabase();
     const call = method => promisify(db[method]).bind(db);
@@ -19,6 +22,7 @@ function initRentalDeviceOrderDb() {
             source_status INTEGER NOT NULL, order_status TEXT NOT NULL, order_type TEXT NOT NULL,
             placed_at TEXT NOT NULL, start_time TEXT NOT NULL, end_time TEXT NOT NULL, rent_hour REAL NOT NULL,
             receivable_cent INTEGER, settlement_cent INTEGER, refund_cent INTEGER, booked_cent INTEGER NOT NULL,
+            ${SOURCE_GAME_COLUMNS.join(',')},
             create_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, modify_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             is_deleted INTEGER NOT NULL DEFAULT 0, desc TEXT NOT NULL DEFAULT '', UNIQUE(user_id,source,order_no)
         )`);
@@ -32,8 +36,23 @@ function initRentalDeviceOrderDb() {
     return ready;
 }
 
-const FIELDS = ['device_id','device_no','device_name','source_status','order_status','order_type',
+async function ensureRentalDeviceOrderGameColumns() {
+    await initRentalDeviceOrderDb();
+    return withDb(async (run,all) => {
+        await run('BEGIN IMMEDIATE');
+        try {
+            const existing = new Set((await all('PRAGMA table_info(rental_device_order)')).map(r=>r.name));
+            for (const [index,field] of SOURCE_GAME_FIELDS.entries()) {
+                if (!existing.has(field)) await run(`ALTER TABLE rental_device_order ADD COLUMN ${SOURCE_GAME_COLUMNS[index]}`);
+            }
+            await run('COMMIT');
+        } catch (err) { await run('ROLLBACK'); throw err; }
+    });
+}
+
+const FACT_FIELDS = ['device_id','device_no','device_name','source_status','order_status','order_type',
     'placed_at','start_time','end_time','rent_hour','receivable_cent','settlement_cent','refund_cent','booked_cent'];
+const FIELDS = [...FACT_FIELDS,...SOURCE_GAME_FIELDS];
 
 function upsertRentalDeviceOrders(uid, orders) {
     return withDb(async (run, _, get) => {
@@ -45,14 +64,17 @@ function upsertRentalDeviceOrders(uid, orders) {
                 const args = FIELDS.map(key => order[key]);
                 const existing = await get('SELECT * FROM rental_device_order WHERE user_id=? AND source=? AND order_no=?',
                     [uid,'uuzuhao_device',order.order_no]);
-                if (existing?.is_deleted === 0 && FIELDS.every(key => existing[key] === order[key])) continue;
+                const sameFact = existing?.is_deleted === 0 && FACT_FIELDS.every(key => existing[key] === order[key]);
+                if (sameFact && SOURCE_GAME_FIELDS.every(key => existing[key] === order[key])) continue;
                 await run(`INSERT INTO rental_device_order(user_id,order_no,${FIELDS.join(',')})
                     VALUES(${args.map(() => '?').concat('?', '?').join(',')})
                     ON CONFLICT(user_id,source,order_no) DO UPDATE SET
                     ${FIELDS.map(key => key + '=excluded.' + key).join(',')}, is_deleted=0, modify_date=CURRENT_TIMESTAMP`,
                     [uid,order.order_no,...args]);
                 changed++;
-                for (const date of [existing?.end_time,order.end_time]) if (date) dates.add(date.slice(0,10));
+                if (!sameFact) {
+                    for (const date of [existing?.end_time,order.end_time]) if (date) dates.add(date.slice(0,10));
+                }
             }
             for (const date of dates) {
                 await run(`INSERT INTO rental_device_stats_dirty_day(user_id,stat_date) VALUES(?,?)
@@ -100,5 +122,5 @@ function readDailyDeviceOrderStats(uid, day) {
         [uid,day,day+'~']));
 }
 
-module.exports = { initRentalDeviceOrderDb, upsertRentalDeviceOrders, listDirtyDeviceDates, clearDirtyDeviceDates,
+module.exports = { initRentalDeviceOrderDb, ensureRentalDeviceOrderGameColumns, upsertRentalDeviceOrders, listDirtyDeviceDates, clearDirtyDeviceDates,
     listDeviceOrderIdentities, readDailyDeviceOrderStats };

@@ -1,6 +1,6 @@
 'use strict';
 
-const { listGta6DeviceOrders } = require('../uuzuhao/uuzuhao_api');
+const { listRentalDeviceOrders } = require('../uuzuhao/uuzuhao_api');
 const { getSystemConfig } = require('../database/system_config_db');
 const { listUserPlatformAuth } = require('../database/user_platform_auth_db');
 const { upsertRentalDeviceOrders } = require('../database/rental_device_order_db');
@@ -23,6 +23,14 @@ function timeText(ms) {
     return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+function sourceGameLogo(value) {
+    if (!value) return '';
+    try {
+        const url = new URL(value);
+        return url.origin === 'https://acctrade-pic.youpinimg.com' && !url.username && !url.password ? url.href : '';
+    } catch { return ''; }
+}
+
 function mapDeviceOrder(raw) {
     const status = Number(raw.orderStatus);
     const end = timeText(raw.rentEndTime);
@@ -37,6 +45,9 @@ function mapDeviceOrder(raw) {
     const hours = Number(raw.rentHour || 0);
     return {
         order_no: raw.purchaseOrderNo.trim(),
+        source_game_id: String(raw.gameId ?? '').trim(),
+        source_game_name: String(raw.gameName ?? '').trim(),
+        source_game_logo: sourceGameLogo(raw.gameLogoUrl),
         device_id: /^[1-9]\d*$/.test(device) ? device : '',
         device_no: String(raw.deviceNo || '').trim(), device_name: String(raw.deviceName || '').trim(),
         source_status: Number.isSafeInteger(status) ? status : -1, order_status: statusText,
@@ -48,7 +59,7 @@ function mapDeviceOrder(raw) {
 }
 
 async function importRentalDeviceOrders(uid, auth) {
-    const orders = (await listGta6DeviceOrders(auth)).map(mapDeviceOrder);
+    const orders = (await listRentalDeviceOrders(auth)).map(mapDeviceOrder);
     const changed = await upsertRentalDeviceOrders(uid, orders);
     const review = orders.filter(o => !STATUS[o.source_status] ||
         (o.source_status === 4000 && (!o.end_time || o.settlement_cent == null || (o.settlement_cent > 0 && o.booked_cent === 0))) ||

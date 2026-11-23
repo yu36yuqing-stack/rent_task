@@ -354,7 +354,7 @@
           <p class="stats-kpi-value money">¥${Number(summary.total_rec_amount_all_time || 0).toFixed(2)}</p>
         </div>
         <div class="stats-kpi-card">
-          <p class="stats-kpi-key">实收总额</p>
+          <p class="stats-kpi-key">区间实收</p>
           <p class="stats-kpi-value money">¥${Number(summary.amount_rec_sum || 0).toFixed(2)}</p>
         </div>
         <div class="stats-kpi-card">

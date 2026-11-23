@@ -2,6 +2,7 @@
   'use strict';
 
   const MAX_KEYWORD_LENGTH = 64;
+  const DEFAULT_QUICK_FILTER = 'last24h';
   const emptyStats = () => ({ progress: 0, done: 0, done_zero: 0, today_total: 0, progress_order_amount_sum: 0 });
 
   function normalizeKeyword(value) {
@@ -29,7 +30,7 @@
       if (o.countdown_timer_id) clearInterval(o.countdown_timer_id);
       Object.assign(o, { keyword: '', search_draft: '', search_error: '', loading: false,
         page: 1, total: 0, list: [], stats: emptyStats(), range: null, countdown_timer_id: 0,
-        status_filter: 'all', quick_filter: 'today', game_name: '全部',
+        status_filter: 'all', quick_filter: DEFAULT_QUICK_FILTER, game_name: '全部',
         complaint_detail: { open: false }, detail_view: { open: false } });
       composing = false;
       renderForm();
@@ -44,7 +45,7 @@
     function fingerprint() {
       const o = getOrders();
       return JSON.stringify([o.keyword || '', o.game_name || '全部', o.status_filter || 'all',
-        o.quick_filter || 'today', o.page || 1, o.pageSize || 20]);
+        o.quick_filter || DEFAULT_QUICK_FILTER, o.page || 1, o.pageSize || 20]);
     }
 
     function renderForm() {
@@ -70,7 +71,7 @@
       renderForm();
       try {
         const query = new URLSearchParams({ page: String(o.page || 1), page_size: String(o.pageSize || 20),
-          status_filter: o.status_filter || 'all', quick_filter: o.quick_filter || 'today',
+          status_filter: o.status_filter || 'all', quick_filter: o.quick_filter || DEFAULT_QUICK_FILTER,
           game_name: o.game_name || '全部', keyword: normalizeKeyword(o.keyword) });
         const data = await request(`/api/orders?${query}`, { background: true, is_current: current });
         if (!current()) return false;
@@ -147,7 +148,7 @@
     return { load, submit, clear, reset, render: () => { synchronizeOwner(); renderForm(); } };
   }
 
-  const api = { MAX_KEYWORD_LENGTH, normalizeKeyword, create };
+  const api = { MAX_KEYWORD_LENGTH, DEFAULT_QUICK_FILTER, normalizeKeyword, create };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.OrderSearch = api;
 })(typeof window === 'undefined' ? globalThis : window);

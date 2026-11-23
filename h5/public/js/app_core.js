@@ -161,7 +161,7 @@
       },
       orders: {
         status_filter: 'all',
-        quick_filter: 'today',
+        quick_filter: window.OrderSearch.DEFAULT_QUICK_FILTER,
         game_name: '全部',
         page: 1,
         pageSize: 20,

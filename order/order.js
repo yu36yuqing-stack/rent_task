@@ -299,13 +299,14 @@ async function listOrdersForUser(userId, options = {}) {
     const source = `WITH visible_orders AS (
         SELECT id,user_id,channel,order_no,game_id,game_name,game_account,role_name,order_status,order_amount,rent_hour,
             ren_way,rec_amount,start_time,end_time,create_date,modify_date,'' AS order_kind,'' AS device_no,NULL AS refund_amount,
-            NULL AS settlement_amount,NULL AS source_status,start_time AS range_start,end_time AS range_end
+            NULL AS settlement_amount,NULL AS source_status,'' AS source_game_id,'' AS source_game_name,'' AS source_game_logo,
+            start_time AS range_start,end_time AS range_end
         FROM "order" WHERE user_id=? AND is_deleted=0 AND TRIM(COALESCE(start_time,''))<>'' AND TRIM(COALESCE(end_time,''))<>''
         UNION ALL
         SELECT id,user_id,source,order_no,'GTA6','GTA6',
             CASE WHEN device_id='' THEN 'device:unlinked' ELSE 'device:'||device_id END,device_name,
             order_status,receivable_cent/100.0,rent_hour,order_type,booked_cent/100.0,start_time,end_time,create_date,modify_date,
-            'device',device_no,refund_cent/100.0,settlement_cent/100.0,source_status,
+            'device',device_no,refund_cent/100.0,settlement_cent/100.0,source_status,source_game_id,source_game_name,source_game_logo,
             COALESCE(NULLIF(start_time,''),NULLIF(placed_at,''),end_time),
             COALESCE(NULLIF(end_time,''),NULLIF(placed_at,''),start_time)
         FROM rental_device_order WHERE user_id=? AND is_deleted=0
@@ -369,6 +370,7 @@ async function listOrdersForUser(userId, options = {}) {
               o.channel, o.order_no, o.game_id, o.game_name, o.game_account, o.role_name,
               o.order_status, o.order_amount, o.rent_hour, o.ren_way, o.rec_amount,
               o.start_time, o.end_time, o.create_date, o.modify_date, o.order_kind, o.device_no, o.refund_amount, o.settlement_amount, o.source_status,
+              o.source_game_id,o.source_game_name,o.source_game_logo,
               o.order_kind='' AND EXISTS(
                   SELECT 1
                   FROM order_complaint oc

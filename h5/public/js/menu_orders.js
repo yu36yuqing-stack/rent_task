@@ -140,6 +140,16 @@
     }
 
     function buildOrderGameAvatarHtml(item) {
+      if (item?.order_kind === 'device') {
+        const fallback = item.source_game_id === '11000'
+          ? '/assets/game_icons/gta6.svg' : '/assets/game_icons/console.svg';
+        const name = escapeAttr(item.source_game_name || '主机订单');
+        const logo = escapeAttr(item.source_game_logo || fallback);
+        return `<span class="game-avatar" title="${name}">
+          <img src="${logo}" alt="${name}" loading="lazy" decoding="async" referrerpolicy="no-referrer"
+            ${item.source_game_logo ? `data-order-icon-fallback="${fallback}"` : ''}>
+        </span>`;
+      }
       const normalized = normalizeOrderGameName(item && item.game_name, item && item.game_id);
       if (normalized === 'GTA6') return '<span class="game-avatar"><img src="/assets/game_icons/gta6.svg" alt="GTA6"></span>';
       if (normalized === 'CSGO') {
@@ -598,6 +608,11 @@
             </div>
           </div>
         `).join('');
+        Array.from(els.orderListContainer.querySelectorAll('[data-order-icon-fallback]')).forEach((img) => {
+          const useFallback = () => { img.src = img.getAttribute('data-order-icon-fallback'); };
+          if (img.complete && img.naturalWidth === 0) useFallback();
+          else img.addEventListener('error', useFallback, { once: true });
+        });
         Array.from(els.orderListContainer.querySelectorAll('[data-order-copy]')).forEach((n) => {
           n.addEventListener('click', () => copyAccount(n.getAttribute('data-order-copy') || ''));
         });
