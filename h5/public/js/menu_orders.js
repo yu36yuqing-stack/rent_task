@@ -139,15 +139,36 @@
       return 'WZRY';
     }
 
+    const DEVICE_ORDER_GAME_DISPLAY = new Map([
+      ['11000', { label: 'GTA6', icon: '/assets/game_icons/gta6.svg' }],
+      ['11001', { label: '黑悟空', icon: '/assets/game_icons/wukong.jpg', preferLocalIcon: true }]
+    ]);
+
+    function resolveDeviceOrderGame(item) {
+      const game = DEVICE_ORDER_GAME_DISPLAY.get(String(item.source_game_id ?? '').trim());
+      const sourceName = String(item.source_game_name ?? '').trim();
+      return {
+        label: game?.label || sourceName || '未知游戏',
+        title: sourceName || game?.label || '未知游戏',
+        fallback: game?.icon || '/assets/game_icons/console.svg',
+        remoteLogo: game?.preferLocalIcon ? '' : item.source_game_logo
+      };
+    }
+
+    function formatDeviceOrderMeta(item) {
+      const { label } = resolveDeviceOrderGame(item);
+      const type = item.ren_way === '首租' || item.ren_way === '续租' ? ` · ${item.ren_way}` : '';
+      return `游戏：${escapeAttr(label)} · 编号：${escapeAttr(textOrDash(item.device_no))}${type}`;
+    }
+
     function buildOrderGameAvatarHtml(item) {
       if (item?.order_kind === 'device') {
-        const fallback = item.source_game_id === '11000'
-          ? '/assets/game_icons/gta6.svg' : '/assets/game_icons/console.svg';
-        const name = escapeAttr(item.source_game_name || '主机订单');
-        const logo = escapeAttr(item.source_game_logo || fallback);
+        const { title, fallback, remoteLogo } = resolveDeviceOrderGame(item);
+        const name = escapeAttr(title);
+        const logo = escapeAttr(remoteLogo || fallback);
         return `<span class="game-avatar" title="${name}">
           <img src="${logo}" alt="${name}" loading="lazy" decoding="async" referrerpolicy="no-referrer"
-            ${item.source_game_logo ? `data-order-icon-fallback="${fallback}"` : ''}>
+            ${remoteLogo ? `data-order-icon-fallback="${fallback}"` : ''}>
         </span>`;
       }
       const normalized = normalizeOrderGameName(item && item.game_name, item && item.game_id);
@@ -573,7 +594,7 @@
 
       if (!Array.isArray(o.list) || o.list.length === 0) {
         const emptyMessage = o.search_error ? '订单查询失败，请重试' : (o.keyword ? '当前筛选条件下没有匹配订单，可调整时间范围（最多近30天）' : '暂无订单数据');
-        els.orderListContainer.innerHTML = `<div class="panel"><div>${emptyMessage}</div></div>`;
+        els.orderListContainer.innerHTML = `<div class="panel"><p class="head-summary-text" role="status">${emptyMessage}</p></div>`;
       } else {
         els.orderListContainer.innerHTML = o.list.map((item) => `
           <div class="order-card">
@@ -590,9 +611,9 @@
                 : ''}
             </div>
             <div class="order-card-line">${formatOrderTimeRange(item)}</div>
-            <div class="order-card-line">${item.order_kind === 'device'
-              ? `渠道：悠悠主机 · 编号：${escapeAttr(item.device_no || '-')} · ${escapeAttr(item.ren_way || '-')}`
-              : `渠道：${item.channel || '-'} · 账号：${item.game_account || '-'}`}</div>
+            ${item.order_kind === 'device'
+              ? `<div class="order-card-line device-order-meta">${formatDeviceOrderMeta(item)}</div>`
+              : `<div class="order-card-line">渠道：${item.channel || '-'} · 账号：${item.game_account || '-'}</div>`}
             <div class="order-card-line">时长：${item.order_kind === 'device' ? `${Number(item.rent_hour || 0)}小时` : formatOrderRentPackage(item)} · ${item.order_kind === 'device' ? '应收' : '订单金额'}：${item.order_amount == null && item.order_kind === 'device' ? '—' : '¥'+Number(item.order_amount || 0).toFixed(2)}</div>
             ${item.order_kind === 'device' && item.refund_amount > 0
               ? `<div class="order-card-line">退款：¥${Number(item.refund_amount).toFixed(2)}</div>` : ''}

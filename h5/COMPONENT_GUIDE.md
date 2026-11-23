@@ -40,7 +40,7 @@
 | PageContainer | `.wrap` `.orders-view` | 全局页面、列表型页面 | 页面锚点只调整布局 |
 | Panel | `.panel` | 登录、配置、页面内容区 | 页面变体可以调整内部排版 |
 | Field | `.field` 及表单控件基础样式 | 登录、授权、配置、Sheet 表单 | 页面变体只调整排列和密度 |
-| ListSearch | `.field.list-search-field` + 页面搜索输入框 | 板卡、阶梯定价账号列表、订单 | 复用 Field 外观；板卡/定价保留本地即时过滤；订单通过 `.list-search-submit` 布局变体以表单提交到服务端，输入框与搜索/清空按钮同行，输入框可收缩且按钮不压扁；不改变其他使用方 |
+| ListSearch | `.field.list-search-field` + 页面搜索输入框 | 板卡、阶梯定价账号列表、订单 | 板卡/定价保留本地即时过滤；订单通过 `.list-search-submit` 提交到服务端，输入框 34px 高、14px 主题色文字；搜索和清空与同步订单共享 PageAction 尺寸和样式；空结果复用 Panel 和 HeadSummary |
 | ModeOption | `.mode-options` `.mode-option-row` | 个人中心、订单规则、商品级配置 | 选项内容和选中状态可变 |
 | AppHeader | `.hero` `.hero-toolbar` `.hero-menu-trigger` `.hero-menu-title` | 登录态和应用态顶部区域 | 标题和菜单状态可变 |
 | Drawer | `.drawer-item` `.drawer-group` `.drawer-group-toggle` `.drawer-sub-list` `.drawer-sub-item` | 全局导航 | 菜单数据、展开和激活状态可变 |
@@ -48,7 +48,7 @@
 | PageAction | `.btn-page-action` | 商品、订单、统计、定价、板卡、维护、风控 | 页面头部主操作统一使用 |
 | CardAction | `.btn-card-action` | 商品卡片、个人中心卡片、阶梯定价账号卡片 | 危险操作使用语义变体 |
 | 主机商品变体 | GameTabs、GameAvatar、OrderCard、CardAction、Sheet、ProductIncomeSummary | 商品「全部」和 GTA6 | 以设备类型切换信息插槽，仅提供本地采购、成本和明细；无订单收入和账号操作；复用手机、桌面布局 |
-| 主机订单与收益变体 | GameTabs、GameAvatar、OrderCard、QuickFilters、Pager、统计看板指标/资产卡、成本明细 Sheet | 订单页与统计看板「全部」和 GTA6 | GTA6 是主机业务页签，订单卡片可显示渠道游戏图标，图标不可用时用本地图标；卡片显示主机编号、结算和退款；缺成本不展示年化；历史设备成本只读 |
+| 主机订单与收益变体 | GameTabs、GameAvatar、OrderCard、QuickFilters、Pager、统计看板指标/资产卡、成本明细 Sheet | 订单页与统计看板「全部」和 GTA6 | GTA6 是主机业务页签；主机订单复用 `.order-card-line` 展示游戏名、编号和已知的首租／续租，不展示固定渠道；通过源游戏 ID 取简称和图标，未配置则用源游戏名；长名称和编号允许换行；结算、退款和统计沿用原口径 |
 | FeatureSwitch | `.feature-switch` `.feature-switch-copy` `.feature-switch-track` | 页面级功能启停 | 使用原生 checkbox + `role="switch"`，页面只绑定状态和保存行为 |
 | HeaderTabs | `.orders-tabs-row` `.orders-tabs` `.orders-tab.header-tab` | 订单、板卡、风控、渠道价格 Sheet；商品页只复用容器 | 数据项和激活状态可变 |
 | QuickFilters | `.orders-quick` `.orders-quick-item.header-quick-tab` | 订单二级筛选 | 默认近24小时；切换游戏保留已选时间范围 |

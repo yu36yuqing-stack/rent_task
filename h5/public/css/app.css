@@ -2003,6 +2003,16 @@
       flex: 1;
       min-width: 0;
       width: 0;
+      height: 34px;
+      padding: 0 12px;
+      font-family: inherit;
+      font-size: 14px;
+      color: var(--ink);
+    }
+
+    .list-search-submit input::placeholder {
+      color: var(--muted);
+      opacity: 1;
     }
 
     .list-search-submit .btn {
@@ -3069,6 +3079,10 @@
       color: #566b82;
       font-size: 13px;
       line-height: 1.45;
+    }
+
+    #orderView .device-order-meta {
+      overflow-wrap: anywhere;
     }
 
     .order-id-row {

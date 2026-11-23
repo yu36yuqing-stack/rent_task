@@ -34,7 +34,8 @@ const fixture = { purchaseOrderNo:'host-a', gameId:11000, deviceId:'922337203685
     deviceName:'轻舟<测试>', orderType:2, orderStatus:4000, receivableAmount:10, settlementAmount:7.25, returnAmount:2.75,
     rentHour:2, createTime:ms(yesterday+' 20:00:00'), rentStartTime:ms(yesterday+' 22:00:00'), rentEndTime:ms(today+' 00:00:00') };
 const gameLogo = 'https://acctrade-pic.youpinimg.com/test/game.png';
-const otherGame = { ...fixture, purchaseOrderNo:'host-other-game', gameId:11001, gameName:'黑神话：悟空',
+const unavailableLogo = 'https://acctrade-pic.youpinimg.com/test/unavailable.png';
+const otherGame = { ...fixture, purchaseOrderNo:'host-other-game', gameId:11001, gameName:'黑神话：悟空', orderType:1,
     gameLogoUrl:gameLogo, receivableAmount:1.75, settlementAmount:1.75, returnAmount:0 };
 
 async function orderSql(method, sql, params = []) {
@@ -61,10 +62,12 @@ async function browserCheck(base,user) {
         for (const width of [375,1280]) {
             const page = await browser.newPage();
             const errors = [];
+            let wukongRemoteRequests = 0;
             page.on('pageerror',e=>errors.push(e.message));
             await page.setRequestInterception(true);
             page.on('request', req => {
-                if (req.url() === gameLogo) return void req.respond({ status:404 }).catch(()=>{});
+                if (req.url() === gameLogo) wukongRemoteRequests++;
+                if (req.url() === gameLogo || req.url() === unavailableLogo) return void req.respond({ status:404 }).catch(()=>{});
                 if (req.url().startsWith(base+'/')) return void req.continue().catch(()=>{});
                 return void req.abort().catch(()=>{});
             });
@@ -75,7 +78,7 @@ async function browserCheck(base,user) {
             const dir = path.resolve(__dirname,'../coverage/rental-device-orders');
             fs.mkdirSync(dir,{recursive:true});
             for (const [menu,attribute,selector,needle] of [
-                ['orders','data-order-game','#orderListContainer','悠悠主机'],
+                ['orders','data-order-game','#orderListContainer','游戏：黑悟空'],
                 ['stats','data-stats-game','#statsAccountList','历史总收入']
             ]) {
                 await page.waitForSelector('#menuTrigger',{visible:true});
@@ -99,7 +102,22 @@ async function browserCheck(base,user) {
                     await page.waitForSelector(tab+'.active',{visible:true});
                     await page.locator('[data-order-quick="last7"]').click();
                     await page.waitForFunction(()=>Array.from(document.querySelectorAll('#orderListContainer img'))
-                        .some(img=>img.alt==='黑神话：悟空' && img.src.endsWith('/console.svg') && img.naturalWidth>0),{timeout:8000});
+                        .some(img=>img.alt==='黑神话：悟空' && img.src.endsWith('/wukong.jpg') && img.naturalWidth>0),{timeout:8000});
+                    assert.equal(wukongRemoteRequests, 0);
+                    await page.waitForFunction(()=>Array.from(document.querySelectorAll('#orderListContainer img'))
+                        .some(img=>img.alt==='地平线6' && img.src.endsWith('/console.svg') && img.naturalWidth>0),{timeout:8000});
+                    const cardFacts = await page.$$eval(`${selector} .device-order-meta`, nodes => nodes.map(n=>n.textContent));
+                    for (const text of ['游戏：黑悟空 · 编号：X_01 · 首租','游戏：GTA6 · 编号：X_01 · 续租',
+                        '游戏：地平线6 · 编号：X_01 · 首租','游戏：未知游戏 · 编号：-']) assert(cardFacts.includes(text));
+                    assert(await page.$eval(selector,n=>!n.textContent.includes('渠道：悠悠主机')));
+                    await page.locator('[data-order-game="全部"]').click();
+                    await page.waitForFunction(s => {
+                        const text = document.querySelector(s)?.textContent || '';
+                        return !state.orders.loading && text.includes('游戏：黑悟空') && text.includes('渠道：uuzuhao · 账号：ordinary');
+                    },{timeout:8000},selector);
+                    assert(await page.$eval(selector,n=>!n.textContent.includes('渠道：悠悠主机')));
+                    await page.locator(tab).click();
+                    await page.waitForFunction(() => !state.orders.loading);
                 } else {
                     assert(await page.$eval('#statsKpiGrid', n=>n.innerText.includes('区间实收')));
                     await page.locator('[data-stats-game="WZRY"]').click();
@@ -237,13 +255,15 @@ async function main() {
         await replaceDeviceSnapshot(uid,[{deviceId:fixture.deviceId,deviceName:fixture.deviceName,deviceNo:fixture.deviceNo}]);
         const beforeMixed = (await api(scoped)).total;
         rows.push(otherGame,
-            {...otherGame,purchaseOrderNo:'host-unknown-game',gameId:undefined,gameName:undefined,gameLogoUrl:'https://untrusted.invalid/test.png',
+            {...otherGame,purchaseOrderNo:'host-unknown-game',gameId:undefined,gameName:undefined,deviceNo:undefined,orderType:undefined,gameLogoUrl:'https://untrusted.invalid/test.png',
                 orderStatus:4200,settlementAmount:0,returnAmount:1.75},
             {...otherGame,purchaseOrderNo:'host-malformed-logo',gameId:10000,gameLogoUrl:'not a URL',
+                gameName:'无效图片',orderStatus:4200,settlementAmount:0,returnAmount:1.75},
+            {...otherGame,purchaseOrderNo:'host-unavailable-logo',gameId:10001,gameLogoUrl:unavailableLogo,gameName:'地平线6',
                 orderStatus:4200,settlementAmount:0,returnAmount:1.75});
-        assert.equal((await importRentalDeviceOrders(uid,auth)).changed,3);
+        assert.equal((await importRentalDeviceOrders(uid,auth)).changed,4);
         assert.equal((await refreshRentalDeviceStats(uid)).refreshed_days,1);
-        assert.equal((await api(scoped)).total,beforeMixed+3);
+        assert.equal((await api(scoped)).total,beforeMixed+4);
         const mixed=(await api(scoped+'&keyword=host-other-game')).list[0];
         assert.deepEqual([mixed.game_name,mixed.source_game_id,mixed.source_game_name,mixed.source_game_logo,mixed.rec_amount],
             ['GTA6','11001','黑神话：悟空',gameLogo,1.75]);
