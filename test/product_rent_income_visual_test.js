@@ -246,6 +246,23 @@ async function main() {
             assert.deepStrictEqual(await page.$$eval('#listView .product-role-text', nodes => nodes.map(node => node.textContent)),
                 ['—', '角色名', 'fallback-account']);
         }
+        const expiry = Date.now() + 3600000;
+        const device = { product_kind: 'device', game_id: 'GTA6', game_name: 'GTA6', game_account: 'device:123',
+            device_no: 'fixture-123', role_name: '主机', status: 5, renting_order_end_time: new Date(expiry).toISOString() };
+        const timer = '[data-slot="rent-countdown"]';
+        for (const tab of ['全部', 'GTA6']) {
+            await renderFixture(page, [device, { ...device, game_account: 'device:124', status: 4, renting_order_end_time: '' }], false, tab);
+            assert.equal(await page.$$eval(timer, nodes => nodes.length), 1);
+            assert.equal(await page.$eval(timer, node => Number(node.dataset.endMs)), expiry);
+        }
+        const previous = await page.$eval(timer, node => node.textContent);
+        await page.waitForFunction((selector, before) => document.querySelector(selector).textContent !== before,
+            { timeout: 5000 }, timer, previous);
+        const renewed = new Date(expiry + 3600000).toISOString();
+        await renderFixture(page, { ...device, renting_order_end_time: renewed });
+        assert.equal(await page.$eval(timer, node => Number(node.dataset.endMs)), Date.parse(renewed));
+        await page.evaluate(after => { Date.now = () => after; }, Date.parse(renewed) + 1000);
+        await page.waitForFunction(selector => !document.querySelector(selector), { timeout: 5000 }, timer);
         assert.deepStrictEqual(errors, [], 'no runtime errors while rendering all cases');
         assert.deepStrictEqual(apiRequests, [], 'no API calls, especially no real business writes');
         fs.writeFileSync(path.join(outputDir, 'visual-results.json'), JSON.stringify({

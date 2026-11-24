@@ -430,6 +430,28 @@ async function main() {
     await finishTask(checkpointFailureTask, checkpointFailure);
     runtimeDb.updateRuntimeTask = originalUpdate;
 
+    const devices = require('../database/rental_device_db');
+    const deviceUser = buildUser(8807);
+    const withDevices = buildPayload({ include_rental_devices: true });
+    await devices.initRentalDeviceDb();
+    await require('../database/account_cost_record_db').initAccountCostRecordDb();
+    const device = { deviceId: '42', deviceNo: '测试主机', status: 4 };
+    await devices.replaceDeviceSnapshot(deviceUser.id, [device]);
+    async function deviceRun(suffix) {
+        const task = await createProductTask(deviceUser.id, suffix);
+        const result = await notifyUserByPayload(deviceUser, withDevices);
+        await finishTask(task, result);
+        return result.channels.dingding;
+    }
+    const sent = await deviceRun('device-first');
+    assert.equal(sent.status, 'sent');
+    assert.equal(sent.snapshot.summary.master_total, withDevices.master_total + 1);
+    assert.match(dingMessages.at(-1), /✅\[0单\] 测试主机 · 已上架/);
+    assert.equal((await deviceRun('device-same')).status, 'skipped_unchanged');
+    await devices.replaceDeviceSnapshot(deviceUser.id, [{ ...device, status: 6 }]);
+    assert.equal((await deviceRun('device-changed')).status, 'sent');
+    assert.match(dingMessages.at(-1), /⬇️\[0单\] 测试主机 · 已下架〔状态 已上架→已下架〕/);
+
     console.log(`[PASS] dingding_report_dedup_smoke_test temp_dir=${tempDir}`);
 }
 

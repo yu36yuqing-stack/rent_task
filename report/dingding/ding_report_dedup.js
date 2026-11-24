@@ -92,7 +92,7 @@ function buildAccountSnapshot(account = {}, authorizedPlatforms = []) {
         icon: pickIcon(account, authorizedPlatforms),
         order_count: Number(account.today_order_count || 0),
         online_tag: normalizeOnlineTag(account.online_tag),
-        youpin: shortState(account.youpin),
+        youpin: account.game_id === 'GTA6' ? account.youpin : shortState(account.youpin),
         uhaozu: shortState(account.uhaozu),
         zuhaowang: shortState(account.zuhaowan),
         suffix: stableText(account.suffix),
@@ -169,7 +169,7 @@ function buildAccountFieldChanges(previous = {}, current = {}) {
     add('order_count', '订单', Number(previous.order_count || 0), Number(current.order_count || 0), { fallback: '0' });
     add('online_tag', '在线', previous.online_tag, current.online_tag);
     add('display_name', '名称', previous.display_name, current.display_name);
-    add('youpin', '悠悠', previous.youpin, current.youpin);
+    add('youpin', current.game_id === 'GTA6' ? '状态' : '悠悠', previous.youpin, current.youpin);
     add('uhaozu', 'U号', previous.uhaozu, current.uhaozu);
     add('zuhaowang', '租号王', previous.zuhaowang, current.zuhaowang);
     if (previous.suffix !== current.suffix) {
@@ -230,7 +230,7 @@ function diffDingdingReportSnapshots(previous, current) {
     for (const [key, row] of currentAccounts.entries()) {
         const old = previousAccounts.get(key);
         if (!old) {
-            accounts[key] = { type: 'added', detail: '新增账号', fields: [] };
+            accounts[key] = { type: 'added', detail: row.game_id === 'GTA6' ? '新增主机' : '新增账号', fields: [] };
             continue;
         }
         const fields = buildAccountFieldChanges(old, row);

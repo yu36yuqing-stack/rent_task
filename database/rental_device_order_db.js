@@ -100,6 +100,15 @@ function clearDirtyDeviceDates(uid, rows) {
     });
 }
 
+async function listDeviceActivityOrders(uid, start, end) {
+    await initRentalDeviceOrderDb();
+    return withDb((_, all) => all(`SELECT device_id,source_status,order_type,start_time,end_time FROM rental_device_order
+        WHERE user_id=? AND source='uuzuhao_device' AND is_deleted=0 AND device_id<>'' AND start_time<>''
+          AND ((start_time>=? AND start_time<? AND (source_status=3000 OR booked_cent>0))
+            OR (source_status=3000 AND end_time>?))
+        ORDER BY device_id,start_time,end_time`, [uid,start,end,end]));
+}
+
 function listDeviceOrderIdentities(uid) {
     return withDb((_, all) => all(`SELECT game_account,device_no,device_name
         FROM (SELECT CASE WHEN device_id='' THEN 'device:unlinked' ELSE 'device:'||device_id END AS game_account,
@@ -123,4 +132,4 @@ function readDailyDeviceOrderStats(uid, day) {
 }
 
 module.exports = { initRentalDeviceOrderDb, ensureRentalDeviceOrderGameColumns, upsertRentalDeviceOrders, listDirtyDeviceDates, clearDirtyDeviceDates,
-    listDeviceOrderIdentities, readDailyDeviceOrderStats };
+    listDeviceOrderIdentities, readDailyDeviceOrderStats, listDeviceActivityOrders };

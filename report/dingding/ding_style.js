@@ -10,7 +10,7 @@ function shortState(s) {
         .replace('下架', '下');
 }
 
-const REPORT_VERSION = 'v1.0.6';
+const REPORT_VERSION = 'v1.0.7';
 const COOLDOWN_SUFFIX = ' 🔸已按冷却期下架规则下架';
 
 function nowDateTimeText() {
@@ -61,6 +61,9 @@ function reportPlatformCodes(acc, authorizedPlatforms) {
 
 function pickIcon(acc = {}, authorizedPlatforms) {
     if (!acc || typeof acc !== 'object' || Array.isArray(acc)) return '❔';
+    if (acc.game_id === 'GTA6') {
+        return { '已上架': '✅', '出租中': '💰', '已下架': '⬇️', '审核失败': '⚠️' }[acc.youpin] || '❔';
+    }
     // The report gateway already supplies the reconciled blacklist reason in this suffix.
     if (acc.is_blacklisted === true && String(acc.suffix || '').startsWith(COOLDOWN_SUFFIX)) return '⏳';
     const codes = reportPlatformCodes(acc, authorizedPlatforms);
@@ -79,6 +82,9 @@ function accountIdentityKey(acc = {}) {
 }
 
 function buildDingdingAccountLine(acc = {}, authorizedPlatforms) {
+    if (acc.game_id === 'GTA6') {
+        return `${pickIcon(acc)}[${acc.today_order_count}单] ${acc.remark} · ${acc.youpin}`;
+    }
     const y = shortState(acc.youpin);
     const u = shortState(acc.uhaozu);
     const z = shortState(acc.zuhaowan);
@@ -89,6 +95,17 @@ function buildDingdingAccountLine(acc = {}, authorizedPlatforms) {
     const tag = acc.suffix ? `${acc.suffix}` : '';
     const hint = String(acc.hint || '');
     return `${icon}[${todayCount}单]${onlineBadge} ${acc.remark || acc.account} Y${y}/U${u}/Z${z}${tag}${hint}`;
+}
+
+function buildDingdingDeviceAccount(device) {
+    const status = String(device.status_desc || '').trim()
+        || ['未知','待编辑','待审核','审核中','上架中','租赁中','待上架','审核失败'][device.status] || '未知';
+    const label = {
+        '上架中': '已上架', '上架': '已上架', '可租': '已上架', '待出租': '已上架',
+        '租赁中': '出租中', '待上架': '已下架', '下架': '已下架'
+    }[status] || status;
+    return { game_id: 'GTA6', account: device.game_account, remark: device.device_no || device.game_account.slice(7),
+        today_order_count: Number(device.today_order_count || 0), youpin: label };
 }
 
 function getDingdingChanges(payload = {}) {
@@ -137,11 +154,14 @@ function buildDingdingMessage(payload) {
         lines.push('');
     }
     const totalPaid = accounts.reduce((sum, acc) => sum + Number(acc && acc.today_order_count || 0), 0);
+    const devices = accounts.filter(acc => acc.game_id === 'GTA6');
+    const devicePaid = devices.reduce((sum, acc) => sum + acc.today_order_count, 0);
+    const breakdown = devices.length ? ` 单（游戏账号 ${totalPaid - devicePaid} 单，主机 ${devicePaid} 单）` : '';
     const orderCountLabel = String(payload.order_count_label || '今日订单').trim() || '今日订单';
     if (summaryChanges.order_count) {
-        lines.push(`🔄 📈 ${orderCountLabel}: ${Number(summaryChanges.order_count.before || 0)} → ${totalPaid}`);
+        lines.push(`🔄 📈 ${orderCountLabel}: ${Number(summaryChanges.order_count.before || 0)} → ${totalPaid}${breakdown}`);
     } else {
-        lines.push(`📈 ${orderCountLabel}: ${totalPaid}`);
+        lines.push(`📈 ${orderCountLabel}: ${totalPaid}${breakdown}`);
     }
     if (summaryChanges.master_total) {
         lines.push(`🔄 📦 商品主档总数: ${Number(summaryChanges.master_total.before || 0)} → ${Number(payload.master_total || 0)}个`);
@@ -165,13 +185,25 @@ function buildDingdingMessage(payload) {
     lines.push('');
     const authorizedPlatforms = normalizeAuthorizedPlatforms(payload.authorized_platforms);
     lines.push(`📋 商品主档明细 (${Number(payload.master_total || accounts.length || 0)}个)`);
-    lines.push('');
-    accounts.forEach((acc) => {
-        const change = accountChanges[accountIdentityKey(acc)] || null;
-        const prefix = change && change.type === 'added' ? '🆕 ' : (change ? '🔄 ' : '');
-        const detail = change && String(change.detail || '').trim() ? `〔${String(change.detail).trim()}〕` : '';
-        lines.push(`${prefix}${buildDingdingAccountLine(acc, authorizedPlatforms)}${detail}`);
-    });
+    const groupNames = new Map([['GTA6','主机租赁'], ['4','CS2'], ['1','王者荣耀'], ['2','和平精英'], ['3','枪战王者'], ['other','其他游戏']]);
+    const groups = new Map();
+    for (const acc of accounts) {
+        const id = String(acc.game_id || '1');
+        const key = groupNames.has(id) ? id : 'other';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(acc);
+    }
+    for (const [key, label] of groupNames) {
+        const rows = groups.get(key);
+        if (!rows) continue;
+        lines.push('', `${label}（${rows.length} ${key === 'GTA6' ? '台' : '个'}）`);
+        for (const acc of rows) {
+            const change = accountChanges[accountIdentityKey(acc)];
+            const prefix = change && change.type === 'added' ? '🆕 ' : (change ? '🔄 ' : '');
+            const detail = change && String(change.detail || '').trim() ? `〔${String(change.detail).trim()}〕` : '';
+            lines.push(`${prefix}${buildDingdingAccountLine(acc, authorizedPlatforms)}${detail}`);
+        }
+    }
 
     const removedAccounts = Array.isArray(changes.removed_accounts) ? changes.removed_accounts : [];
     if (removedAccounts.length > 0) {
@@ -179,7 +211,7 @@ function buildDingdingMessage(payload) {
         lines.push('➖ 已移出商品主档');
         removedAccounts.forEach((row) => {
             const name = String((row && (row.display_name || row.account)) || '').trim() || '未知账号';
-            const account = String((row && row.account) || '').trim();
+            const account = row?.game_id === 'GTA6' ? '' : String((row && row.account) || '').trim();
             lines.push(`• ${name}${account ? `（${account}）` : ''}`);
         });
     }
@@ -282,6 +314,7 @@ module.exports = {
     buildDingdingMessage,
     buildDingdingCooldownPreview,
     buildDingdingAccountLine,
+    buildDingdingDeviceAccount,
     normalizeAuthorizedPlatforms,
     accountIdentityKey,
     pickIcon,

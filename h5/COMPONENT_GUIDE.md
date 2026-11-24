@@ -47,7 +47,7 @@
 | Button | `.btn` + `.btn-primary/.btn-ghost/.btn-ok/.btn-danger` | 登录、分页、普通操作 | 只增加有明确语义的变体 |
 | PageAction | `.btn-page-action` | 商品、订单、统计、定价、板卡、维护、风控 | 页面头部主操作统一使用 |
 | CardAction | `.btn-card-action` | 商品卡片、个人中心卡片、阶梯定价账号卡片 | 危险操作使用语义变体 |
-| 主机商品变体 | GameTabs、GameAvatar、OrderCard、CardAction、Sheet、ProductIncomeSummary | 商品「全部」和 GTA6 | 以设备类型切换信息插槽，仅提供本地采购、成本和明细；无订单收入和账号操作；复用手机、桌面布局 |
+| 主机商品变体 | GameTabs、GameAvatar、OrderCard、CardAction、Sheet、ProductIncomeSummary | 商品「全部」和 GTA6 | 以设备类型切换信息插槽，展示设备编号、状态、采购与成本；出租中且有已同步租期时，复用账号卡的租赁倒计时，连续续租延长显示时间 |
 | 主机订单与收益变体 | GameTabs、GameAvatar、OrderCard、QuickFilters、Pager、统计看板指标/资产卡、成本明细 Sheet | 订单页与统计看板「全部」和 GTA6 | GTA6 是主机业务页签；主机订单复用 `.order-card-line` 展示游戏名、编号和已知的首租／续租，不展示固定渠道；通过源游戏 ID 取简称和图标，未配置则用源游戏名；长名称和编号允许换行；结算、退款和统计沿用原口径 |
 | FeatureSwitch | `.feature-switch` `.feature-switch-copy` `.feature-switch-track` | 页面级功能启停 | 使用原生 checkbox + `role="switch"`，页面只绑定状态和保存行为 |
 | HeaderTabs | `.orders-tabs-row` `.orders-tabs` `.orders-tab.header-tab` | 订单、板卡、风控、渠道价格 Sheet；商品页只复用容器 | 数据项和激活状态可变 |

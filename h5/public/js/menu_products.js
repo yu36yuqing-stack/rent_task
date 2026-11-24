@@ -1923,11 +1923,13 @@
                 <p class="square-title">主机信息</p><p class="square-line">编号：${escapeAttr(item.device_no) || '—'}</p>
                 <p class="square-line">机型：${escapeAttr(item.model_name) || '—'}</p>
                 <p class="square-line">供货价：${price}</p>
-                <p class="square-line">最长租期：${item.max_hours == null ? '—' : escapeAttr(String(item.max_hours)) + ' 小时'}</p></div>
+                <p class="square-line">最长租期：${item.max_hours == null ? '—' : escapeAttr(String(item.max_hours)) + ' 小时'}</p>
+                ${buildRentCountdownHtml(item)}</div>
                 <div class="info-square"><p class="square-title">采购与成本</p>${buildPurchaseBriefHtml(item, false)}
                 <p class="square-line" title="${escapeAttr(item.synced_at)}">同步：${escapeAttr(formatBlacklistTimeForCard(item.synced_at))}</p></div></div>
               <div class="ops"><button class="btn btn-ghost btn-card-action product-op-btn" data-op="device-cost">采购与成本</button></div>`;
             node.querySelector('[data-op="device-cost"]').addEventListener('click', () => openMoreOpsSheet(item));
+            state.cardNodeMap[productIdentityKey(item)] = node;
             root.appendChild(node);
             return;
           }

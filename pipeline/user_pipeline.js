@@ -459,6 +459,7 @@ async function runUserPipelineAfterSync(user, syncOut = null, options = {}) {
                 report_owner: String(user.name || user.account || '').trim(),
                 recentActions,
                 master_total: activeRows.length,
+                include_rental_devices: Boolean(syncOut?.rental_devices && !syncOut.rental_devices.skipped),
                 sync_anomalies: syncAnomalies
             });
             notifyResult = await notifyUserByPayload(user, payload);

@@ -3,7 +3,8 @@ const path = require('path');
 const { sendTelegramMessage } = require('./telegram/tg_notify.js');
 const { sendDingdingMessage } = require('./dingding/ding_notify.js');
 const { buildTelegramMessage } = require('./telegram/tg_style.js');
-const { buildDingdingMessage } = require('./dingding/ding_style.js');
+const { buildDingdingMessage, buildDingdingDeviceAccount } = require('./dingding/ding_style.js');
+const { listDevicesWithActivity } = require('../product/rental_device_activity');
 const {
     buildDingdingReportDeliveryDecision,
     recordDingdingReportCheckpoint
@@ -392,6 +393,71 @@ async function sendDingding(message, options = {}) {
     return true;
 }
 
+async function deliverDingdingReport(uid, basePayload, dingCfg) {
+    let payload = basePayload;
+    if (payload.ok && payload.include_rental_devices) {
+        const devices = (await listDevicesWithActivity(uid, payload.order_count_mode)).map(buildDingdingDeviceAccount);
+        const accounts = payload.accounts || [];
+        payload = {
+            ...payload,
+            accounts: accounts.concat(devices),
+            master_total: (payload.master_total ?? accounts.length) + devices.length,
+            allNormal: payload.allNormal && devices.every(device => ['已上架', '出租中', '已下架'].includes(device.youpin))
+        };
+    }
+    const decision = await buildDingdingReportDeliveryDecision({
+        userId: uid,
+        payload,
+        webhook: dingCfg.webhook
+    });
+    const dingChannelBase = {
+        content_hash: decision.content_hash,
+        destination_hash: decision.destination_hash,
+        fingerprint_version: decision.fingerprint_version
+    };
+    if (!decision.should_send) {
+        return {
+            status: 'skipped_unchanged',
+            reason: 'unchanged',
+            based_on_task_id: decision.previous && decision.previous.task_id
+                ? decision.previous.task_id
+                : '',
+            snapshot_task_id: decision.previous && decision.previous.snapshot_task_id
+                ? decision.previous.snapshot_task_id
+                : (decision.previous && decision.previous.snapshot && decision.previous.task_id
+                    ? decision.previous.task_id
+                    : ''),
+            ...dingChannelBase
+        };
+    }
+    const sentCheckpoint = {
+        ...dingChannelBase,
+        snapshot: decision.snapshot
+    };
+    const dingMsg = buildDingdingMessage({
+        ...payload,
+        dingding_changes: decision.changes
+    });
+    await sendDingdingMessage(dingMsg, { webhook: dingCfg.webhook, secret: dingCfg.secret || '' });
+    let checkpointResult = null;
+    let checkpointError = '';
+    try {
+        checkpointResult = await recordDingdingReportCheckpoint(uid, sentCheckpoint);
+    } catch (error) {
+        checkpointError = String(error && error.message ? error.message : error);
+        console.warn(`[Report] 钉钉通知指纹保存失败 user=${uid}: ${checkpointError}`);
+    }
+    return {
+        status: 'sent',
+        reason: decision.reason,
+        checkpoint_recorded: Boolean(checkpointResult && checkpointResult.recorded),
+        checkpoint_error: checkpointError,
+        dedup_error: decision.dedup_error || '',
+        change_count: Number((decision.changes && decision.changes.change_count) || 0),
+        ...sentCheckpoint
+    };
+}
+
 async function notifyUserByPayload(user, payload) {
     const cfg = user && user.notify_config && typeof user.notify_config === 'object' ? user.notify_config : {};
     const tgCfg = cfg.telegram || {};
@@ -441,65 +507,7 @@ async function notifyUserByPayload(user, payload) {
     }
     if (dingCfg.webhook) {
         configuredCount += 1;
-        const decision = await buildDingdingReportDeliveryDecision({
-            userId: uid,
-            payload: payloadWithAuth,
-            webhook: dingCfg.webhook
-        });
-        const dingChannelBase = {
-            content_hash: decision.content_hash,
-            destination_hash: decision.destination_hash,
-            fingerprint_version: decision.fingerprint_version
-        };
-        if (!decision.should_send) {
-            channels.dingding = {
-                status: 'skipped_unchanged',
-                reason: 'unchanged',
-                based_on_task_id: decision.previous && decision.previous.task_id
-                    ? decision.previous.task_id
-                    : '',
-                snapshot_task_id: decision.previous && decision.previous.snapshot_task_id
-                    ? decision.previous.snapshot_task_id
-                    : (decision.previous && decision.previous.snapshot && decision.previous.task_id
-                        ? decision.previous.task_id
-                        : ''),
-                ...dingChannelBase
-            };
-        } else {
-            const sentCheckpoint = {
-                ...dingChannelBase,
-                snapshot: decision.snapshot
-            };
-            const dingMsg = buildDingdingMessage({
-                ...payloadWithAuth,
-                dingding_changes: decision.changes
-            });
-            jobs.push({
-                channel: 'dingding',
-                promise: sendDingdingMessage(dingMsg, {
-                    webhook: dingCfg.webhook,
-                    secret: dingCfg.secret || ''
-                }).then(async () => {
-                    let checkpointResult = null;
-                    let checkpointError = '';
-                    try {
-                        checkpointResult = await recordDingdingReportCheckpoint(uid, sentCheckpoint);
-                    } catch (error) {
-                        checkpointError = String(error && error.message ? error.message : error);
-                        console.warn(`[Report] 钉钉通知指纹保存失败 user=${uid}: ${checkpointError}`);
-                    }
-                    return {
-                        status: 'sent',
-                        reason: decision.reason,
-                        checkpoint_recorded: Boolean(checkpointResult && checkpointResult.recorded),
-                        checkpoint_error: checkpointError,
-                        dedup_error: decision.dedup_error || '',
-                        change_count: Number((decision.changes && decision.changes.change_count) || 0),
-                        ...sentCheckpoint
-                    };
-                })
-            });
-        }
+        jobs.push({ channel: 'dingding', promise: deliverDingdingReport(uid, payloadWithAuth, dingCfg) });
     } else {
         channels.dingding = { status: 'not_configured' };
     }

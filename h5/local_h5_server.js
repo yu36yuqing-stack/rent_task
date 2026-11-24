@@ -282,6 +282,7 @@ function escapeRegExp(text) {
 }
 
 const rentalDevices = require('../product/rental_device_service');
+const { listDevicesWithActivity } = require('../product/rental_device_activity');
 const DEVICE_COST_ROUTES = new Set(['/api/products/purchase-config', '/api/products/account-cost/create', '/api/products/account-cost/delete']);
 
 async function readJsonBody(req) {
@@ -693,7 +694,7 @@ async function handleProducts(req, res, urlObj) {
     const assetStatusRaw = String(urlObj.searchParams.get('asset_status') || 'active').trim().toLowerCase();
     const assetStatus = assetStatusRaw === 'sold' ? 'sold' : 'active';
     const devices = (isAllGame || gameName === 'GTA6') && assetStatus === 'active'
-        ? await rentalDevices.listDeviceCards(user.id) : [];
+        ? await listDevicesWithActivity(user.id) : [];
     const rentingDevices = devices.filter(d => d.status === 5);
     const visibleDevices = filter === 'renting' ? rentingDevices : filter === 'restricted' ? [] : devices;
     if (gameName === 'GTA6') {
