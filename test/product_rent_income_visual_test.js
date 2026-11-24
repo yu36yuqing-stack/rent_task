@@ -37,7 +37,9 @@ const scenarios = [
 
 function fixture(game, scenario) {
     return { ...game,
-        game_account: '1072370802', display_name: '商品租金与总成本对比', purchase_date: '2026-01-01',
+        game_account: game.game_id === '4' ? 'lokili8201' : '1072370802',
+        display_name: game.game_id === '4' ? '5E✅禁止官匹🔥爪子刀虎牙' : '商品租金与总成本对比',
+        purchase_date: '2026-01-01',
         channel_status: { uuzuhao: '下架', uhaozu: '上架', zuhaowang: '租赁中' },
         price_ladder: { uuzuhao: { current_tier: 1, hour_price: 1.9 },
             uhaozu: { current_tier: 2, hour_price: 2.3 }, zuhaowang: { current_tier: 3, hour_price: 123.45 } },
@@ -49,18 +51,19 @@ function fixture(game, scenario) {
     };
 }
 
-async function renderFixture(page, item, sold = false) {
-    await page.evaluate(({ item, sold }) => {
+async function renderFixture(page, items, sold = false, gameTab) {
+    const list = Array.isArray(items) ? items : [items];
+    await page.evaluate(({ list, sold, gameTab }) => {
         state.user = { id: 12, name: 'Fixture user', account: 'fixture' };
         state.token = 'fixture-only';
         state.currentMenu = sold ? 'products_sold' : 'products';
-        state.product_game_name = item.game_name;
+        state.product_game_name = gameTab;
         state.userRules.order_off_mode = 'rolling_24h';
-        state.list = [item];
-        state.total = 1;
+        state.list = list;
+        state.total = list.length;
         state.page = 1;
         render();
-    }, { item, sold });
+    }, { list, sold, gameTab: gameTab || list[0].game_name });
     await page.waitForSelector('#listView .product-card');
 }
 
@@ -95,6 +98,7 @@ async function readCardLayout(page) {
                     || textBounds.some((rect) => rect.left < container.left - 1 || rect.right > container.right + 1) };
         }).filter((result) => result.clipped || result.outside);
         return {
+            title: card.querySelector('.product-role-text').textContent,
             documentWidth: document.documentElement.scrollWidth, viewport: window.innerWidth,
             card: box(card), base: box(base), channel: box(channel), squares: box(squares), ops: box(ops),
             cost: box(cost), income: box(income), countdown: box(countdown), copy: box(copy),
@@ -194,6 +198,7 @@ async function main() {
                     const item = fixture(game, scenario);
                     await renderFixture(page, item);
                     const layout = await readCardLayout(page);
+                    assert.strictEqual(layout.title, game.game_id === '4' ? item.game_account : item.display_name);
                     try {
                         verifyActiveLayout(layout, width, game, scenario, item);
                     } catch (error) {
@@ -215,6 +220,7 @@ async function main() {
                     lifecycle_profit_amount: 668.5, sold_at: '2026-10-21 12:00:00', asset_status: 'sold' };
                 await renderFixture(page, soldItem, true);
                 const soldLayout = await readCardLayout(page);
+                assert.strictEqual(soldLayout.title, game.game_id === '4' ? soldItem.game_account : soldItem.display_name);
                 const context = `${width}/${game.game_name}/sold`;
                 assert.strictEqual(soldLayout.incomeCount, 0, `${context}: sold cards must not gain rental income row`);
                 assert.strictEqual(soldLayout.costCount, 0, `${context}: sold purchase brief must retain its original markup`);
@@ -225,15 +231,30 @@ async function main() {
                 assert(soldLayout.documentWidth <= width, `${context}: no horizontal page overflow`);
                 results.push({ width, game: game.game_name, scenario: 'sold-unchanged', sold: true, ...soldLayout });
             }
+            const cs2 = fixture(games[3], scenarios[0]);
+            const other = fixture(games[0], scenarios[0]);
+            await renderFixture(page, [other, cs2], false, '全部');
+            const titles = await page.$$eval('#listView .product-role-text', nodes => nodes.map(node => node.textContent));
+            assert.deepStrictEqual(titles, [other.display_name, 'lokili8201']);
+            await page.click('#listView .product-card:nth-child(2) .copy-btn');
+            assert.strictEqual(await page.evaluate(() => window.__copiedAccounts.pop()), 'lokili8201');
+            await renderFixture(page, [
+                { ...cs2, game_name: '', game_account: '' },
+                { ...other, display_name: '', role_name: '角色名' },
+                { ...other, display_name: '', role_name: '', game_account: 'fallback-account' }
+            ], false, '全部');
+            assert.deepStrictEqual(await page.$$eval('#listView .product-role-text', nodes => nodes.map(node => node.textContent)),
+                ['—', '角色名', 'fallback-account']);
         }
         assert.deepStrictEqual(errors, [], 'no runtime errors while rendering all cases');
         assert.deepStrictEqual(apiRequests, [], 'no API calls, especially no real business writes');
         fs.writeFileSync(path.join(outputDir, 'visual-results.json'), JSON.stringify({
             activeCases: viewports.length * games.length * scenarios.length,
             soldCases: viewports.length * games.length,
+            mixedTitleCases: viewports.length * 2,
             apiRequests, errors, results
         }, null, 2) + '\n');
-        console.log(`[PASS] product rental income visual: ${results.length} cases (${viewports.length * games.length * scenarios.length} active + ${viewports.length * games.length} sold), 4 games x 6 viewports, adjacent vertical amounts, copy/actions/channel/countdown regression, no API calls`);
+        console.log(`[PASS] product rental income visual: ${results.length} single-card cases + ${viewports.length * 2} mixed-list title cases, 4 games x 6 viewports, copy/actions/channel/countdown regression, no API calls`);
     } finally {
         try {
             await browser.close();

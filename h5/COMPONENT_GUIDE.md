@@ -53,7 +53,7 @@
 | HeaderTabs | `.orders-tabs-row` `.orders-tabs` `.orders-tab.header-tab` | 订单、板卡、风控、渠道价格 Sheet；商品页只复用容器 | 数据项和激活状态可变 |
 | QuickFilters | `.orders-quick` `.orders-quick-item.header-quick-tab` | 订单二级筛选 | 默认近24小时；切换游戏保留已选时间范围 |
 | HeadSummary | `.head-summary-text` | 商品、订单、统计、板卡、维护、阶梯定价 | 文案可变，视觉层级固定；阶梯定价的实际北京时间区间放在帮助Sheet和渠道详情中，主列表不重复已选周期 |
-| OrderCard | `.order-card` `.order-card-top` `.order-card-role` `.order-card-line` | 订单、商品及相关列表 | 通过附加类增加领域差异 |
+| OrderCard | `.order-card` `.order-card-top` `.order-card-role` `.order-card-line` | 订单、商品及相关列表 | 通过附加类增加领域差异。商品卡按商品自身的游戏选择标题，CS2 显示 Steam 账号，缺失时显示「—」 |
 | StatusTag | `.chip` `.order-chip` `.plat` 及已有语义变体 | 商品、订单、统计状态 | 新状态必须保留统一语义 |
 | Pager | `.pager` `.page-info` + `.btn` | 商品、订单、风控 | 页码和禁用状态可变 |
 | Overlay | `.overlay` `.overlay-card` | 提示和确认类遮罩 | 内容可变，不重建遮罩层 |

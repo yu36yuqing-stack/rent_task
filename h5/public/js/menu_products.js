@@ -1951,6 +1951,7 @@
           const account = String(item.game_account || '').trim();
           const identityKey = productIdentityKey(item);
           const isCs2 = isCs2Product(item);
+          const cardTitle = isCs2 ? (account || '—') : (item.display_name || item.role_name || account);
           const querying = Boolean(isCs2
             ? state.steamGuardLoadingMap[identityKey]
             : (state.onlineLoadingMap[identityKey] || state.forbiddenLoadingMap[identityKey]));
@@ -1980,7 +1981,7 @@
           node.style.animationDelay = `${Math.min(idx * 35, 220)}ms`;
           node.innerHTML = `
             <div class="order-card-top product-card-top">
-              <p class="order-card-role product-card-role">${buildGameAvatarHtml(item)}<span class="product-role-text">${item.display_name || item.role_name || item.game_account}</span></p>
+              <p class="order-card-role product-card-role">${buildGameAvatarHtml(item)}<span class="product-role-text">${escapeAttr(cardTitle)}</span></p>
               <div class="card-top-chips">
                 ${soldView ? '' : `<span data-slot="online-chip">${buildOnlineChipHtml(identityKey)}</span>`}
                 ${soldView ? '' : `<span data-slot="forbidden-chip">${buildForbiddenChipHtml(identityKey)}</span>`}
@@ -1993,8 +1994,8 @@
             <div class="info-squares">
               <div class="info-square base-square">
                 <div class="account-main">
-                  <div class="account">账号：${item.game_account}</div>
-                  ${soldView ? '' : `<button class="copy-btn" data-copy="${item.game_account}">复制</button>`}
+                  <div class="account">账号：${escapeAttr(item.game_account)}</div>
+                  ${soldView ? '' : `<button class="copy-btn" data-copy="${escapeAttr(item.game_account)}">复制</button>`}
                 </div>
                 ${buildPurchaseBriefHtml(item, soldView)}
                 ${soldView ? `<p class="square-line">售出价：¥${Number(item.sold_price || 0).toFixed(2)}</p><p class="square-line">生命周期总收益：¥${Number(item.lifecycle_profit_amount || 0).toFixed(2)}</p>` : `<p class="square-line">${orderCountLabelByMode()}：${item.today_paid_count}</p>`}
