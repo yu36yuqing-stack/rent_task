@@ -1,9 +1,9 @@
 (() => {
   const games = [
     { key: '全部', label: '全部' },
-    { key: 'WZRY', label: '王者荣耀', icon: '/assets/game_icons/wzry.webp' },
+    { key: 'WZRY', label: '王者', icon: '/assets/game_icons/wzry.webp' },
     { key: 'GTA6', label: 'GTA6', icon: '/assets/game_icons/gta6.svg' },
-    { key: '和平精英', label: '和平精英', icon: '/assets/game_icons/hpjy.png' },
+    { key: '和平精英', label: '和平', icon: '/assets/game_icons/hpjy.png' },
     { key: 'CSGO', label: 'CS2', icon: '/assets/game_icons/csgo.png?v=20260425-soldier' },
     { key: 'CFM', label: 'CFM', icon: '/assets/game_icons/cfm.png' }
   ];

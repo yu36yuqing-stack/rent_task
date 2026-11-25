@@ -32,7 +32,7 @@ async function main() {
         await page.evaluateOnNewDocument(auth => sessionStorage.setItem('h5_auth_bundle', JSON.stringify(auth)),
             { token: createAccessToken(user), user: { id: user.id, account: user.account, user_type: user.user_type } });
         await page.coverage.startJSCoverage({ resetOnNavigation: false, includeRawScriptCoverage: true });
-        const all = ['全部', '王者荣耀', 'GTA6', '和平精英', 'CS2', 'CFM'];
+        const all = ['全部', '王者', 'GTA6', '和平', 'CS2', 'CFM'];
         const sold = all.filter(label => label !== 'GTA6');
         const pricing = sold.slice(1);
         for (const width of [375, 1280]) {
@@ -47,21 +47,28 @@ async function main() {
                 await page.waitForSelector(tabs, { visible: true, timeout: 8000 });
                 assert.deepEqual(await page.$$eval(tabs, nodes => nodes.map(n => n.textContent.trim())), labels);
                 assert.equal(await page.$eval(tabs + '.active', n => n.textContent.trim()), labels[0]);
-                const cs2 = '[data-' + scope + '-game="CSGO"]';
-                const [response] = await Promise.all([
-                    page.waitForResponse(r => {
-                        const url = new URL(r.url());
-                        return url.pathname === api && url.searchParams.get('game_name') === 'CSGO';
-                    }, { timeout: 6000 }),
-                    page.locator(cs2).click()
-                ]);
-                assert.equal(response.status(), 200);
-                if (menu === 'products_sold') assert.equal(new URL(response.url()).searchParams.get('asset_status'), 'sold');
-                await page.waitForSelector(cs2 + '.active');
-                assert.equal(await page.$$eval(tabs + '.active', nodes => nodes.length), 1);
-                assert(await page.$eval(cs2 + ' img', img => img.complete && img.naturalWidth > 0));
+                for (const [label, key] of [['和平', '和平精英'], ['王者', 'WZRY'], ['CS2', 'CSGO']]) {
+                    await page.waitForSelector('#globalLoading', { hidden: true });
+                    const tab = '[data-' + scope + '-game="' + key + '"]';
+                    assert.equal(await page.$eval(tab, n => n.textContent.trim()), label);
+                    const [response] = await Promise.all([
+                        page.waitForResponse(r => {
+                            const url = new URL(r.url());
+                            return url.pathname === api && url.searchParams.get('game_name') === key;
+                        }, { timeout: 6000 }),
+                        page.locator(tab).click()
+                    ]);
+                    assert.equal(response.status(), 200);
+                    if (menu === 'products_sold') assert.equal(new URL(response.url()).searchParams.get('asset_status'), 'sold');
+                    await page.waitForSelector(tab + '.active');
+                    assert.equal(await page.$$eval(tabs + '.active', nodes => nodes.length), 1);
+                    await page.waitForFunction(selector => {
+                        const img = document.querySelector(selector + ' img');
+                        return img && img.complete && img.naturalWidth > 0;
+                    }, { timeout: 6000 }, tab);
+                }
                 assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
-                console.log('[PASS]', width, menu, 'CS2 → CSGO');
+                console.log('[PASS]', width, menu, '和平/王者/CS2');
             }
         }
         assert.deepEqual(errors, []);

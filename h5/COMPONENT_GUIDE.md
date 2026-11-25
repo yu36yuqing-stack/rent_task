@@ -62,7 +62,7 @@
 | Toast | `.toast` 及 `.toast-detail` 反馈变体 | 全局轻提示和渠道错误详情 | 普通提示定时关闭；详情模式允许 `durationMs=0` 持续展示，并由用户点击关闭 |
 | GlobalLoading | `.global-loading` 及其子元素 | 全局请求等待 | 文案和可见状态可变 |
 | PullRefresh | `.pull-refresh` `.pull-refresh-inner` `.pull-spinner` | 商品列表下拉刷新 | 遵循固定 Loading 文案规则 |
-| GameTabs | `window.GameTabs.render(scope, selected, options)` 复用 `.stats-game-tabs` 与 `.stats-game-tab` | 商品、已售商品、订单、统计看板、阶梯定价共用「全部、王者荣耀、GTA6、和平精英、CS2、CFM」顺序。已售商品省略 GTA6，定价省略全部和 GTA6。CS2 的查询值为 CSGO，选中态和点击查询使用游戏标识。 |
+| GameTabs | `window.GameTabs.render(scope, selected, options)` 复用 `.stats-game-tabs` 与 `.stats-game-tab` | 商品、已售商品、订单、统计看板、阶梯定价共用「全部、王者、GTA6、和平、CS2、CFM」顺序。已售商品省略 GTA6，定价省略全部和 GTA6。「王者」「和平」「CS2」分别使用 `WZRY`、`和平精英`、`CSGO` 选中和查询；简称仅用于页签展示。 |
 | ClipboardCopy | `copyTextToClipboard(text)` + `.copy-btn` | 商品账号、渠道价格错误日志 | 复制行为统一回退，调用方只负责反馈文案 |
 
 ## 5. 试用组件与待收口能力
