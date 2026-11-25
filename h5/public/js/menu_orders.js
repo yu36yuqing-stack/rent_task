@@ -544,14 +544,6 @@
         clearInterval(o.countdown_timer_id);
         o.countdown_timer_id = 0;
       }
-      const games = [
-        { k: '全部', t: '全部', icon: '' },
-        { k: 'WZRY', t: '王者荣耀', icon: '/assets/game_icons/wzry.webp' },
-        { k: 'GTA6', t: 'GTA6', icon: '/assets/game_icons/gta6.svg' },
-        { k: '和平精英', t: '和平精英', icon: '/assets/game_icons/hpjy.png' },
-        { k: 'CFM', t: 'CFM', icon: '/assets/game_icons/cfm.png' },
-        { k: 'CSGO', t: 'CSGO', icon: '/assets/game_icons/csgo.png?v=20260425-soldier' }
-      ];
       const tabs = [
         { k: 'all', t: '全部' },
         { k: 'progress', t: '租赁中' },
@@ -565,12 +557,7 @@
         { k: 'last30', t: '近30天' }
       ];
       if (els.orderGameTabs) {
-        els.orderGameTabs.innerHTML = games.map((x) => `
-          <button class="stats-game-tab ${String(o.game_name || '全部') === x.k ? 'active' : ''}" data-order-game="${x.k}" type="button">
-            ${x.icon ? `<span class="game-avatar"><img src="${x.icon}" alt="${x.t}" loading="lazy" decoding="async"></span>` : ''}
-            <span class="stats-game-tab-text">${x.t}</span>
-          </button>
-        `).join('');
+        els.orderGameTabs.innerHTML = window.GameTabs.render('order', o.game_name || '全部');
       }
       if (els.orderSearchInput) {
         const hint = o.game_name === 'GTA6' ? '搜索主机名称、编号或订单号' : '搜索名称 / 账号';

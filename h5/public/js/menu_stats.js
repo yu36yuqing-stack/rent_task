@@ -317,14 +317,6 @@
 
     function renderStatsView() {
       const s = state.statsBoard || {};
-      const games = [
-        { k: '全部', t: '全部', icon: '' },
-        { k: 'WZRY', t: '王者荣耀', icon: '/assets/game_icons/wzry.webp' },
-        { k: 'GTA6', t: 'GTA6', icon: '/assets/game_icons/gta6.svg' },
-        { k: '和平精英', t: '和平精英', icon: '/assets/game_icons/hpjy.png' },
-        { k: 'CFM', t: 'CFM', icon: '/assets/game_icons/cfm.png' },
-        { k: 'CSGO', t: 'CSGO', icon: '/assets/game_icons/csgo.png?v=20260425-soldier' }
-      ];
       const periods = [
         { k: 'week', t: '本周' },
         { k: 'last7', t: '近7天' },
@@ -334,12 +326,7 @@
       const summary = s.summary || {};
       const devicesOnly = s.game_name === 'GTA6';
       if (els.statsGameTabs) {
-        els.statsGameTabs.innerHTML = games.map((x) => `
-          <button class="stats-game-tab ${String(s.game_name || '全部') === x.k ? 'active' : ''}" data-stats-game="${x.k}">
-            ${x.icon ? `<span class="game-avatar"><img src="${x.icon}" alt="${x.t}" loading="lazy" decoding="async"></span>` : ''}
-            <span class="stats-game-tab-text">${x.t}</span>
-          </button>
-        `).join('');
+        els.statsGameTabs.innerHTML = window.GameTabs.render('stats', s.game_name || '全部');
       }
       els.statsPeriods.innerHTML = periods.map((x) => `
         <button class="stats-period-btn ${s.period === x.k ? 'active' : ''}" data-stats-period="${x.k}">${x.t}</button>
@@ -361,9 +348,6 @@
           const device = x.product_kind === 'device';
           const sold = String(x.asset_status || '').trim() === 'sold';
           const soldMeta = sold ? ` · 已售${x.sold_at ? ` ${x.sold_at}` : ''}` : '';
-          const soldChips = sold ? `
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">生命周期总收益</p><p class="stats-acc-chip-v">¥${Number(x.lifecycle_profit_amount || 0).toFixed(2)}</p></div>
-          ` : '';
           const gaps = window.StatsMetrics.coverageText(x.operating_metrics);
           return `
           <div class="stats-acc-item ${sold ? 'is-sold' : ''}">
@@ -376,12 +360,6 @@
               ${window.StatsMetrics.render(x, { account: true, costDetail: !device || x.cost_detail_available })}
             </div>
             ${gaps ? `<p class="head-summary-text stats-acc-coverage">${escapeAttr(gaps)}</p>` : ''}
-            <div class="stats-acc-grid stats-acc-extra" aria-label="资产资料">
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">采购成本</p><p class="stats-acc-chip-v">${device && !x.cost_configured ? '未填写' : '¥'+Number(x.purchase_cost_amount || x.purchase_base || 0).toFixed(2)}</p></div>
-              ${device ? '' : `<div class="stats-acc-chip"><p class="stats-acc-chip-k">3单达成率</p><p class="stats-acc-chip-v">${(Number(x.target3_rate || 0) * 100).toFixed(1)}%</p></div>`}
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">零实收撤单</p><p class="stats-acc-chip-v">${Number(x.settled_orders?.cancelled || 0)}</p></div>
-              ${soldChips}
-            </div>
           </div>
         `;
         }).join('');

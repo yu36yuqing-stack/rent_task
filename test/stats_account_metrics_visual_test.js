@@ -63,7 +63,13 @@ const { createCoverageMap } = require('istanbul-lib-coverage');
                 const cards=[...document.querySelectorAll('.stats-acc-item')].map(n=>({
                     items:[...n.querySelectorAll('.stats-acc-metrics [data-metric]')].map(c=>({key:c.dataset.metric,
                         label:c.querySelector('.stats-acc-chip-k').textContent.replace('›',''),value:c.querySelector('.stats-acc-chip-v').textContent})),
-                    extras:n.querySelector('.stats-acc-extra').textContent,coverage:n.querySelector('.stats-acc-coverage')?.textContent||''}));
+                    totalChips:n.querySelectorAll('.stats-acc-chip').length,
+                    grids:n.querySelectorAll('.stats-acc-grid').length,
+                    rows:new Set([...n.querySelectorAll('.stats-acc-chip')].map(c=>Math.round(c.getBoundingClientRect().top))).size,
+                    columns:new Set([...n.querySelectorAll('.stats-acc-chip')].map(c=>Math.round(c.getBoundingClientRect().left))).size,
+                    hasExtra:Boolean(n.querySelector('.stats-acc-extra')),
+                    sold:Boolean(n.querySelector('.chip')),
+                    coverage:n.querySelector('.stats-acc-coverage')?.textContent||''}));
                 const first = document.querySelector('[data-stats-cost-detail]');first.click();
                 await new Promise(resolve=>setTimeout(resolve,0));
                 const costOpened=!els.statsCostDetailSheet.classList.contains('hidden');
@@ -116,8 +122,11 @@ const { createCoverageMap } = require('istanbul-lib-coverage');
             for(const card of result.cards)assert.deepEqual(card.items.map(x=>[x.key,x.label]),result.header.map(x=>[x.key,x.label]));
             assert.deepEqual(result.cards[0].items.map(x=>x.value),result.header.map(x=>x.value));
             assert.equal(result.cards[3].items.every(x=>x.value==='—'),true);
-            assert.match(result.cards[2].extras,/生命周期总收益/);
-            assert.match(result.cards[0].extras,/采购成本/);assert.match(result.cards[0].extras,/3单达成率/);
+            for(const card of result.cards){
+                assert.equal(card.totalChips,16);assert.equal(card.grids,1);
+                assert.equal(card.rows,4);assert.equal(card.columns,4);assert.equal(card.hasExtra,false);
+            }
+            assert.equal(result.cards[2].sold,true);
             assert.match(result.cards[0].coverage,/实收待核实/);
             assert.equal(result.costOpened,true);
             assert(result.calls.some(x=>x.url.includes('account-cost-detail')));
@@ -133,7 +142,7 @@ const { createCoverageMap } = require('istanbul-lib-coverage');
                 converter.applyCoverage(entry.rawScriptCoverage.functions);coverage.merge(converter.toIstanbul());
             }
             await page.close();
-            console.log('PASS shared 16 metrics, extras, cost detail, calendar, game filters and layout '+width+'px');
+            console.log('PASS strict 4x4 / 16 total cells, no extra row, cost detail, calendar and layout '+width+'px');
         }
         fs.writeFileSync(path.join(dir,'coverage.json'),JSON.stringify(coverage.toJSON()));
     }finally{await browser.close();}

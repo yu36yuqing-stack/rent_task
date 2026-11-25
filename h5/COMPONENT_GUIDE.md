@@ -62,6 +62,7 @@
 | Toast | `.toast` 及 `.toast-detail` 反馈变体 | 全局轻提示和渠道错误详情 | 普通提示定时关闭；详情模式允许 `durationMs=0` 持续展示，并由用户点击关闭 |
 | GlobalLoading | `.global-loading` 及其子元素 | 全局请求等待 | 文案和可见状态可变 |
 | PullRefresh | `.pull-refresh` `.pull-refresh-inner` `.pull-spinner` | 商品列表下拉刷新 | 遵循固定 Loading 文案规则 |
+| GameTabs | `window.GameTabs.render(scope, selected, options)` 复用 `.stats-game-tabs` 与 `.stats-game-tab` | 商品、已售商品、订单、统计看板、阶梯定价共用「全部、王者荣耀、GTA6、和平精英、CS2、CFM」顺序。已售商品省略 GTA6，定价省略全部和 GTA6。CS2 的查询值为 CSGO，选中态和点击查询使用游戏标识。 |
 | ClipboardCopy | `copyTextToClipboard(text)` + `.copy-btn` | 商品账号、渠道价格错误日志 | 复制行为统一回退，调用方只负责反馈文案 |
 
 ## 5. 试用组件与待收口能力
@@ -70,9 +71,7 @@
 
 | 候选组件 | 当前实现 | 已知问题 | 新调用方要求 |
 | --- | --- | --- | --- |
-| GameTabs | `.stats-game-tabs` `.stats-game-tab` `.stats-game-tab-text` | CSS 仍枚举商品、订单、统计、定价页面 ID；各页面分别渲染 | 复用同一 DOM 语义，并先提出通用选择器/渲染方案 |
-| GameCatalog | 各 `menu_*.js` 内的游戏名称和图标映射 | 商品、订单、定价、板卡等存在重复映射 | 不得新增第五份映射，先收口公共数据源 |
-| GameTabsRenderer | 商品、订单、统计、定价分别生成页签 HTML 和绑定事件 | 行为相近但数据属性不同 | 新页面不得复制模板，先设计公共渲染接口 |
+| GameCatalog | 卡片等场景的游戏名称和图标 | 游戏页签数据已集中在 GameTabs | 页签新增选项只修改 GameTabs 配置 |
 | ProductFilters | 商品页使用 `.stats-period-btn.product-filter-tab` | 与 HeaderTabs/周期筛选存在视觉复用，但契约仍是页面级组合 | 新页面不得照搬，应先确认归入 HeaderTabs 还是独立组件 |
 | SheetController | 各页面分别维护 Sheet 的打开、关闭、Loading 和结果状态 | 外壳统一但行为分散 | 可复用现有外壳；新增重复行为时应抽公共控制器 |
 | EmptyState | 多页面各自生成空数据内容 | 尚无统一结构和状态契约 | 新页面需先声明统一空状态方案 |
@@ -90,7 +89,7 @@
 - 入口：`window.StatsMetrics.items(source)`、`render(source, { account, costDetail })`、`coverageText(metrics)`，位于 `h5/public/js/ui/stats_metrics.js`。
 - 头部汇总和账号／主机卡片共用四组16项的名称、顺序、单位及空值格式；金额和公式由后端提供，不在组件内重算。来源为 `operating_metrics`，历史租金、区间实收和日均实收读取同层字段。
 - 直接复用 `.stats-kpi-card` 与 `.stats-acc-chip`，增加 `.stats-metric-value` 处理金额换行。账号周转率只显示 `7.2h/天`，不显示问号、帮助弹层或周转率百分比；未知显示“—”，明确零显示0，有时长缺口显示“≥”。
-- 账号变体只允许在累计总成本格附加已转义的成本详情身份；采购、3单达成率和已售生命周期信息位于资产资料区，不混入16项。
+- 账号变体只允许在累计总成本格附加已转义的成本详情身份；每张账号／主机卡片严格只有一个4行×4列的16项指标网格，不额外展示采购成本、3单达成率、零实收撤单数或生命周期收益的第五行。身份、采购日期和已售标记仍保留在卡片元信息中。
 - 使用方：统计看板汇总、普通游戏卡片、全部游戏的合并卡片、GTA6主机卡片。验证单资产逐项一致、多资产分母、缺资料、已售、成本详情、重复渲染和375px／1280px布局。
 
 ### 订单搜索（ListSearch 提交模式页面变体）
@@ -160,7 +159,7 @@
 
 | 需求元素 | 对应已有组件 | 决策 | 差异原因 | 影响页面 | 验证方式 |
 | --- | --- | --- | --- | --- | --- |
-| 示例：游戏切换 | GameTabs（试用） | 完成公共化后复用 | 需要支持新页面容器 | 商品/订单/统计/定价/新页面 | 手机、桌面、多游戏 |
+| 示例：游戏切换 | GameTabs | 直接复用 | 需要支持新页面容器 | 商品/订单/统计/定价/新页面 | 手机、桌面、多游戏 |
 
 决策只能使用以下值：
 

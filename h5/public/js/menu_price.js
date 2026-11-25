@@ -7,20 +7,6 @@ function normalizePricingGameName(gameName) {
   return 'WZRY';
 }
 
-function buildPricingGameAvatarHtml(gameName) {
-  const normalized = normalizePricingGameName(gameName);
-  const catalog = {
-    CSGO: { title: 'CSGO', className: 'game-avatar-csgo', src: '/assets/game_icons/csgo.png?v=20260425-soldier' },
-    '和平精英': { title: '和平精英', className: 'game-avatar-hpjy', src: '/assets/game_icons/hpjy.png' },
-    CFM: { title: 'CFM', className: 'game-avatar-cfm', src: '/assets/game_icons/cfm.png' },
-    WZRY: { title: '王者荣耀', className: 'game-avatar-wzry', src: '/assets/game_icons/wzry.webp' }
-  };
-  const item = catalog[normalized] || catalog.WZRY;
-  return `<span class="game-avatar ${item.className}" title="${item.title}" aria-label="${item.title}">
-    <img src="${item.src}" alt="${item.title}" loading="lazy" decoding="async">
-  </span>`;
-}
-
 function escapePricingHtml(text) {
   return String(text == null ? '' : text)
     .replace(/&/g, '&amp;')
@@ -39,15 +25,6 @@ function formatPricingMoney(value) {
 function formatPricingResultMoney(value) {
   const text = formatPricingMoney(value);
   return text ? `¥${text}` : '-';
-}
-
-function pricingGameOptions() {
-  return [
-    { game_name: 'WZRY', label: '王者荣耀' },
-    { game_name: '和平精英', label: '和平精英' },
-    { game_name: 'CFM', label: 'CFM' },
-    { game_name: 'CSGO', label: 'CSGO' }
-  ];
 }
 
 function normalizePricingCountMode(value) {
@@ -690,12 +667,7 @@ function applyPricingPayload(out, options = {}) {
 function renderPricingGameTabs() {
   if (!els.pricingGameTabs) return;
   const current = normalizePricingGameName(ensurePricingLadderState().game_name);
-  els.pricingGameTabs.innerHTML = pricingGameOptions().map((item) => `
-    <button class="stats-game-tab ${current === item.game_name ? 'active' : ''}" data-pricing-game="${item.game_name}" type="button">
-      ${buildPricingGameAvatarHtml(item.game_name)}
-      <span class="stats-game-tab-text">${escapePricingHtml(item.label)}</span>
-    </button>
-  `).join('');
+  els.pricingGameTabs.innerHTML = window.GameTabs.render('pricing', current, { includeAll: false, includeConsole: false });
   Array.from(els.pricingGameTabs.querySelectorAll('[data-pricing-game]')).forEach((node) => {
     node.onclick = () => {
       const nextGame = String(node.getAttribute('data-pricing-game') || '').trim();

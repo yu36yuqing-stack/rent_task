@@ -3823,7 +3823,6 @@
       text-overflow: clip;
     }
 
-    #statsView .stats-acc-extra { margin-top: 10px; }
     #statsView .stats-acc-coverage { margin: 6px 0 0; }
 
     .stats-missing-overlay {

@@ -62,6 +62,8 @@ function harness(initial = feature(), options = {}) {
         request: async () => { throw new Error('unexpected request'); }
     };
     vm.createContext(context);
+    const tabsPath = path.join(frontendRoot, 'ui/game_tabs.js');
+    vm.runInContext(fs.readFileSync(tabsPath, 'utf8'), context, { filename: tabsPath });
     vm.runInContext(helperSource, context, { filename: path.join(frontendRoot, 'ui/pricing_feature_state.js') });
     vm.runInContext(menuSource, context, { filename: path.join(frontendRoot, 'menu_price.js') });
     context.applyPricingPayload(payload(initial));
