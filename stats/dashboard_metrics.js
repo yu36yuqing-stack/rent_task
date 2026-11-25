@@ -196,4 +196,26 @@ function dashboardMetrics(assets, orders, costs, range, historicalRent, accountH
         held_days: heldDays
     };
 }
-module.exports = { dashboardMetrics, dailyAverages, orderTotals };
+function accountOperatingMetrics(assets, orders, costs, range, historicalTotals, incomeRows) {
+    const group = rows => {
+        const grouped = new Map();
+        for (const row of rows) {
+            if (!grouped.has(row.game_account)) grouped.set(row.game_account, []);
+            grouped.get(row.game_account).push(row);
+        }
+        return grouped;
+    };
+    const assetsByAccount = group(assets), ordersByAccount = group(orders);
+    const costsByAccount = group(costs), incomeByAccount = group(incomeRows);
+    const result = new Map();
+    for (const [account, scopedAssets] of assetsByAccount) {
+        const { daily_averages, ...metrics } = dashboardMetrics(
+            scopedAssets, ordersByAccount.get(account) || [], costsByAccount.get(account) || [],
+            range, historicalTotals.get(account) || 0, new Map(), incomeByAccount.get(account) || []
+        );
+        result.set(account, metrics);
+    }
+    return result;
+}
+
+module.exports = { dashboardMetrics, dailyAverages, orderTotals, accountOperatingMetrics };

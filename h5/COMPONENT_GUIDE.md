@@ -85,6 +85,14 @@
 
 “试用”不表示禁止使用，而是表示复用时必须优先补齐公共契约，不能继续复制。
 
+### 统计指标（StatsMetrics，试用）
+
+- 入口：`window.StatsMetrics.items(source)`、`render(source, { account, costDetail })`、`coverageText(metrics)`，位于 `h5/public/js/ui/stats_metrics.js`。
+- 头部汇总和账号／主机卡片共用四组16项的名称、顺序、单位及空值格式；金额和公式由后端提供，不在组件内重算。来源为 `operating_metrics`，历史租金、区间实收和日均实收读取同层字段。
+- 直接复用 `.stats-kpi-card` 与 `.stats-acc-chip`，增加 `.stats-metric-value` 处理金额换行。账号周转率只显示 `7.2h/天`，不显示问号、帮助弹层或周转率百分比；未知显示“—”，明确零显示0，有时长缺口显示“≥”。
+- 账号变体只允许在累计总成本格附加已转义的成本详情身份；采购、3单达成率和已售生命周期信息位于资产资料区，不混入16项。
+- 使用方：统计看板汇总、普通游戏卡片、全部游戏的合并卡片、GTA6主机卡片。验证单资产逐项一致、多资产分母、缺资料、已售、成本详情、重复渲染和375px／1280px布局。
+
 ### 订单搜索（ListSearch 提交模式页面变体）
 
 - 订单页四游戏共用 `OrderSearch` 控制器（`h5/public/js/ui/order_search.js`）及一个搜索表单，位于时间快捷筛选下、汇总上。复用 Field、Button/PageAction、HeadSummary、OrderCard、Pager 和 Toast；HeadSummary使用“总计XX笔（0收入占XX笔）”明确笔数，租赁中附“预计收入¥XX.XX”，沿用原订单金额估算口径。仅新增 `.list-search-submit` 的横向布局变体，不新增游戏分支、卡片、色板或内联样式。
@@ -137,7 +145,7 @@
 | --- | --- | --- |
 | Profile | `.profile-card` `.profile-field` `.profile-mode-inline` `.profile-threshold-*` | 基于 Panel、Field、ModeOption |
 | Pricing | `.pricing-ladder-head` `.pricing-title-row` `.pricing-settings-row` `.pricing-ladder-list` `.pricing-account-card` `.pricing-ladder-grid` `.pricing-copy-field` `.pricing-count-field` `.pricing-search-field` `.pricing-channel-tabs` `.pricing-package-table` `.pricing-ratio-panel` `.pricing-ratio-grid` `.pricing-ratio-example` `.pricing-ratio-result` | 基于 GameTabs、Panel、Card、Field、ListSearch、CardAction、PageAction、HeaderTabs、Sheet；四档统一时租输入、账号复制、当前游戏内搜索、渠道动态套餐列和按渠道套餐倍率表单为页面变体。标题与配置分层；订单周期和FeatureSwitch组成等宽两列，标签同基线、36px控件行同中心；select保留原生键盘行为，箭头用页面变体内缩14px，宽度最多192px。周期标签同行放置 `#pricingCountStatus.head-summary-text`，使用 `role=status`、`aria-live=polite`、`aria-atomic=true`，且由select的 `aria-describedby` 关联；`data-state=pending/effective/failed` 分别复用 `--warn/--ok/--danger`，仅显示“待生效/已生效/保存失败”，不另占一行。右侧FeatureSwitch只显示“已开启/已关闭”，不混入周期保存或重算状态。实际窗口仅放帮助Sheet/渠道详情，主列表无重复说明；无数据时隐藏空窗口。全号主的滚动24小时/每日06:00设置通过PricingFeatureState共用保存版本，保存中及配置未确认时禁用控件；选择后立即保持新选项和“待生效”，明确保存失败才回退；成功保存不等于已生效，关闭自动调价时新设置仍待生效；列表刷新失败不回退已确认保存，较旧响应及跨游戏旧请求不得覆盖。手机与桌面均不允许页面横向溢出。套餐倍率页直接复用 HeaderTabs、Panel、Field 与 PageAction，头部示例时租价只用于前端演算、不持久化，结果以普通文字紧跟各倍率字段展示；不在通用账号卡片写入渠道字段 |
-| Stats | `.stats-kpi-grid` 中的周转率显示每日赚钱小时与百分比。账号和主机卡片复用日均指标，经营日内零收入显示 ¥0.00，没有经营日显示 —。实收和时长缺口通过 `.head-summary-text` 显示，计算说明复用 HelpSheet。 | 统计看板所有游戏，375px 和 1280px 验证卡片、说明开关及空分母 |
+| Stats | 头部和账号／主机卡片复用四组16项指标；周转率只显示每日赚钱小时（`h/天`），不显示问号和百分比。经营日内零收入显示 ¥0.00，没有经营日显示 —。实收和时长缺口通过 `.head-summary-text` 显示。 | 统计看板所有游戏，375px 和 1280px 验证卡片、空分母和换行 |
 | Board | `.board-top-row` `.board-card` `.board-mobile-card` `.board-account-list` `.board-account-tag` | 基于 PageAction、Panel、Card、GameAvatar |
 | Maintenance | `.maintenance-top-row` `.maintenance-summary-grid` `.maintenance-kpi-card` `.maintenance-log-card` `.maintenance-status-pill`；清理记录使用 `.maintenance-detail-table` 统一展示数据表、日志文件和数据库压缩结果；页面及 Grid 子项必须允许收缩，移动端仅表格容器横向滚动并固定项目列；`640px` 以下顶部操作改为纵向、指标卡改为两列，`360px` 以下改为单列 | 基于 Panel、Card、StatusTag、Table、PageAction |
 | Products | `.product-filters` `.product-filter-tab` `.product-op-btn` `.product-op-btn-danger` `.product-income-brief` | 基于 HeaderTabs、Button、CardAction、OrderCard；ProductIncomeSummary复用原采购brief纵向Grid显示相邻总成本和累计租金，不新增横向指标块。`#listView .product-income-brief`仅允许容器收缩和长金额自然换行，保留原2px行距，不截断金额，不影响已售采购brief。仅在售卡片新增累计租金，已售卡片维持原展示 |

@@ -186,6 +186,12 @@
           };
         });
         showToast('删除成功');
+        try {
+          await loadStatsBoard();
+          renderStatsView();
+        } catch {
+          showToast('删除成功，统计刷新失败，请刷新报表');
+        }
       } catch (e) {
         alert(e.message || '删除失败');
       } finally {
@@ -327,7 +333,6 @@
       ];
       const summary = s.summary || {};
       const devicesOnly = s.game_name === 'GTA6';
-      const percent = value => Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : '—';
       if (els.statsGameTabs) {
         els.statsGameTabs.innerHTML = games.map((x) => `
           <button class="stats-game-tab ${String(s.game_name || '全部') === x.k ? 'active' : ''}" data-stats-game="${x.k}">
@@ -341,38 +346,10 @@
       `).join('');
       els.statsRangeText.textContent = `统计区间：${(s.range && s.range.start_date) || '-'} ~ ${(s.range && s.range.end_date) || '-'}`;
       const m = summary.operating_metrics || {};
-      const fmt = (n, places = 2) => Number.isFinite(n) ? n.toFixed(places) : '—';
-      const cash = n => Number.isFinite(n) ? '¥' + n.toFixed(2) : '—';
-      const rate = n => Number.isFinite(n) ? (n * 100).toFixed(1) + '%' : '—';
-      const turnover = Number.isFinite(m.turnover_hours)
-        ? (m.missing_held_hours ? '≥' : '') + fmt(m.turnover_hours, 1) + ' <span class="stats-kpi-unit">小时/天</span>' : '—';
-      const cards = [
-        ['累计总成本', cash(m.cumulative_cost)], ['累计租金', cash(summary.total_rec_amount_all_time)],
-        ['售出金额', cash(m.sale_amount)], ['回本进度', rate(m.payback)],
-        ['区间实收', cash(summary.amount_rec_sum)], ['日均实收', cash(summary.avg_daily_rec)],
-        ['单号日均实收', cash(m.income_per_asset_day)], ['年化租金回报', rate(m.annual_rent_return)],
-        ['有效订单', fmt(m.paid_orders, 0)], ['日均单数', fmt(m.paid_orders_per_day)],
-        ['单均实收', cash(m.income_per_order)], ['单均有效租期', m.hours_per_paid_order == null ? '—' : fmt(m.hours_per_paid_order, 1) + ' 小时'],
-        ['出单账号率', rate(m.rented_asset_rate)], ['账号周转率', turnover],
-        ['折算时租', cash(m.hourly_income)], ['撤单率', rate(m.cancellation_rate)]
-      ];
-      const help = document.getElementById('statsMetricHelpBtn');
-      els.statsKpiGrid.innerHTML = cards.map(([label, value]) => `
-        <div class="stats-kpi-card">
-          <p class="stats-kpi-key"${label === '账号周转率' ? ' data-turnover-label' : ''}>${label}</p>
-          <p class="stats-kpi-value${value.startsWith('¥') ? ' money' : ''}">${value}</p>
-          ${label === '账号周转率' && m.turnover_rate != null ? `<small>（${m.missing_held_hours ? '≥' : ''}${rate(m.turnover_rate)}）</small>` : ''}
-        </div>`).join('');
-      els.statsKpiGrid.querySelector('[data-turnover-label]').appendChild(help);
-      window.HelpSheet.bind(help, document.getElementById('statsMetricHelpSheet'), document.getElementById('statsMetricHelpCloseBtn'));
-      const gaps = [];
-      if (m.missing_hours) gaps.push(`${m.missing_hours} 笔有收入订单时长待核实`);
-      if (m.unknown_receipts) gaps.push(`${m.unknown_receipts} 笔实收待核实`);
-      if (m.missing_holding) gaps.push(`${m.missing_holding} 个资产未计持有期`);
-      if (m.missing_cost) gaps.push(`${m.missing_cost} 个资产成本待补`);
+      els.statsKpiGrid.innerHTML = window.StatsMetrics.render(summary);
       const coverage = document.getElementById('statsCoverageText');
-      coverage.textContent = gaps.join(' · ');
-      coverage.hidden = !gaps.length;
+      coverage.textContent = window.StatsMetrics.coverageText(m);
+      coverage.hidden = !coverage.textContent;
       renderStatsCalendar();
 
       els.statsAccountTitle.textContent = `${devicesOnly ? '主机' : '账号'}收益（已配置成本 ${Number(s.configured_account_count || 0)} 个）`;
@@ -382,13 +359,12 @@
       } else {
         els.statsAccountList.innerHTML = list.map((x) => {
           const device = x.product_kind === 'device';
-          const costAttrs = device && !x.cost_detail_available ? '' : `data-stats-cost-detail="${escapeAttr(x.game_account)}" data-stats-cost-game="${escapeAttr(x.game_name)}"`;
           const sold = String(x.asset_status || '').trim() === 'sold';
           const soldMeta = sold ? ` · 已售${x.sold_at ? ` ${x.sold_at}` : ''}` : '';
           const soldChips = sold ? `
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">售出价</p><p class="stats-acc-chip-v">¥${Number(x.sold_price || 0).toFixed(2)}</p></div>
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">生命周期总收益</p><p class="stats-acc-chip-v">¥${Number(x.lifecycle_profit_amount || 0).toFixed(2)}</p></div>
           ` : '';
+          const gaps = window.StatsMetrics.coverageText(x.operating_metrics);
           return `
           <div class="stats-acc-item ${sold ? 'is-sold' : ''}">
             <div class="stats-acc-top">
@@ -396,15 +372,12 @@
               <span class="stats-acc-money">¥${Number(x.amount_rec_sum || 0).toFixed(2)}</span>
             </div>
             <p class="stats-acc-meta">${device ? '主机编号' : '账号'}：${escapeAttr((device ? x.device_no : x.game_account) || '-')} · 有效订单：${Number(x.settled_orders?.paid || 0)} · 采购：${x.purchase_date || '-'}${soldMeta}</p>
-            <div class="stats-acc-grid">
-              <div class="stats-acc-chip ${costAttrs ? 'is-clickable' : ''}" ${costAttrs}><p class="stats-acc-chip-k">${device ? '总成本' : '维护成本'}${costAttrs ? '<span class="stats-acc-chip-mark">›</span>' : ''}</p><p class="stats-acc-chip-v">¥${Number(x.total_cost_amount || 0).toFixed(2)}</p></div>
+            <div class="stats-acc-grid stats-acc-metrics" aria-label="经营指标">
+              ${window.StatsMetrics.render(x, { account: true, costDetail: !device || x.cost_detail_available })}
+            </div>
+            ${gaps ? `<p class="head-summary-text stats-acc-coverage">${escapeAttr(gaps)}</p>` : ''}
+            <div class="stats-acc-grid stats-acc-extra" aria-label="资产资料">
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">采购成本</p><p class="stats-acc-chip-v">${device && !x.cost_configured ? '未填写' : '¥'+Number(x.purchase_cost_amount || x.purchase_base || 0).toFixed(2)}</p></div>
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">历史总收入</p><p class="stats-acc-chip-v">¥${Number(x.total_rec_amount_all_time || 0).toFixed(2)}</p></div>
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">年化(单利)</p><p class="stats-acc-chip-v">${percent(x.annualized_return_rate)}</p></div>
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">日均单数</p><p class="stats-acc-chip-v">${fmt(x.settled_daily_count)}</p></div>
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">账号周转率</p><p class="stats-acc-chip-v">${x.turnover_hours == null ? '—' : (x.turnover_partial ? '≥' : '') + fmt(x.turnover_hours, 1) + ' 小时/天'}</p></div>
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">单均订单额</p><p class="stats-acc-chip-v">¥${Number(x.avg_order_price || 0).toFixed(2)}</p></div>
-              <div class="stats-acc-chip"><p class="stats-acc-chip-k">日均实收</p><p class="stats-acc-chip-v">${cash(x.avg_daily_rec)}</p></div>
               ${device ? '' : `<div class="stats-acc-chip"><p class="stats-acc-chip-k">3单达成率</p><p class="stats-acc-chip-v">${(Number(x.target3_rate || 0) * 100).toFixed(1)}%</p></div>`}
               <div class="stats-acc-chip"><p class="stats-acc-chip-k">零实收撤单</p><p class="stats-acc-chip-v">${Number(x.settled_orders?.cancelled || 0)}</p></div>
               ${soldChips}

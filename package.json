@@ -1,5 +1,8 @@
 {
   "scripts": {
+    "test:stats-account-metrics": "node test/run_stats_account_metrics_tests.js",
+    "test:stats-account-metrics-visual": "node test/stats_account_metrics_visual_test.js",
+    "coverage:stats-account-metrics": "c8 --all --include=stats/dashboard_metrics.js --include=stats/order_stats.js --include=h5/public/js/ui/stats_metrics.js --include=h5/public/js/menu_stats.js --reporter=json --reporter=json-summary --report-dir=coverage/stats-account-metrics/code node test/run_stats_account_metrics_tests.js && node test/stats_account_metrics_visual_test.js && node test/check_stats_account_metrics_coverage.js",
     "test:rental-device-orders": "node test/rental_device_order_integration_test.js",
     "coverage:rental-device-orders": "c8 --all --include=order/rental_device_order_service.js --include=database/rental_device_order_db.js --include=database/migrations/20261123_02*_rental_device_order*.js --report-dir=coverage/rental-device-orders/core --reporter=text --reporter=json-summary --check-coverage --per-file --lines=90 node test/rental_device_order_integration_test.js --ui",
     "test:rental-device": "node test/rental_device_integration_test.js",

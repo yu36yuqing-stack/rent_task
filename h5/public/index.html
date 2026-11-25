@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Rent Task H5</title>
-  <link rel="stylesheet" href="/css/app.css?v=turnover-20261123-device-order-meta">
+  <link rel="stylesheet" href="/css/app.css?v=20261125-account-metrics2">
 </head>
 <body>
   <div class="wrap">
@@ -105,7 +105,6 @@
         <button id="statsRefreshBtn" class="btn btn-ghost btn-page-action">手动刷新</button>
       </div>
       <div id="statsCoverageText" class="head-summary-text" hidden></div>
-      <button id="statsMetricHelpBtn" class="drawer-help-btn" type="button" aria-label="查看账号周转率说明" aria-haspopup="dialog" aria-controls="statsMetricHelpSheet">?</button>
       <div id="statsKpiGrid" class="stats-kpi-grid"></div>
       <div id="statsCalCard" class="stats-cal-card">
         <div class="stats-cal-head">
@@ -370,16 +369,6 @@
     </div>
   </div>
 
-  <div id="statsMetricHelpSheet" class="sheet hidden" aria-hidden="true">
-    <section class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="statsMetricHelpTitle">
-      <div class="sheet-head"><div id="statsMetricHelpTitle" class="sheet-title">经营指标说明</div></div>
-      <p>日均从持有起始日和窗口开始日中较晚的一天算到窗口结束日，空闲日也算。整体日均按经营的自然日计，同一天只算一次。单号日均实收按各账号和主机的经营天数之和计算。</p>
-      <p>账号周转率只累计最终有收入的订单时长。零收入订单计 0 小时。整单归入结束日，除以区间内的账号持有天数。跨周、跨月的订单可能让单日超过 24 小时。</p>
-      <p>有效订单为终态且最终实收大于零的订单。撤单率为零实收终态单占已确认结算单的比例。</p>
-      <p>时长优先取履约记录。实收未知或有收入但时长缺失时，「≥」表示已经确认的赚钱小时数。持有日期缺失的资产不参与按持有天数计算的指标。</p>
-      <div class="sheet-actions"><button id="statsMetricHelpCloseBtn" class="sheet-btn" type="button">关闭</button></div>
-    </section>
-  </div>
   <div id="pricingWindowHelpSheet" class="sheet hidden" aria-hidden="true">
     <section class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="pricingWindowHelpTitle">
       <div class="sheet-head">
@@ -891,7 +880,8 @@
   <script defer src="/js/menu_products.js?v=20261124-device-countdown"></script>
   <script defer src="/js/menu_orders.js?v=20261123-device-order-meta"></script>
   <script defer src="/js/menu_risk.js?v=20260303a"></script>
-  <script defer src="/js/menu_stats.js?v=20261123-operating-days"></script>
+  <script defer src="/js/ui/stats_metrics.js?v=20261125-account-metrics2"></script>
+  <script defer src="/js/menu_stats.js?v=20261125-account-metrics2"></script>
   <script defer src="/js/ui/daily_price_policy.js?v=20261025a"></script>
   <script defer src="/js/ui/help_sheet.js?v=20261007a"></script>
   <script defer src="/js/ui/pricing_feature_state.js?v=20261016c"></script>

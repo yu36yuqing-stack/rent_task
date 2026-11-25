@@ -30,7 +30,7 @@ const { listAccountCostRecordsByUserAndAccount } = require('../database/account_
 const { canonicalGameId } = require('../common/game_profile');
 const { buildHistoricalIncomeTotals } = require('./historical_income');
 const { readDashboardOrders } = require('../order/service/dashboard_order_facts');
-const { dashboardMetrics, dailyAverages, orderTotals } = require('./dashboard_metrics');
+const { dashboardMetrics, dailyAverages, orderTotals, accountOperatingMetrics } = require('./dashboard_metrics');
 const { tryAcquireLock, releaseOwnedLock } = require('../database/lock_db');
 const { randomUUID } = require('node:crypto');
 const { initRentalDeviceDb, listDeviceCards } = require('../database/rental_device_db');
@@ -966,12 +966,16 @@ async function getOrderStatsDashboardByUser(userId, options = {}) {
     const { daily_averages: overallDaily, ...metrics } = dashboardMetrics(
         historicalAccounts, reportOrders, reportCosts, periodInfo, totalRecAmountAllTime, accountHolding, rows
     );
+    const accountMetrics = accountOperatingMetrics(
+        historicalAccounts, reportOrders, reportCosts, periodInfo, historicalTotalMap, rows
+    );
     const detailOrders = new Map();
     for (const order of reportOrders) {
         if (!detailOrders.has(order.game_account)) detailOrders.set(order.game_account, []);
         detailOrders.get(order.game_account).push(order);
     }
     for (const account of by_account) {
+        account.operating_metrics = accountMetrics.get(account.game_account);
         account.settled_orders = orderTotals(detailOrders.get(account.game_account) || []);
         const held = accountHolding.get(account.game_account);
         account.turnover_hours = held && (held.timed || !held.missing) ? held.hours / held.days : null;

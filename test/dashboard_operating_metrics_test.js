@@ -110,6 +110,12 @@ async function test() {
     assert.equal(report.by_account.find(row=>row.game_account==='A').turnover_hours,170/7);
     assert.equal(report.by_account.find(row=>row.game_account==='A').turnover_partial,true);
     assert.equal(report.by_account.find(row=>row.game_account==='A').settled_orders.cancelled,1);
+    const only = report.by_account.find(row=>row.game_account==='A').operating_metrics;
+    assert.equal(only.income_per_order,22);
+    assert.equal(only.cancellation_rate,1/3);
+    assert.equal(only.turnover_hours,170/7);
+    assert.equal(only.rented_asset_rate,1);
+    assert.equal(report.by_account.find(row=>row.game_account==='idle').operating_metrics.rented_asset_rate,0);
     const main = openDatabase();
     await promisify(main.run).call(main, `INSERT INTO user_game_account (user_id,game_account,game_id,game_name)
         VALUES (8,'no-cost','1','WZRY')`);
@@ -181,6 +187,10 @@ async function testOperatingDays() {
     assert.equal(shared.operating_days,10);
     assert.equal(shared.avg_daily_rec,15);
     assert.equal(shared.settled_daily_count,0.6);
+    assert.equal(shared.operating_metrics.cumulative_cost,20);
+    assert.equal(shared.operating_metrics.income_per_order,227/7);
+    assert.equal(shared.operating_metrics.rented_asset_rate,1);
+    assert.equal(shared.operating_metrics.paid_orders,7);
     assert.equal(all.by_account.find(x=>x.game_account==='device:one').avg_daily_rec,0);
     const firstDay = await getOrderStatsDashboardByUser(uid,{stat_date:'2026-11-18',game_name:'GTA6',now});
     assert.equal(firstDay.summary.operating_days,1);
@@ -194,5 +204,29 @@ async function testOperatingDays() {
     assert.equal(last7.summary.avg_daily_rec,Number((20/7).toFixed(4)));
 }
 
-test().then(testOperatingDays).then(()=>console.log('PASS dashboard turnover, operating days, settled orders, data gaps and scope'))
+async function testSingleAssetParity() {
+    const uid=29, account='single-parity';
+    const db=openDatabase();
+    await promisify(db.run).call(db,`INSERT INTO user_game_account
+        (user_id,game_id,game_name,game_account,purchase_date,purchase_price,total_cost_amount)
+        VALUES (?,'1','WZRY',?,'2026-11-16',100,120)`,uid,account);
+    await promisify(db.close).call(db);
+    for(const [type,date,amount] of [['purchase','2026-11-16',100],['other','2026-11-22',20]]) {
+        await createAccountCostRecord({user_id:uid,game_id:'1',game_account:account,
+            cost_type:type,cost_date:date,cost_amount:amount});
+    }
+    await upsertOrder({user_id:uid,game_id:'1',game_name:'WZRY',game_account:account,channel:'uuzuhao',
+        order_no:'single-parity',order_status:'已完成',order_amount:5.59,rec_amount:4.47,rent_hour:2,
+        start_time:'2026-11-22 10:00:00',end_time:'2026-11-22 12:00:00'});
+    await replaceOrderStatsRowsForDay(uid,'2026-11-22','WZRY',[{channel:'uuzuhao',game_account:account,
+        amount_rec_sum:4.47,amount_order_sum:5.59,order_cnt_effective:1,order_cnt_total:1}]);
+    const report=await getOrderStatsDashboardByUser(uid,{game_name:'WZRY',period:'last7',now:new Date('2026-11-23T12:00:00+08:00')});
+    assert.equal(report.by_account.length,1);
+    assert.deepEqual(report.by_account[0].operating_metrics,report.summary.operating_metrics);
+    const {items}=require('../h5/public/js/ui/stats_metrics');
+    assert.deepEqual(items(report.by_account[0]),items(report.summary));
+    assert.equal(report.by_account[0].operating_metrics.income_per_order,4.47);
+}
+
+test().then(testOperatingDays).then(testSingleAssetParity).then(()=>console.log('PASS dashboard turnover, operating days, settled orders, data gaps and scope'))
     .catch(err=>{console.error(err);process.exitCode=1;}).finally(()=>fs.rmSync(temp,{recursive:true,force:true}));
