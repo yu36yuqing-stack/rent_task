@@ -435,7 +435,7 @@ async function main() {
     const withDevices = buildPayload({ include_rental_devices: true });
     await devices.initRentalDeviceDb();
     await require('../database/account_cost_record_db').initAccountCostRecordDb();
-    const device = { deviceId: '42', deviceNo: '测试主机', status: 4 };
+    const device = { deviceId: '42', deviceNo: '20261103100014', deviceName: '轻舟Xbox', status: 4 };
     await devices.replaceDeviceSnapshot(deviceUser.id, [device]);
     async function deviceRun(suffix) {
         const task = await createProductTask(deviceUser.id, suffix);
@@ -446,11 +446,32 @@ async function main() {
     const sent = await deviceRun('device-first');
     assert.equal(sent.status, 'sent');
     assert.equal(sent.snapshot.summary.master_total, withDevices.master_total + 1);
-    assert.match(dingMessages.at(-1), /✅\[0单\] 测试主机 · 已上架/);
+    assert.match(dingMessages.at(-1), /✅\[0单\] 轻舟Xbox · 已上架/);
     assert.equal((await deviceRun('device-same')).status, 'skipped_unchanged');
     await devices.replaceDeviceSnapshot(deviceUser.id, [{ ...device, status: 6 }]);
     assert.equal((await deviceRun('device-changed')).status, 'sent');
-    assert.match(dingMessages.at(-1), /⬇️\[0单\] 测试主机 · 已下架〔状态 已上架→已下架〕/);
+    assert.match(dingMessages.at(-1), /⬇️\[0单\] 轻舟Xbox · 已下架〔状态 已上架→已下架〕/);
+    const legacy = structuredClone(sent.snapshot);
+    legacy.version = 'v1';
+    const deviceKey = 'GTA6::device:42';
+    const oldDevice = legacy.accounts.find(row => row.key === deviceKey);
+    oldDevice.display_name = device.deviceNo;
+    oldDevice.youpin = '已下架';
+    const upgraded = dedup.diffDingdingReportSnapshots(legacy, sent.snapshot);
+    assert.equal(upgraded.accounts[deviceKey].detail, '状态 已下架→已上架');
+    const legacyRemoval = dedup.diffDingdingReportSnapshots(legacy, dedup.buildDingdingReportSnapshot(withDevices));
+    const removalText = buildDingdingMessage({ ...withDevices, dingding_changes: legacyRemoval });
+    assert.match(removalText, /➖ 已移出商品主档\n• 未命名主机/);
+    assert.doesNotMatch(removalText, /20261103100014|device:42/);
+
+    await devices.replaceDeviceSnapshot(deviceUser.id, [{ ...device, deviceName: '客厅Xbox', status: 6 }]);
+    assert.equal((await deviceRun('device-renamed')).status, 'sent');
+    assert.match(dingMessages.at(-1), /客厅Xbox · 已下架〔名称 轻舟Xbox→客厅Xbox〕/);
+    assert.equal((await deviceRun('device-renamed-same')).status, 'skipped_unchanged');
+    await devices.replaceDeviceSnapshot(deviceUser.id, []);
+    assert.equal((await deviceRun('device-removed')).status, 'sent');
+    assert.match(dingMessages.at(-1), /➖ 已移出商品主档\n• 客厅Xbox/);
+    assert.doesNotMatch(dingMessages.at(-1), /20261103100014|device:42/);
 
     console.log(`[PASS] dingding_report_dedup_smoke_test temp_dir=${tempDir}`);
 }

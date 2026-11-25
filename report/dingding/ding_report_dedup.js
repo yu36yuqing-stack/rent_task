@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const {
+    UNNAMED_DEVICE,
     buildDingdingMessage,
     normalizeAuthorizedPlatforms,
     accountIdentityKey,
@@ -17,7 +18,7 @@ const {
 const PRODUCT_SYNC_TASK_TYPE = 'product_sync';
 const CHECKPOINT_KEY = 'dingding_rent_status';
 const FINGERPRINT_VERSION = 'v1';
-const SNAPSHOT_VERSION = 'v1';
+const SNAPSHOT_VERSION = 'v2';
 
 function hashText(value) {
     return crypto.createHash('sha256').update(String(value || ''), 'utf8').digest('hex');
@@ -193,7 +194,7 @@ function formatAccountChangeDetail(fields = []) {
 }
 
 function diffDingdingReportSnapshots(previous, current) {
-    if (!previous || !current || previous.version !== SNAPSHOT_VERSION || current.version !== SNAPSHOT_VERSION) {
+    if (!previous || !current || !['v1', SNAPSHOT_VERSION].includes(previous.version) || current.version !== SNAPSHOT_VERSION) {
         return {
             available: false,
             summary: {},
@@ -224,8 +225,15 @@ function diffDingdingReportSnapshots(previous, current) {
     if (!jsonEqual(previousSummary.auth_problems || [], currentSummary.auth_problems || [])) summary.auth_problems_changed = true;
     if (previousSummary.footer_normal !== currentSummary.footer_normal) summary.footer_changed = true;
 
-    const previousAccounts = new Map((Array.isArray(previous.accounts) ? previous.accounts : []).map((row) => [row.key, row]));
     const currentAccounts = new Map((Array.isArray(current.accounts) ? current.accounts : []).map((row) => [row.key, row]));
+    const previousAccounts = new Map();
+    for (const row of (Array.isArray(previous.accounts) ? previous.accounts : [])) {
+        // v1 stored the device number as its display name, including in removal notices.
+        const legacyDevice = previous.version === 'v1' && row.game_id === 'GTA6';
+        previousAccounts.set(row.key, legacyDevice
+            ? { ...row, display_name: currentAccounts.get(row.key)?.display_name || UNNAMED_DEVICE }
+            : row);
+    }
     const accounts = {};
     for (const [key, row] of currentAccounts.entries()) {
         const old = previousAccounts.get(key);

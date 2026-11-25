@@ -44,7 +44,7 @@ function replaceDeviceSnapshot(uid, devices) {
 function listDeviceCards(uid, identity, { includeInactive = false } = {}) {
     return withDb((_, all) => all(`SELECT d.id, 'device' AS product_kind, 'GTA6' AS game_id, 'GTA6' AS game_name,
         'device:' || d.device_id AS game_account, coalesce(nullif(d.device_name,''),nullif(d.device_no,''),d.device_id) AS role_name,
-        d.device_no,d.model_name,d.hour_price,d.max_hours,d.status,d.status_desc,d.modify_date AS synced_at,d.is_deleted AS inactive,
+        d.device_name,d.device_no,d.model_name,d.hour_price,d.max_hours,d.status,d.status_desc,d.modify_date AS synced_at,d.is_deleted AS inactive,
         coalesce(sum(c.cost_amount),0) AS total_cost_amount,
         max(CASE WHEN c.cost_type='purchase' THEN c.cost_amount END) AS purchase_price,
         max(CASE WHEN c.cost_type='purchase' THEN c.cost_date END) AS purchase_date

@@ -11,6 +11,7 @@ function shortState(s) {
 }
 
 const REPORT_VERSION = 'v1.0.7';
+const UNNAMED_DEVICE = '未命名主机';
 const COOLDOWN_SUFFIX = ' 🔸已按冷却期下架规则下架';
 
 function nowDateTimeText() {
@@ -104,7 +105,7 @@ function buildDingdingDeviceAccount(device) {
         '上架中': '已上架', '上架': '已上架', '可租': '已上架', '待出租': '已上架',
         '租赁中': '出租中', '待上架': '已下架', '下架': '已下架'
     }[status] || status;
-    return { game_id: 'GTA6', account: device.game_account, remark: device.device_no || device.game_account.slice(7),
+    return { game_id: 'GTA6', account: device.game_account, remark: String(device.device_name || '').trim() || UNNAMED_DEVICE,
         today_order_count: Number(device.today_order_count || 0), youpin: label };
 }
 
@@ -311,6 +312,7 @@ function buildBlacklistInspectorSummaryText(payload = {}) {
 }
 
 module.exports = {
+    UNNAMED_DEVICE,
     buildDingdingMessage,
     buildDingdingCooldownPreview,
     buildDingdingAccountLine,

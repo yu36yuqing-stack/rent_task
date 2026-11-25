@@ -26,6 +26,9 @@ async function main() {
     await initAccountCostRecordDb();
     assert.deepEqual(await listDevicesWithActivity(77), []);
     const inventory = [5, 6, 4, 7, 3, 5].map((status, i) => ({ deviceId: String(i + 1), deviceNo: '编号' + i, status }));
+    inventory[0].deviceName = '  轻舟Xbox ';
+    inventory[1].deviceName = '轻舟Xbox';
+    inventory[2].deviceName = '  ';
     await replaceDeviceSnapshot(8, inventory);
     const rows = [
         order('boundary', '1', '2026-11-23 10:00:00', day + '01:00:00', 4000, 100),
@@ -49,12 +52,16 @@ async function main() {
         assert.deepEqual([one.today_order_count, one.renting_order_end_time], [count, '2026-11-24T12:00:00+08:00']);
         assert(devices.filter(d => d !== one).every(d => d.today_order_count === 0 && d.renting_order_end_time === ''));
         const accounts = devices.map(buildDingdingDeviceAccount);
+        assert.equal(buildDingdingAccountLine(accounts.find(d => d.account === 'device:1')), `💰[${count}单] 轻舟Xbox · 出租中`);
+        assert.equal(buildDingdingAccountLine(accounts.find(d => d.account === 'device:2')), '⬇️[0单] 轻舟Xbox · 已下架');
+        assert.equal(buildDingdingAccountLine(accounts.find(d => d.account === 'device:3')), '✅[0单] 未命名主机 · 已上架');
         const expected = ['💰', '⬇️', '✅', '⚠️', '❔'];
         for (let i = 0; i < expected.length; i++) {
             assert(buildDingdingAccountLine(accounts.find(d => d.account === 'device:' + (i+1))).startsWith(expected[i]));
         }
         const games = ['3','2','1','4','99'].map(game_id => ({ game_id, account: 'A' + game_id, today_order_count: 1 }));
         const msg = buildDingdingMessage({ ok: true, accounts: [...games, ...accounts], master_total: 11 });
+        assert.doesNotMatch(msg, /编号|device:/);
         assert(msg.includes('游戏账号 5 单，主机 ' + count + ' 单'));
         const headers = msg.split('\n').filter(line => /（\d+ (个|台)）$/.test(line));
         assert.deepEqual(headers, ['主机租赁（6 台）','CS2（1 个）','王者荣耀（1 个）','和平精英（1 个）','枪战王者（1 个）','其他游戏（1 个）']);
@@ -62,7 +69,7 @@ async function main() {
         assert(!/主机租赁|CS2|其他游戏/.test(noHost));
     }
     const unknown = buildDingdingDeviceAccount({ game_account: 'device:123', status: 100 });
-    assert.equal(buildDingdingAccountLine(unknown), '❔[0单] 123 · 未知');
+    assert.equal(buildDingdingAccountLine(unknown), '❔[0单] 未命名主机 · 未知');
     await assert.rejects(listDevicesWithActivity(8, 'wrong', now), /不合法/);
     console.log('[PASS] 主机计数窗口、续租边界、隔离、状态和分组');
 }
